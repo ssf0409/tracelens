@@ -1,0 +1,182 @@
+"""Transcript models for recording agent execution.
+
+A Transcript is a complete record of an agent's execution, including:
+- All steps taken (LLM calls, tool calls, etc.)
+- Final and intermediate outputs
+- Timing and token usage
+- Errors encountered
+"""
+
+from datetime import datetime
+from enum import Enum
+from typing import Any
+import uuid
+
+from pydantic import BaseModel, Field
+
+
+class StepType(str, Enum):
+    """Types of execution steps."""
+
+    LLM_CALL = "llm_call"
+    TOOL_CALL = "tool_call"
+    USER_INPUT = "user_input"
+    AGENT_OUTPUT = "agent_output"
+    ERROR = "error"
+    INTERNAL = "internal"
+
+
+class ToolCall(BaseModel):
+    """Record of a tool invocation.
+
+    Captures the tool name, arguments, result, and timing.
+    """
+
+    tool_name: str
+    arguments: dict[str, Any]
+    result: Any | None = None
+    error: str | None = None
+    duration_ms: float | None = None
+
+
+class TranscriptStep(BaseModel):
+    """A single step in agent execution.
+
+    Steps are the atomic units of a transcript. Each step represents
+    one action the agent took (LLM call, tool call, etc.).
+    """
+
+    step_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    step_type: StepType
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+    # Content depends on step type
+    content: Any = None
+    tool_call: ToolCall | None = None
+
+    # LLM-specific fields
+    model: str | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+
+    # Error information
+    error: str | None = None
+    error_traceback: str | None = None
+
+    @property
+    def is_error(self) -> bool:
+        """Check if this step is an error."""
+        return self.step_type == StepType.ERROR or self.error is not None
+
+
+class Transcript(BaseModel):
+    """Complete record of agent execution for a task.
+
+    A Transcript captures everything that happened during an agent's
+    execution, providing a complete audit trail for grading and debugging.
+
+    Example:
+        transcript = Transcript(
+            transcript_id=str(uuid.uuid4()),
+            task_id=task.task_id,
+            agent_name="goal_decomposition",
+            started_at=datetime.utcnow(),
+        )
+        transcript.steps.append(step)
+        transcript.final_output = result
+        transcript.completed_at = datetime.utcnow()
+    """
+
+    transcript_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    task_id: str
+
+    # Execution timeline
+    steps: list[TranscriptStep] = Field(default_factory=list)
+
+    # Summary outputs
+    final_output: Any = None
+    intermediate_outputs: list[Any] = Field(default_factory=list)
+
+    # Aggregated tool calls for easy access
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+
+    # Errors encountered
+    errors: list[str] = Field(default_factory=list)
+
+    # Timing
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    # Metadata
+    agent_name: str | None = None
+    agent_version: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def duration_ms(self) -> float | None:
+        """Calculate execution duration in milliseconds."""
+        if self.started_at and self.completed_at:
+            return (self.completed_at - self.started_at).total_seconds() * 1000
+        return None
+
+    @property
+    def total_tokens(self) -> int:
+        """Calculate total token usage across all steps."""
+        return sum(
+            (s.tokens_in or 0) + (s.tokens_out or 0)
+            for s in self.steps
+        )
+
+    @property
+    def input_tokens(self) -> int:
+        """Calculate total input tokens."""
+        return sum(s.tokens_in or 0 for s in self.steps)
+
+    @property
+    def output_tokens(self) -> int:
+        """Calculate total output tokens."""
+        return sum(s.tokens_out or 0 for s in self.steps)
+
+    @property
+    def has_errors(self) -> bool:
+        """Check if any errors occurred during execution."""
+        return len(self.errors) > 0 or any(s.is_error for s in self.steps)
+
+    @property
+    def llm_calls_count(self) -> int:
+        """Count LLM calls."""
+        return sum(1 for s in self.steps if s.step_type == StepType.LLM_CALL)
+
+    @property
+    def tool_calls_count(self) -> int:
+        """Count tool calls."""
+        return sum(1 for s in self.steps if s.step_type == StepType.TOOL_CALL)
+
+    def add_step(self, step: TranscriptStep) -> None:
+        """Add a step to the transcript."""
+        self.steps.append(step)
+        if step.tool_call:
+            self.tool_calls.append(step.tool_call)
+        if step.error:
+            self.errors.append(step.error)
+
+    def get_tool_calls_by_name(self, name: str) -> list[ToolCall]:
+        """Get all tool calls with a specific name."""
+        return [tc for tc in self.tool_calls if tc.tool_name == name]
+
+    def get_steps_by_type(self, step_type: StepType) -> list[TranscriptStep]:
+        """Get all steps of a specific type."""
+        return [s for s in self.steps if s.step_type == step_type]
+
+    def to_summary(self) -> dict[str, Any]:
+        """Create a summary dict for reporting."""
+        return {
+            "task_id": self.task_id,
+            "agent_name": self.agent_name,
+            "duration_ms": self.duration_ms,
+            "total_tokens": self.total_tokens,
+            "llm_calls": self.llm_calls_count,
+            "tool_calls": self.tool_calls_count,
+            "has_errors": self.has_errors,
+            "error_count": len(self.errors),
+        }

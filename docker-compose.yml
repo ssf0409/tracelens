@@ -1,0 +1,62 @@
+services:
+  # Unit tests
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    command: pytest tests/ -v --tb=short
+    environment:
+      - PYTHONPATH=/app/src
+
+  # Run tests with coverage
+  test-coverage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./coverage:/app/coverage
+    command: pytest tests/ -v --cov=agent_eval --cov-report=html:coverage/html --cov-report=term-missing
+    environment:
+      - PYTHONPATH=/app/src
+
+  # Type checking with mypy
+  type-check:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+    command: mypy src/agent_eval/ --ignore-missing-imports
+    environment:
+      - PYTHONPATH=/app/src
+
+  # Linting with ruff
+  lint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    command: ruff check src/ tests/
+    environment:
+      - PYTHONPATH=/app/src
+
+  # Interactive development shell
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONPATH=/app/src
