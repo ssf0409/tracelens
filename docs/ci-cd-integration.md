@@ -10,6 +10,21 @@ The CI/CD integration provides:
 - **Baseline updates** on main branch merges
 - **Human calibration** workflow (weekly)
 
+## Prerequisites: Private Repository Access
+
+Since `agent-eval` is a private repository, your CI/CD workflows need authentication to install it. See the [Installation Guide](./installation.md#private-repository-authentication) for detailed options.
+
+**Quick setup** (for repos under the same GitHub account):
+
+```yaml
+- name: Configure git for private repos
+  run: |
+    git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+    git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+```
+
+Add this step after `actions/checkout` and before installing dependencies.
+
 ## GitHub Actions Workflow
 
 ### StrideAI Workflow
@@ -55,6 +70,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Required for private agent-eval dependency
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -124,6 +145,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
@@ -168,6 +194,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -250,6 +281,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Required for private agent-eval dependency
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4

@@ -53,9 +53,12 @@ In `crypto-trading-system/pyproject.toml`:
 [project]
 dependencies = [
     # ... existing dependencies
-    "agent-eval @ git+https://github.com/ssf0409/agent-eval.git",
+    # Use SSH URL for local development (works with your SSH keys)
+    "agent-eval @ git+ssh://git@github.com/ssf0409/agent-eval.git",
 ]
 ```
+
+> **Note**: For CI/CD authentication, see the [Installation Guide](./installation.md#private-repository-authentication) and [CI/CD Guide](./ci-cd-integration.md#prerequisites-private-repository-access).
 
 Install:
 ```bash

@@ -57,6 +57,128 @@ git submodule add https://github.com/ssf0409/agent-eval.git libs/agent-eval
 uv pip install -e libs/agent-eval
 ```
 
+## Private Repository Authentication
+
+Since `agent-eval` is a private repository, you need to configure authentication for both local development and CI/CD.
+
+### Local Development (SSH)
+
+**Recommended**: Use SSH URLs for local development. This works automatically if you have SSH keys configured with GitHub.
+
+```toml
+# In your project's pyproject.toml
+[project]
+dependencies = [
+    "agent-eval @ git+ssh://git@github.com/ssf0409/agent-eval.git",
+]
+```
+
+Verify SSH is working:
+```bash
+ssh -T git@github.com
+# Should see: "Hi ssf0409! You've successfully authenticated..."
+```
+
+### CI/CD Authentication
+
+For GitHub Actions, you have three options:
+
+#### Option A: GITHUB_TOKEN (Same Owner - Easiest)
+
+If all repos are under the same GitHub account (`ssf0409`), use the built-in token:
+
+```yaml
+# .github/workflows/eval.yml
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+```
+
+#### Option B: Personal Access Token (Cross-Organization)
+
+For repos in different organizations or accounts:
+
+1. Create a PAT at https://github.com/settings/tokens with `repo` scope
+2. Add it as a repository secret: `Settings > Secrets > Actions > PRIVATE_REPO_TOKEN`
+
+```yaml
+- name: Configure git for private repos
+  run: |
+    git config --global url."https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+    git config --global url."https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "https://github.com/"
+```
+
+#### Option C: Deploy Key (Most Secure)
+
+For production environments, deploy keys provide read-only access scoped to a single repo:
+
+1. Generate a key pair:
+   ```bash
+   ssh-keygen -t ed25519 -C "agent-eval-deploy" -f agent-eval-deploy -N ""
+   ```
+
+2. Add the **public key** (`agent-eval-deploy.pub`) to agent-eval:
+   `Settings > Deploy keys > Add deploy key` (enable "Allow read access")
+
+3. Add the **private key** (`agent-eval-deploy`) as a secret in your project:
+   `Settings > Secrets > Actions > AGENT_EVAL_DEPLOY_KEY`
+
+4. Use in workflow:
+   ```yaml
+   - name: Setup SSH for private deps
+     uses: webfactory/ssh-agent@v0.9.0
+     with:
+       ssh-private-key: ${{ secrets.AGENT_EVAL_DEPLOY_KEY }}
+
+   - name: Install dependencies
+     run: uv sync
+   ```
+
+### Authentication Summary
+
+| Environment | Method | pyproject.toml URL |
+|-------------|--------|-------------------|
+| Local (macOS/Linux) | SSH keys | `git+ssh://git@github.com/...` |
+| GitHub Actions (same owner) | GITHUB_TOKEN | Either SSH or HTTPS (converted) |
+| GitHub Actions (different org) | PAT | Either SSH or HTTPS (converted) |
+| Production CI | Deploy Key | `git+ssh://git@github.com/...` |
+
+### Recommended Setup
+
+For projects under the same GitHub account:
+
+**pyproject.toml**:
+```toml
+[project]
+dependencies = [
+    "agent-eval @ git+ssh://git@github.com/ssf0409/agent-eval.git",
+]
+```
+
+**GitHub Actions**:
+```yaml
+- name: Configure git for private repos
+  run: |
+    git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
+```
+
+This gives you:
+- Local development uses SSH (your existing git setup)
+- CI uses GITHUB_TOKEN (no extra secrets needed)
+
 ## Quick Start
 
 ### 1. Define a Task

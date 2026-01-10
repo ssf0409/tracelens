@@ -45,7 +45,8 @@ In `StrideAI/pyproject.toml`:
 [project]
 dependencies = [
     # ... existing dependencies
-    "agent-eval[llm] @ git+https://github.com/ssf0409/agent-eval.git",
+    # Use SSH URL for local development (works with your SSH keys)
+    "agent-eval[llm] @ git+ssh://git@github.com/ssf0409/agent-eval.git",
 ]
 ```
 
@@ -53,6 +54,8 @@ Install:
 ```bash
 uv sync
 ```
+
+> **Note**: For CI/CD authentication, see the [Installation Guide](./installation.md#private-repository-authentication) and [CI/CD Guide](./ci-cd-integration.md#prerequisites-private-repository-access).
 
 ## Step 2: Define Task Schema
 
