@@ -250,15 +250,34 @@ print(f"Correlation: {report.score_correlation:.2f}")
 
 ## Installation
 
+Since this is a private package, install directly from GitHub:
+
 ```bash
-# Basic installation
-pip install agent-eval
+# Using uv (recommended)
+uv pip install git+https://github.com/ssf0409/agent-eval.git
 
 # With LLM support
-pip install agent-eval[llm]
+uv pip install "agent-eval[llm] @ git+https://github.com/ssf0409/agent-eval.git"
 
-# Development
-pip install agent-eval[dev]
+# Or add to pyproject.toml
+# dependencies = [
+#     "agent-eval @ git+https://github.com/ssf0409/agent-eval.git",
+# ]
+```
+
+### Development Setup
+
+```bash
+# Clone and install
+git clone https://github.com/ssf0409/agent-eval.git
+cd agent-eval
+uv pip install -e ".[dev]"
+
+# Run tests
+uv run pytest tests/ -v
+
+# Run with Docker
+docker compose run --rm test
 ```
 
 ## Quick Start
@@ -289,11 +308,18 @@ print(f"Pass rate: {results.pass_rate:.2%}")
 print(f"Pass@5: {results.pass_at_k[5]:.2%}")
 ```
 
-## Related Documentation
+## Documentation
+
+### Integration Guides
+
+- **[Installation Guide](docs/installation.md)** - How to install and use the framework
+- **[StrideAI Integration](docs/strideai-integration.md)** - Phase 2A: LLM graders for goal decomposition
+- **[Crypto-Trading Integration](docs/crypto-trading-integration.md)** - Phase 2B: Financial metrics graders
+- **[CI/CD Integration](docs/ci-cd-integration.md)** - Phase 3: Automated evaluation pipelines
+
+### References
 
 - [Anthropic: Demystifying Evals for AI Agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
-- [StrideAI Evaluation Guide](../StrideAI/eval/README.md)
-- [Crypto-Trading Evaluation Guide](../crypto-trading-system/docs/evaluation.md)
 
 ## Key Design Principles
 

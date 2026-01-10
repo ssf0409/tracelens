@@ -4,11 +4,14 @@ FROM python:3.12-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    UV_SYSTEM_PYTHON=1 \
+    UV_COMPILE_BYTECODE=1
 
 # Set working directory
 WORKDIR /app
+
+# Install uv (fast Python package manager)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,12 +24,11 @@ COPY pyproject.toml README.md ./
 # Copy source code (needed for editable install)
 COPY src/ src/
 
-# Install dependencies and package
-RUN pip install --upgrade pip && \
-    pip install -e ".[dev]"
+# Install dependencies and package using uv
+RUN uv pip install -e ".[dev]"
 
 # Copy tests (after install for better caching)
 COPY tests/ tests/
 
 # Default command: run tests
-CMD ["pytest", "tests/", "-v", "--tb=short"]
+CMD ["uv", "run", "pytest", "tests/", "-v", "--tb=short"]

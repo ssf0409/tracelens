@@ -63,3 +63,13 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# UV task runner scripts
+[tool.uv.scripts]
+test = "pytest tests/ -v --tb=short"
+test-cov = "pytest tests/ -v --cov=agent_eval --cov-report=html --cov-report=term-missing"
+lint = "ruff check src/ tests/"
+lint-fix = "ruff check src/ tests/ --fix"
+format = "ruff format src/ tests/"
+typecheck = "mypy src/agent_eval/ --ignore-missing-imports"
+check = ["lint", "typecheck", "test"]
