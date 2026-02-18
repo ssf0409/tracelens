@@ -219,6 +219,10 @@ class TrialBatch(BaseModel):
         """Check if all trials are complete."""
         return all(t.is_complete for t in self.trials)
 
+    def add_trial(self, trial: Trial) -> None:
+        """Add a trial to the batch."""
+        self.trials.append(trial)
+
     def get_trials_for_task(self, task_id: str) -> list[Trial]:
         """Get all trials for a specific task."""
         return [t for t in self.trials if t.task_id == task_id]

@@ -208,6 +208,27 @@ class EvalSet(BaseModel):
             filtered = filtered[:max_tasks]
         return filtered
 
+    def filtered_eval_set(
+        self,
+        tags: list[str] | None = None,
+        categories: list[str] | None = None,
+        difficulties: list[str] | None = None,
+        max_tasks: int | None = None,
+    ) -> "EvalSet":
+        """Return a new EvalSet with only tasks matching the filter criteria."""
+        filtered = self.filter_tasks(
+            tags=tags, categories=categories,
+            difficulties=difficulties, max_tasks=max_tasks,
+        )
+        return EvalSet(
+            name=self.name,
+            tasks=filtered,
+            default_grader_ids=self.default_grader_ids,
+            metadata=self.metadata,
+            default_num_runs=self.default_num_runs,
+            default_timeout_seconds=self.default_timeout_seconds,
+        )
+
     def add_task(self, task: Task) -> None:
         """Add a task to the set."""
         self.tasks.append(task)

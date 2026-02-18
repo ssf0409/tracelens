@@ -1,7 +1,7 @@
 """Core abstractions for the evaluation framework."""
 
 from eval_kit.core.task import Task, TaskLoader, EvalSet, TaskExpectation
-from eval_kit.core.trial import Trial, TrialStatus
+from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 from eval_kit.core.grader import (
     Grader,
     CodeGrader,
@@ -28,6 +28,7 @@ __all__ = [
     "EvalSet",
     "TaskExpectation",
     "Trial",
+    "TrialBatch",
     "TrialStatus",
     "Grader",
     "CodeGrader",

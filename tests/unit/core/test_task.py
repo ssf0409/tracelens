@@ -228,3 +228,25 @@ class TestEvalSet:
 
         not_found = eval_set.get_task("nonexistent")
         assert not_found is None
+
+    def test_eval_set_filtered_eval_set(self):
+        """Test filtered_eval_set returns a new EvalSet with filtered tasks."""
+        tasks = [
+            Task(name="Task 1", input_data={}, category="a", tags=["x"]),
+            Task(name="Task 2", input_data={}, category="b", tags=["y"]),
+            Task(name="Task 3", input_data={}, category="a", tags=["x", "y"]),
+        ]
+
+        eval_set = EvalSet(
+            name="Test Suite",
+            tasks=tasks,
+            default_num_runs=5,
+            default_grader_ids=["g1"],
+        )
+
+        result = eval_set.filtered_eval_set(categories=["a"])
+        assert isinstance(result, EvalSet)
+        assert len(result.tasks) == 2
+        assert result.name == "Test Suite"
+        assert result.default_num_runs == 5
+        assert result.default_grader_ids == ["g1"]

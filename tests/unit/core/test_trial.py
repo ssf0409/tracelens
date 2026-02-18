@@ -271,3 +271,13 @@ class TestTrialBatch:
         assert results["t1"] == [True, False]
         assert "t2" in results
         assert results["t2"] == [True]
+
+    def test_batch_add_trial(self):
+        """Test adding trials to a batch via add_trial()."""
+        batch = TrialBatch()
+        assert batch.total_count == 0
+
+        trial = Trial(task_id="t1", run_index=0)
+        batch.add_trial(trial)
+        assert batch.total_count == 1
+        assert batch.trials[0].task_id == "t1"
