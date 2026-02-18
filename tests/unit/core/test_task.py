@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from datetime import datetime
 
-from agent_eval.core.task import (
+from eval_kit.core.task import (
     Task,
     TaskExpectation,
     TaskLoader,

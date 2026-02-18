@@ -26,7 +26,7 @@ This is a **common evaluation framework** for AI agents, designed to be used by:
 ## Key Files
 
 ```
-src/agent_eval/
+src/eval_kit/
 ├── core/
 │   ├── task.py          # Task, TaskLoader, EvalSet - test case definitions
 │   ├── trial.py         # Trial - single execution of a task
@@ -121,7 +121,7 @@ THRESHOLDS = {
 1. `StrideAI/eval/schemas/task_definition.py` - GoalDecompositionTask
 2. `StrideAI/eval/graders/*.py` - LLM-based quality graders
 3. `StrideAI/eval/data/scenarios/*.json` - 20+ test scenarios
-4. `StrideAI/.github/workflows/agent-eval.yml` - CI integration
+4. `StrideAI/.github/workflows/eval-kit.yml` - CI integration
 
 ### Crypto-Trading Integration Path
 1. `evaluation/framework/task.py` - TradingTask schema
@@ -136,7 +136,7 @@ THRESHOLDS = {
 pytest tests/
 
 # Type checking
-mypy src/agent_eval/
+mypy src/eval_kit/
 
 # Linting
 ruff check src/
@@ -146,7 +146,7 @@ ruff check src/
 
 ```bash
 # Run evaluation with baseline check
-agent-eval run \
+eval-kit run \
   --eval-set eval/suite.json \
   --graders quality,personalization \
   --num-runs 5 \
@@ -154,15 +154,15 @@ agent-eval run \
   --fail-on-regression moderate
 
 # Generate report
-agent-eval report --format json --output results.json
+eval-kit report --format json --output results.json
 ```
 
 ## Human Evaluation Workflow
 
 Weekly calibration (20 samples):
-1. `agent-eval sample --strategy diverse --size 20`
+1. `eval-kit sample --strategy diverse --size 20`
 2. Human rates samples in UI
-3. `agent-eval reconcile --human human_grades.json --llm llm_grades.json`
+3. `eval-kit reconcile --human human_grades.json --llm llm_grades.json`
 4. Review correlation report, adjust graders if < 0.7
 
 ## Key Principles (from Anthropic)

@@ -18,7 +18,7 @@ import uuid
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from agent_eval.core.decision_spec import DecisionSpec
+    from eval_kit.core.decision_spec import DecisionSpec
 
 
 class StepType(str, Enum):
@@ -200,7 +200,7 @@ class Transcript(BaseModel):
 # Rebuild model to resolve forward reference to DecisionSpec
 def _rebuild_transcript_model() -> None:
     """Rebuild Transcript model with DecisionSpec reference resolved."""
-    from agent_eval.core.decision_spec import DecisionSpec
+    from eval_kit.core.decision_spec import DecisionSpec
     Transcript.model_rebuild()
 
 

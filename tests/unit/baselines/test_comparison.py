@@ -2,13 +2,13 @@
 
 import pytest
 
-from agent_eval.baselines.comparison import (
+from eval_kit.baselines.comparison import (
     RegressionSeverity,
     MetricRegression,
     RegressionReport,
     RegressionDetector,
 )
-from agent_eval.baselines.manager import TaskBaseline
+from eval_kit.baselines.manager import TaskBaseline
 
 
 class TestRegressionSeverity:

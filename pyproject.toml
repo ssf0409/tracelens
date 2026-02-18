@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-eval"
+name = "eval-kit"
 version = "0.1.0"
 description = "Common evaluation framework for AI agents with support for LLM and code-based grading"
 readme = "README.md"
@@ -44,10 +44,10 @@ dev = [
 ]
 
 [project.scripts]
-agent-eval = "agent_eval.cli.main:main"
+eval-kit = "eval_kit.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_eval"]
+packages = ["src/eval_kit"]
 
 [tool.ruff]
 line-length = 100
@@ -63,13 +63,3 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-
-# UV task runner scripts
-[tool.uv.scripts]
-test = "pytest tests/ -v --tb=short"
-test-cov = "pytest tests/ -v --cov=agent_eval --cov-report=html --cov-report=term-missing"
-lint = "ruff check src/ tests/"
-lint-fix = "ruff check src/ tests/ --fix"
-format = "ruff format src/ tests/"
-typecheck = "mypy src/agent_eval/ --ignore-missing-imports"
-check = ["lint", "typecheck", "test"]

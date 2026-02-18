@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_eval.core.grader import (
+from eval_kit.core.grader import (
     Grader,
     CodeGrader,
     CompositeGrader,
@@ -10,9 +10,9 @@ from agent_eval.core.grader import (
     GraderRole,
     GraderConfig,
 )
-from agent_eval.core.task import Task
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.outcome import Outcome
+from eval_kit.core.task import Task
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.outcome import Outcome
 
 
 class SimpleScoreGrader(CodeGrader):

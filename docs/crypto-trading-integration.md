@@ -1,10 +1,10 @@
 # Phase 2B: Crypto-Trading System Integration Guide
 
-This guide covers integrating the `agent-eval` framework with the crypto-trading-system's hierarchical trading agents.
+This guide covers integrating the `eval-kit` framework with the crypto-trading-system's hierarchical trading agents.
 
 ## Overview
 
-The crypto-trading-system has a mature evaluation infrastructure with financial metrics, walk-forward validation, and regime analysis. This integration wraps existing metrics in the `agent-eval` framework to enable:
+The crypto-trading-system has a mature evaluation infrastructure with financial metrics, walk-forward validation, and regime analysis. This integration wraps existing metrics in the `eval-kit` framework to enable:
 - Baseline regression detection
 - CI/CD blocking on performance drops
 - Unified evaluation interface
@@ -23,7 +23,7 @@ crypto-trading-system/
 │   ├── walk_forward.py           # Keep
 │   ├── regime_analysis.py        # Keep
 │   │
-│   ├── framework/                # NEW - agent-eval integration
+│   ├── framework/                # NEW - eval-kit integration
 │   │   ├── __init__.py
 │   │   ├── task.py               # TradingTask schema
 │   │   ├── harness.py            # Evaluation orchestrator
@@ -54,7 +54,7 @@ In `crypto-trading-system/pyproject.toml`:
 dependencies = [
     # ... existing dependencies
     # Use SSH URL for local development (works with your SSH keys)
-    "agent-eval @ git+ssh://git@github.com/ssf0409/agent-eval.git",
+    "eval-kit @ git+ssh://git@github.com/ssf0409/eval-kit.git",
 ]
 ```
 
@@ -76,7 +76,7 @@ from typing import Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from agent_eval.core.task import Task, TaskExpectation
+from eval_kit.core.task import Task, TaskExpectation
 
 
 class MarketConditions(BaseModel):
@@ -186,9 +186,9 @@ Create `evaluation/graders/financial.py`:
 ```python
 """Financial metrics grader wrapping existing metrics.py."""
 
-from agent_eval.core.grader import CodeGrader
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.task import Task
+from eval_kit.core.grader import CodeGrader
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.task import Task
 
 # Import existing metrics
 from evaluation.metrics import (
@@ -338,9 +338,9 @@ Create `evaluation/graders/debate.py`:
 ```python
 """Grader for debate mechanism impact."""
 
-from agent_eval.core.grader import CodeGrader
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.task import Task
+from eval_kit.core.grader import CodeGrader
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.task import Task
 
 
 class DebateImpactGrader(CodeGrader):
@@ -423,7 +423,7 @@ Create `evaluation/ci/thresholds.py`:
 ```python
 """Regression thresholds for CI blocking."""
 
-from agent_eval.baselines.comparison import RegressionSeverity
+from eval_kit.baselines.comparison import RegressionSeverity
 
 # Metric configurations
 METRIC_THRESHOLDS = {
@@ -484,14 +484,14 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any
 
-from agent_eval.core.task import EvalSet
-from agent_eval.core.trial import Trial, TrialBatch, TrialStatus
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.grader import CompositeGrader
-from agent_eval.statistics.pass_at_k import PassAtKAnalyzer
-from agent_eval.statistics.consistency import ConsistencyAnalyzer
-from agent_eval.baselines.manager import BaselineManager
-from agent_eval.baselines.comparison import RegressionDetector
+from eval_kit.core.task import EvalSet
+from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.grader import CompositeGrader
+from eval_kit.statistics.pass_at_k import PassAtKAnalyzer
+from eval_kit.statistics.consistency import ConsistencyAnalyzer
+from eval_kit.baselines.manager import BaselineManager
+from eval_kit.baselines.comparison import RegressionDetector
 
 from evaluation.framework.task import TradingTask
 from evaluation.graders.financial import FinancialMetricsGrader, ExecutionMetricsGrader
@@ -701,8 +701,8 @@ Trading agents may have non-deterministic elements:
 This module provides tools to analyze decision consistency.
 """
 
-from agent_eval.statistics.pass_at_k import pass_at_k
-from agent_eval.statistics.consistency import pass_to_k
+from eval_kit.statistics.pass_at_k import pass_at_k
+from eval_kit.statistics.consistency import pass_to_k
 
 
 def analyze_decision_consistency(

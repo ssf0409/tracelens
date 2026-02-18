@@ -1,8 +1,17 @@
-"""Core abstractions for the evaluation framework."""
+"""Agent Evaluation Framework.
 
-from agent_eval.core.task import Task, TaskLoader, EvalSet, TaskExpectation
-from agent_eval.core.trial import Trial, TrialStatus
-from agent_eval.core.grader import (
+A common evaluation framework for AI agents with support for:
+- Code-based deterministic grading
+- LLM-as-judge grading
+- Human evaluation calibration
+- Statistical analysis (pass@k, pass^k)
+- Baseline regression detection
+- CI/CD integration
+"""
+
+from eval_kit.core.task import Task, TaskLoader, EvalSet
+from eval_kit.core.trial import Trial, TrialStatus
+from eval_kit.core.grader import (
     Grader,
     CodeGrader,
     LLMGrader,
@@ -11,9 +20,9 @@ from agent_eval.core.grader import (
     GraderRole,
     GraderConfig,
 )
-from agent_eval.core.transcript import Transcript, TranscriptStep, StepType, ToolCall
-from agent_eval.core.outcome import Outcome, GradeLevel
-from agent_eval.core.decision_spec import (
+from eval_kit.core.transcript import Transcript, TranscriptStep
+from eval_kit.core.outcome import Outcome, GradeLevel
+from eval_kit.core.decision_spec import (
     DecisionSpec,
     ModelConfig,
     PromptSpec,
@@ -22,11 +31,13 @@ from agent_eval.core.decision_spec import (
     EnvironmentSpec,
 )
 
+__version__ = "0.1.0"
+
 __all__ = [
+    # Core models
     "Task",
     "TaskLoader",
     "EvalSet",
-    "TaskExpectation",
     "Trial",
     "TrialStatus",
     "Grader",
@@ -38,8 +49,6 @@ __all__ = [
     "GraderConfig",
     "Transcript",
     "TranscriptStep",
-    "StepType",
-    "ToolCall",
     "Outcome",
     "GradeLevel",
     # Reproducibility

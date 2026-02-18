@@ -5,11 +5,11 @@ from datetime import datetime
 import tempfile
 from pathlib import Path
 
-from agent_eval.core.task import Task, TaskExpectation, EvalSet
-from agent_eval.core.transcript import Transcript, TranscriptStep, StepType, ToolCall
-from agent_eval.core.outcome import Outcome, GradeLevel
-from agent_eval.core.trial import Trial, TrialStatus
-from agent_eval.baselines.manager import TaskBaseline, MetricBaseline
+from eval_kit.core.task import Task, TaskExpectation, EvalSet
+from eval_kit.core.transcript import Transcript, TranscriptStep, StepType, ToolCall
+from eval_kit.core.outcome import Outcome, GradeLevel
+from eval_kit.core.trial import Trial, TrialStatus
+from eval_kit.baselines.manager import TaskBaseline, MetricBaseline
 
 
 @pytest.fixture

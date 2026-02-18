@@ -4,7 +4,7 @@ import pytest
 import json
 from pathlib import Path
 
-from agent_eval.baselines.manager import (
+from eval_kit.baselines.manager import (
     MetricBaseline,
     TaskBaseline,
     BaselineManager,

@@ -1,13 +1,13 @@
 """Baseline management and regression detection."""
 
-from agent_eval.baselines.manager import (
+from eval_kit.baselines.manager import (
     MetricBaseline,
     TaskBaseline,
     BaselineManager,
     BaselineType,
     PromotionPolicy,
 )
-from agent_eval.baselines.comparison import (
+from eval_kit.baselines.comparison import (
     RegressionSeverity,
     MetricRegression,
     RegressionReport,

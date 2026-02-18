@@ -13,9 +13,9 @@ import uuid
 
 from pydantic import BaseModel
 
-from agent_eval.core.outcome import Outcome
-from agent_eval.core.task import Task
-from agent_eval.core.transcript import Transcript
+from eval_kit.core.outcome import Outcome
+from eval_kit.core.task import Task
+from eval_kit.core.transcript import Transcript
 
 
 class GraderType(str, Enum):

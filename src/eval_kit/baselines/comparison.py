@@ -12,7 +12,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 from scipy import stats
 
-from agent_eval.baselines.manager import TaskBaseline
+from eval_kit.baselines.manager import TaskBaseline
 
 
 class RegressionSeverity(str, Enum):

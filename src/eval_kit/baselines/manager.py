@@ -902,7 +902,7 @@ class BaselineManager:
             - is_regression: True if significant decline
             - cohens_d: Effect size
         """
-        from agent_eval.statistics.inference import (
+        from eval_kit.statistics.inference import (
             estimate_metric,
             compare_to_baseline_summary,
         )

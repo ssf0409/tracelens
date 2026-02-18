@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 
-from agent_eval.statistics.inference import (
+from eval_kit.statistics.inference import (
     MetricEstimate,
     ComparisonResult,
     bootstrap_ci,

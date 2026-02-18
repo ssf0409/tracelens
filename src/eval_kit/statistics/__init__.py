@@ -1,16 +1,16 @@
 """Statistical analysis for evaluation results."""
 
-from agent_eval.statistics.pass_at_k import (
+from eval_kit.statistics.pass_at_k import (
     pass_at_k,
     pass_at_k_estimator,
     PassAtKAnalyzer,
 )
-from agent_eval.statistics.consistency import (
+from eval_kit.statistics.consistency import (
     pass_to_k,
     pass_to_k_estimator,
     ConsistencyAnalyzer,
 )
-from agent_eval.statistics.inference import (
+from eval_kit.statistics.inference import (
     MetricEstimate,
     ComparisonResult,
     bootstrap_ci,

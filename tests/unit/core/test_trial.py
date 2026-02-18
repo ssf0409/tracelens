@@ -3,8 +3,8 @@
 import pytest
 from datetime import datetime
 
-from agent_eval.core.trial import Trial, TrialStatus, TrialBatch
-from agent_eval.core.outcome import Outcome
+from eval_kit.core.trial import Trial, TrialStatus, TrialBatch
+from eval_kit.core.outcome import Outcome
 
 
 class TestTrialStatus:

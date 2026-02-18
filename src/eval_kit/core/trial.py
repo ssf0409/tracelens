@@ -13,8 +13,8 @@ import uuid
 
 from pydantic import BaseModel, Field
 
-from agent_eval.core.outcome import Outcome
-from agent_eval.core.transcript import Transcript
+from eval_kit.core.outcome import Outcome
+from eval_kit.core.transcript import Transcript
 
 
 class TrialStatus(str, Enum):

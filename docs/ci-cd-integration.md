@@ -12,7 +12,7 @@ The CI/CD integration provides:
 
 ## Prerequisites: Private Repository Access
 
-Since `agent-eval` is a private repository, your CI/CD workflows need authentication to install it. See the [Installation Guide](./installation.md#private-repository-authentication) for detailed options.
+Since `eval-kit` is a private repository, your CI/CD workflows need authentication to install it. See the [Installation Guide](./installation.md#private-repository-authentication) for detailed options.
 
 **Quick setup** (for repos under the same GitHub account):
 
@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Required for private agent-eval dependency
+      # Required for private eval-kit dependency
       - name: Configure git for private repos
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
@@ -282,7 +282,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Required for private agent-eval dependency
+      # Required for private eval-kit dependency
       - name: Configure git for private repos
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
@@ -369,7 +369,7 @@ import sys
 from pathlib import Path
 
 from eval.harness import StrideAIEvaluator
-from agent_eval.baselines.comparison import RegressionSeverity
+from eval_kit.baselines.comparison import RegressionSeverity
 
 
 def parse_args():
@@ -523,7 +523,7 @@ from pathlib import Path
 
 from evaluation.framework.harness import CryptoTradingEvaluator
 from evaluation.framework.task import BTC_DAILY_BACKTEST, ETH_HOURLY_VOLATILE
-from agent_eval.baselines.comparison import RegressionSeverity
+from eval_kit.baselines.comparison import RegressionSeverity
 
 
 TASK_MAP = {

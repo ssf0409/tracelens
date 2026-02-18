@@ -1,6 +1,6 @@
 # Installation & Usage Guide
 
-This guide explains how to install and use the `agent-eval` framework in your projects.
+This guide explains how to install and use the `eval-kit` framework in your projects.
 
 ## Installation Options
 
@@ -10,13 +10,13 @@ Since this is a private repository, you can install directly from GitHub:
 
 ```bash
 # Using uv (recommended)
-uv pip install git+https://github.com/ssf0409/agent-eval.git
+uv pip install git+https://github.com/ssf0409/eval-kit.git
 
 # Using pip
-pip install git+https://github.com/ssf0409/agent-eval.git
+pip install git+https://github.com/ssf0409/eval-kit.git
 
 # With LLM support (for LLM-based graders)
-uv pip install "agent-eval[llm] @ git+https://github.com/ssf0409/agent-eval.git"
+uv pip install "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git"
 ```
 
 ### Option 2: Add as Dependency in pyproject.toml
@@ -26,17 +26,17 @@ Add to your project's `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "agent-eval @ git+https://github.com/ssf0409/agent-eval.git",
+    "eval-kit @ git+https://github.com/ssf0409/eval-kit.git",
 ]
 
 # Or with a specific version/tag
 dependencies = [
-    "agent-eval @ git+https://github.com/ssf0409/agent-eval.git@v0.1.0",
+    "eval-kit @ git+https://github.com/ssf0409/eval-kit.git@v0.1.0",
 ]
 
 # With LLM extras
 dependencies = [
-    "agent-eval[llm] @ git+https://github.com/ssf0409/agent-eval.git",
+    "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git",
 ]
 ```
 
@@ -51,15 +51,15 @@ If you want to develop both projects together:
 
 ```bash
 # Add as submodule
-git submodule add https://github.com/ssf0409/agent-eval.git libs/agent-eval
+git submodule add https://github.com/ssf0409/eval-kit.git libs/eval-kit
 
 # Install in development mode
-uv pip install -e libs/agent-eval
+uv pip install -e libs/eval-kit
 ```
 
 ## Private Repository Authentication
 
-Since `agent-eval` is a private repository, you need to configure authentication for both local development and CI/CD.
+Since `eval-kit` is a private repository, you need to configure authentication for both local development and CI/CD.
 
 ### Local Development (SSH)
 
@@ -69,7 +69,7 @@ Since `agent-eval` is a private repository, you need to configure authentication
 # In your project's pyproject.toml
 [project]
 dependencies = [
-    "agent-eval @ git+ssh://git@github.com/ssf0409/agent-eval.git",
+    "eval-kit @ git+ssh://git@github.com/ssf0409/eval-kit.git",
 ]
 ```
 
@@ -127,13 +127,13 @@ For production environments, deploy keys provide read-only access scoped to a si
 
 1. Generate a key pair:
    ```bash
-   ssh-keygen -t ed25519 -C "agent-eval-deploy" -f agent-eval-deploy -N ""
+   ssh-keygen -t ed25519 -C "eval-kit-deploy" -f eval-kit-deploy -N ""
    ```
 
-2. Add the **public key** (`agent-eval-deploy.pub`) to agent-eval:
+2. Add the **public key** (`eval-kit-deploy.pub`) to eval-kit:
    `Settings > Deploy keys > Add deploy key` (enable "Allow read access")
 
-3. Add the **private key** (`agent-eval-deploy`) as a secret in your project:
+3. Add the **private key** (`eval-kit-deploy`) as a secret in your project:
    `Settings > Secrets > Actions > AGENT_EVAL_DEPLOY_KEY`
 
 4. Use in workflow:
@@ -164,7 +164,7 @@ For projects under the same GitHub account:
 ```toml
 [project]
 dependencies = [
-    "agent-eval @ git+ssh://git@github.com/ssf0409/agent-eval.git",
+    "eval-kit @ git+ssh://git@github.com/ssf0409/eval-kit.git",
 ]
 ```
 
@@ -184,7 +184,7 @@ This gives you:
 ### 1. Define a Task
 
 ```python
-from agent_eval.core.task import Task, TaskExpectation
+from eval_kit.core.task import Task, TaskExpectation
 
 task = Task(
     task_id="goal-decomposition-001",
@@ -208,9 +208,9 @@ task = Task(
 ### 2. Create a Grader
 
 ```python
-from agent_eval.core.grader import CodeGrader
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.task import Task
+from eval_kit.core.grader import CodeGrader
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.task import Task
 
 class QualityGrader(CodeGrader):
     """Grade based on output quality metrics."""
@@ -250,8 +250,8 @@ class QualityGrader(CodeGrader):
 ### 3. Run Evaluation and Compute Statistics
 
 ```python
-from agent_eval.statistics.pass_at_k import PassAtKAnalyzer
-from agent_eval.statistics.consistency import ConsistencyAnalyzer
+from eval_kit.statistics.pass_at_k import PassAtKAnalyzer
+from eval_kit.statistics.consistency import ConsistencyAnalyzer
 
 # Collect results from multiple runs
 pass_results = {
@@ -273,8 +273,8 @@ print(reliability)  # {"pass^2": 0.6, "pass^3": 0.4, "pass^5": 0.2}
 ### 4. Baseline Comparison
 
 ```python
-from agent_eval.baselines.manager import BaselineManager
-from agent_eval.baselines.comparison import RegressionDetector
+from eval_kit.baselines.manager import BaselineManager
+from eval_kit.baselines.comparison import RegressionDetector
 
 # Load/create baseline manager
 manager = BaselineManager("baselines.json")
@@ -314,13 +314,13 @@ uv pip install -e ".[dev]"
 uv run pytest tests/ -v
 
 # Run tests with coverage
-uv run pytest tests/ -v --cov=agent_eval --cov-report=html
+uv run pytest tests/ -v --cov=eval_kit --cov-report=html
 
 # Lint
 uv run ruff check src/ tests/
 
 # Type check
-uv run mypy src/agent_eval/
+uv run mypy src/eval_kit/
 ```
 
 Using Docker:
@@ -338,7 +338,7 @@ docker compose run --rm dev
 
 ## Project Structure for Integration
 
-When integrating `agent-eval` into your project, we recommend this structure:
+When integrating `eval-kit` into your project, we recommend this structure:
 
 ```
 your-project/
@@ -361,7 +361,7 @@ your-project/
 ├── .github/
 │   └── workflows/
 │       └── eval.yml              # CI evaluation workflow
-└── pyproject.toml                # Include agent-eval dependency
+└── pyproject.toml                # Include eval-kit dependency
 ```
 
 ## Next Steps

@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timedelta
 
-from agent_eval.core.transcript import (
+from eval_kit.core.transcript import (
     Transcript,
     TranscriptStep,
     StepType,

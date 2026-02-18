@@ -1,7 +1,7 @@
 """Tests for DecisionSpec and related models."""
 
 import pytest
-from agent_eval.core.decision_spec import (
+from eval_kit.core.decision_spec import (
     DecisionSpec,
     ModelConfig,
     PromptSpec,
@@ -352,7 +352,7 @@ class TestDecisionSpecIntegration:
 
     def test_transcript_with_decision_spec(self):
         """Test that DecisionSpec works with Transcript."""
-        from agent_eval.core.transcript import Transcript
+        from eval_kit.core.transcript import Transcript
 
         spec = DecisionSpec(
             model=ModelConfig(
@@ -379,8 +379,8 @@ class TestDecisionSpecIntegration:
 
     def test_trial_fingerprint_property(self):
         """Test that Trial can access fingerprint from transcript."""
-        from agent_eval.core.transcript import Transcript
-        from agent_eval.core.trial import Trial
+        from eval_kit.core.transcript import Transcript
+        from eval_kit.core.trial import Trial
 
         spec = DecisionSpec(
             model=ModelConfig(provider="test", model_id="test-model"),
@@ -401,8 +401,8 @@ class TestDecisionSpecIntegration:
 
     def test_trial_fingerprint_none_without_spec(self):
         """Test that Trial fingerprint is None without decision_spec."""
-        from agent_eval.core.transcript import Transcript
-        from agent_eval.core.trial import Trial
+        from eval_kit.core.transcript import Transcript
+        from eval_kit.core.trial import Trial
 
         transcript = Transcript(task_id="test-task")
         trial = Trial(task_id="test-task", transcript=transcript)

@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_eval.statistics.consistency import (
+from eval_kit.statistics.consistency import (
     pass_to_k,
     pass_to_k_estimator,
     ConsistencyAnalyzer,

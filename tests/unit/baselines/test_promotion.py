@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_eval.baselines.manager import (
+from eval_kit.baselines.manager import (
     BaselineManager,
     BaselineType,
     PromotionPolicy,

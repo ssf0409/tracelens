@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_eval.statistics.pass_at_k import (
+from eval_kit.statistics.pass_at_k import (
     pass_at_k,
     pass_at_k_estimator,
     PassAtKAnalyzer,

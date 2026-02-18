@@ -1,6 +1,6 @@
 # Phase 2A: StrideAI Integration Guide
 
-This guide covers integrating the `agent-eval` framework with StrideAI's goal decomposition agent.
+This guide covers integrating the `eval-kit` framework with StrideAI's goal decomposition agent.
 
 ## Overview
 
@@ -46,7 +46,7 @@ In `StrideAI/pyproject.toml`:
 dependencies = [
     # ... existing dependencies
     # Use SSH URL for local development (works with your SSH keys)
-    "agent-eval[llm] @ git+ssh://git@github.com/ssf0409/agent-eval.git",
+    "eval-kit[llm] @ git+ssh://git@github.com/ssf0409/eval-kit.git",
 ]
 ```
 
@@ -67,7 +67,7 @@ Create `eval/schemas/task_definition.py`:
 from typing import Any
 from pydantic import BaseModel, Field
 
-from agent_eval.core.task import Task, TaskExpectation
+from eval_kit.core.task import Task, TaskExpectation
 
 
 class UserContext(BaseModel):
@@ -121,9 +121,9 @@ Create `eval/graders/specificity_grader.py`:
 ```python
 """Grader for task specificity - are tasks concrete and actionable?"""
 
-from agent_eval.core.grader import LLMGrader
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.task import Task
+from eval_kit.core.grader import LLMGrader
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.task import Task
 
 
 class SpecificityGrader(LLMGrader):
@@ -232,9 +232,9 @@ Create `eval/graders/personalization_grader.py`:
 ```python
 """Grader for personalization - does the plan match user context?"""
 
-from agent_eval.core.grader import LLMGrader
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.task import Task
+from eval_kit.core.grader import LLMGrader
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.task import Task
 
 
 class PersonalizationGrader(LLMGrader):
@@ -351,9 +351,9 @@ Create `eval/graders/actionability_grader.py`:
 ```python
 """Grader for actionability - can the user start immediately?"""
 
-from agent_eval.core.grader import LLMGrader
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.task import Task
+from eval_kit.core.grader import LLMGrader
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.task import Task
 
 
 class ActionabilityGrader(LLMGrader):
@@ -512,14 +512,14 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-from agent_eval.core.task import EvalSet
-from agent_eval.core.trial import Trial, TrialBatch, TrialStatus
-from agent_eval.core.transcript import Transcript
-from agent_eval.core.grader import CompositeGrader
-from agent_eval.statistics.pass_at_k import PassAtKAnalyzer
-from agent_eval.statistics.consistency import ConsistencyAnalyzer
-from agent_eval.baselines.manager import BaselineManager
-from agent_eval.baselines.comparison import RegressionDetector, RegressionSeverity
+from eval_kit.core.task import EvalSet
+from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.grader import CompositeGrader
+from eval_kit.statistics.pass_at_k import PassAtKAnalyzer
+from eval_kit.statistics.consistency import ConsistencyAnalyzer
+from eval_kit.baselines.manager import BaselineManager
+from eval_kit.baselines.comparison import RegressionDetector, RegressionSeverity
 
 from eval.schemas.task_definition import GoalDecompositionTask
 from eval.graders.specificity_grader import SpecificityGrader

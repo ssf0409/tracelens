@@ -1,4 +1,4 @@
-# Agent Evaluation Framework
+# eval-kit
 
 A common evaluation framework for AI agents with support for LLM-based and code-based grading, statistical analysis, baseline regression detection, and CI/CD integration.
 
@@ -14,7 +14,7 @@ This framework provides a unified evaluation methodology for AI agent projects. 
 ## Architecture
 
 ```
-agent-eval/
+eval-kit/
 ├── core/                    # Abstract interfaces
 │   ├── task.py              # Task, TaskLoader, EvalSet ABCs
 │   ├── trial.py             # Trial execution model
@@ -46,7 +46,7 @@ agent-eval/
 A Task defines a single evaluation test case:
 
 ```python
-from agent_eval import Task
+from eval_kit import Task
 
 task = Task(
     name="Portfolio website decomposition",
@@ -65,7 +65,7 @@ Graders evaluate agent outputs. There are two main types:
 
 **CodeGrader** - For deterministic metrics (crypto-trading):
 ```python
-from agent_eval import CodeGrader
+from eval_kit import CodeGrader
 
 class SharpeGrader(CodeGrader):
     def compute_metrics(self, transcript, task):
@@ -80,7 +80,7 @@ class SharpeGrader(CodeGrader):
 
 **LLMGrader** - For subjective quality (StrideAI):
 ```python
-from agent_eval import LLMGrader
+from eval_kit import LLMGrader
 
 class SpecificityGrader(LLMGrader):
     def build_grading_prompt(self, transcript, task):
@@ -100,7 +100,7 @@ class SpecificityGrader(LLMGrader):
 A Trial represents a single execution of a Task:
 
 ```python
-from agent_eval import Trial, TrialStatus
+from eval_kit import Trial, TrialStatus
 
 trial = Trial(
     task_id=task.task_id,
@@ -123,7 +123,7 @@ trial = Trial(
 - Higher k = lower pass^k (harder to pass every time)
 
 ```python
-from agent_eval.statistics import pass_at_k, pass_to_k
+from eval_kit.statistics import pass_at_k, pass_to_k
 
 # Capability: can it succeed at least once in 5 tries?
 capability = pass_at_k(n=10, c=7, k=5)  # 0.99+
@@ -137,7 +137,7 @@ reliability = pass_to_k(results=[True, True, False, True, True], k=3)  # 0.33
 `DecisionSpec` captures all parameters affecting agent behavior for reproducibility. The fingerprint is a SHA-256 hash of the entire configuration.
 
 ```python
-from agent_eval.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
+from eval_kit.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
 
 # Capture agent configuration
 decision_spec = DecisionSpec(
@@ -173,7 +173,7 @@ Graders can have two roles in composite evaluation:
 - **SCORE_CONTRIBUTOR**: Quality graders. Contribute to weighted average.
 
 ```python
-from agent_eval import CompositeGrader, GraderRole, GraderConfig
+from eval_kit import CompositeGrader, GraderRole, GraderConfig
 
 # Safety grader - must pass or entire trial fails
 safety_config = GraderConfig(role=GraderRole.MUST_PASS)
@@ -199,7 +199,7 @@ outcome = await composite.grade(transcript, task)
 ### Baseline Regression Detection
 
 ```python
-from agent_eval.baselines import BaselineManager, RegressionDetector
+from eval_kit.baselines import BaselineManager, RegressionDetector
 
 manager = BaselineManager("baselines/baselines.json")
 baseline = manager.get_baseline("btc_backtest")
@@ -220,7 +220,7 @@ Baselines can be protected or auto-promoted based on their type:
 - **EXPERIMENTAL**: For testing. No restrictions.
 
 ```python
-from agent_eval.baselines import BaselineManager, BaselineType, PromotionPolicy
+from eval_kit.baselines import BaselineManager, BaselineType, PromotionPolicy
 
 manager = BaselineManager("baselines/baselines.json")
 
@@ -256,7 +256,7 @@ promoted = manager.try_promote(
 Research-grade statistical comparison with confidence intervals:
 
 ```python
-from agent_eval.statistics.inference import (
+from eval_kit.statistics.inference import (
     compare_metrics,
     compare_to_baseline_summary,
     estimate_metric,
@@ -295,7 +295,7 @@ summary = compare_to_baseline_summary(
 
 ```python
 # eval/graders/quality_grader.py
-from agent_eval import LLMGrader
+from eval_kit import LLMGrader
 
 class DecompositionQualityGrader(LLMGrader):
     """Evaluates goal decomposition quality using LLM-as-judge."""
@@ -315,7 +315,7 @@ class DecompositionQualityGrader(LLMGrader):
 
 ```python
 # evaluation/graders/financial.py
-from agent_eval import CodeGrader
+from eval_kit import CodeGrader
 
 class FinancialGrader(CodeGrader):
     """Wraps existing financial metrics as a grader."""
@@ -342,7 +342,7 @@ class FinancialGrader(CodeGrader):
 ```yaml
 - name: Run Evaluation
   run: |
-    agent-eval run \
+    eval-kit run \
       --eval-set eval/suite.json \
       --graders quality,personalization \
       --num-runs 5 \
@@ -350,7 +350,7 @@ class FinancialGrader(CodeGrader):
       --fail-on-regression moderate
 
 - name: Comment on PR
-  run: agent-eval report --format github-pr
+  run: eval-kit report --format github-pr
 ```
 
 ### Regression Thresholds
@@ -381,7 +381,7 @@ Weekly process to calibrate LLM graders:
 4. **Grader Tuning**: Adjust prompts if correlation < 0.7
 
 ```python
-from agent_eval.human_eval import HumanEvalSampler, Reconciler
+from eval_kit.human_eval import HumanEvalSampler, Reconciler
 
 sampler = HumanEvalSampler(strategy="diverse", sample_size=20)
 samples = sampler.select(trials)
@@ -398,14 +398,14 @@ Since this is a private package, install directly from GitHub:
 
 ```bash
 # Using uv (recommended)
-uv pip install git+https://github.com/ssf0409/agent-eval.git
+uv pip install git+https://github.com/ssf0409/eval-kit.git
 
 # With LLM support
-uv pip install "agent-eval[llm] @ git+https://github.com/ssf0409/agent-eval.git"
+uv pip install "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git"
 
 # Or add to pyproject.toml
 # dependencies = [
-#     "agent-eval @ git+https://github.com/ssf0409/agent-eval.git",
+#     "eval-kit @ git+https://github.com/ssf0409/eval-kit.git",
 # ]
 ```
 
@@ -413,8 +413,8 @@ uv pip install "agent-eval[llm] @ git+https://github.com/ssf0409/agent-eval.git"
 
 ```bash
 # Clone and install
-git clone https://github.com/ssf0409/agent-eval.git
-cd agent-eval
+git clone https://github.com/ssf0409/eval-kit.git
+cd eval-kit
 uv pip install -e ".[dev]"
 
 # Run tests
@@ -427,8 +427,8 @@ docker compose run --rm test
 ## Quick Start
 
 ```python
-from agent_eval import Task, EvalSet, Trial
-from agent_eval.execution import EvaluationRunner
+from eval_kit import Task, EvalSet, Trial
+from eval_kit.execution import EvaluationRunner
 
 # Define tasks
 tasks = [
