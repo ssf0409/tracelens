@@ -4,6 +4,8 @@ from agent_eval.baselines.manager import (
     MetricBaseline,
     TaskBaseline,
     BaselineManager,
+    BaselineType,
+    PromotionPolicy,
 )
 from agent_eval.baselines.comparison import (
     RegressionSeverity,
@@ -16,6 +18,8 @@ __all__ = [
     "MetricBaseline",
     "TaskBaseline",
     "BaselineManager",
+    "BaselineType",
+    "PromotionPolicy",
     "RegressionSeverity",
     "MetricRegression",
     "RegressionReport",

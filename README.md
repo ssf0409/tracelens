@@ -18,17 +18,19 @@ agent-eval/
 ├── core/                    # Abstract interfaces
 │   ├── task.py              # Task, TaskLoader, EvalSet ABCs
 │   ├── trial.py             # Trial execution model
-│   ├── grader.py            # Grader ABC hierarchy (CodeGrader, LLMGrader)
+│   ├── grader.py            # Grader ABC hierarchy (CodeGrader, LLMGrader, CompositeGrader)
 │   ├── transcript.py        # Agent execution logging
+│   ├── decision_spec.py     # Reproducibility fingerprinting
 │   └── outcome.py           # Grading results
 ├── execution/               # Trial runner
 │   ├── runner.py            # Parallel/concurrent execution
 │   └── agent_adapter.py     # Agent invocation interface
 ├── statistics/              # Non-determinism handling
 │   ├── pass_at_k.py         # Capability ceiling (pass@k)
-│   └── consistency.py       # Reliability (pass^k)
+│   ├── consistency.py       # Reliability (pass^k)
+│   └── inference.py         # Bootstrap CI, significance testing
 ├── baselines/               # Regression detection
-│   ├── manager.py           # Baseline storage
+│   ├── manager.py           # Baseline storage, promotion semantics
 │   └── comparison.py        # Regression detection
 ├── human_eval/              # Weekly calibration
 │   ├── sampler.py           # Sample selection
@@ -130,6 +132,70 @@ capability = pass_at_k(n=10, c=7, k=5)  # 0.99+
 reliability = pass_to_k(results=[True, True, False, True, True], k=3)  # 0.33
 ```
 
+### Reproducibility with DecisionSpec
+
+`DecisionSpec` captures all parameters affecting agent behavior for reproducibility. The fingerprint is a SHA-256 hash of the entire configuration.
+
+```python
+from agent_eval.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
+
+# Capture agent configuration
+decision_spec = DecisionSpec(
+    model=ModelConfig(
+        model_id="gpt-4-turbo",
+        temperature=0.7,
+        max_tokens=4096,
+    ),
+    agent=AgentSpec(
+        agent_id="goal-decomposer-v2",
+        version="1.2.3",
+        git_commit="abc123",
+    ),
+    global_seed=42,
+)
+
+# Get fingerprint for reproducibility tracking
+print(f"Fingerprint: {decision_spec.fingerprint[:16]}...")
+
+# Attach to transcript for full reproducibility
+transcript = Transcript(
+    task_id="task-1",
+    final_output={"result": "..."},
+    decision_spec=decision_spec,
+)
+```
+
+### Grader Roles (Must-Pass vs Score-Contributor)
+
+Graders can have two roles in composite evaluation:
+
+- **MUST_PASS**: Safety/constraint graders. Any failure = trial fails.
+- **SCORE_CONTRIBUTOR**: Quality graders. Contribute to weighted average.
+
+```python
+from agent_eval import CompositeGrader, GraderRole, GraderConfig
+
+# Safety grader - must pass or entire trial fails
+safety_config = GraderConfig(role=GraderRole.MUST_PASS)
+safety_grader = FormatValidationGrader("format", config=safety_config)
+
+# Quality grader - contributes to score average
+quality_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)
+quality_grader = SpecificityGrader("specificity", config=quality_config)
+
+# Composite: safety failure = trial failure, quality affects score
+composite = CompositeGrader(
+    grader_id="combined",
+    graders=[
+        (safety_grader, 0.2),   # Weight still affects score
+        (quality_grader, 0.8),  # Higher weight for quality
+    ],
+)
+
+outcome = await composite.grade(transcript, task)
+# outcome.passed = False if safety_grader fails, regardless of quality score
+```
+
 ### Baseline Regression Detection
 
 ```python
@@ -143,6 +209,84 @@ report = detector.compare(baseline, current_results)
 
 if report.should_block_ci(threshold=RegressionSeverity.MODERATE):
     sys.exit(1)  # Block the PR
+```
+
+### Baseline Promotion (Canary vs Capability)
+
+Baselines can be protected or auto-promoted based on their type:
+
+- **CANARY**: Protected baselines that never auto-update. Manual promotion only.
+- **CAPABILITY**: Track improvements over time. Auto-promote when criteria met.
+- **EXPERIMENTAL**: For testing. No restrictions.
+
+```python
+from agent_eval.baselines import BaselineManager, BaselineType, PromotionPolicy
+
+manager = BaselineManager("baselines/baselines.json")
+
+# Create a canary baseline (protected, manual promotion only)
+canary = manager.create_canary_baseline(
+    task_id="critical_safety_check",
+    metrics={"safety_score": 0.95},
+)
+
+# Create capability baseline with auto-promotion policy
+policy = PromotionPolicy(
+    allow_auto_promotion=True,
+    min_improvement_relative=0.05,  # 5% improvement required
+    min_samples=10,
+    required_confidence=0.95,
+)
+capability = manager.create_capability_baseline(
+    task_id="quality_benchmark",
+    metrics={"quality_score": 0.75},
+    policy=policy,
+)
+
+# Try auto-promotion (returns True if promoted)
+promoted = manager.try_promote(
+    task_id="quality_benchmark",
+    new_metrics={"quality_score": 0.82},
+    sample_count=15,
+)
+```
+
+### Statistical Inference (Bootstrap CI)
+
+Research-grade statistical comparison with confidence intervals:
+
+```python
+from agent_eval.statistics.inference import (
+    compare_metrics,
+    compare_to_baseline_summary,
+    estimate_metric,
+)
+
+# Compare current run against baseline with bootstrap CI
+baseline_values = [0.72, 0.75, 0.71, 0.74, 0.73]
+current_values = [0.78, 0.81, 0.79, 0.82, 0.80]
+
+result = compare_metrics(
+    baseline_values,
+    current_values,
+    confidence=0.95,
+    compute_p_value=True,
+)
+
+print(f"Baseline: {result.baseline.mean:.3f} ± {result.baseline.std:.3f}")
+print(f"Current:  {result.current.mean:.3f} ± {result.current.std:.3f}")
+print(f"Difference: {result.difference:.3f}")
+print(f"95% CI: [{result.ci_lower:.3f}, {result.ci_upper:.3f}]")
+print(f"Effect size (Cohen's d): {result.effect_size:.2f}")
+print(f"Significant improvement: {result.significant_improvement}")
+
+# Get summary for CI reporting
+summary = compare_to_baseline_summary(
+    baseline_values,
+    current_values,
+    metric_name="quality_score",
+)
+# Returns: "quality_score: 0.800 vs baseline 0.730 (Δ=+0.070, 95% CI [0.045, 0.095], d=1.23, p<0.05)"
 ```
 
 ## Integration Patterns
