@@ -1,0 +1,133 @@
+"""Evaluation runner for executing tasks with concurrency control.
+
+The EvaluationRunner orchestrates:
+- Running each task × run_index combination
+- Concurrency limiting via semaphore
+- Per-trial timeout enforcement
+- Grading each trial's transcript
+- Collecting results into a TrialBatch
+"""
+
+import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from eval_kit.core.grader import Grader
+from eval_kit.core.outcome import Outcome
+from eval_kit.core.task import EvalSet, Task
+from eval_kit.core.transcript import Transcript
+from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from eval_kit.execution.agent_adapter import AgentAdapter
+
+
+@dataclass
+class RunnerConfig:
+    """Configuration for the evaluation runner."""
+
+    num_runs: int = 1
+    max_concurrency: int = 5
+    timeout_seconds: float = 300.0
+    fail_fast: bool = False
+
+
+class EvaluationRunner:
+    """Runs evaluations with concurrency control and timeout enforcement.
+
+    Example:
+        runner = EvaluationRunner(
+            adapter=my_adapter,
+            graders=[quality_grader, safety_grader],
+            config=RunnerConfig(num_runs=5, max_concurrency=10),
+        )
+        batch = await runner.run(eval_set)
+        print(f"Pass rate: {batch.pass_rate:.2%}")
+    """
+
+    def __init__(
+        self,
+        adapter: AgentAdapter,
+        graders: list[Grader],
+        config: RunnerConfig | None = None,
+    ) -> None:
+        self.adapter = adapter
+        self.graders = graders
+        self.config = config or RunnerConfig()
+
+    async def run(self, eval_set: EvalSet) -> TrialBatch:
+        """Run all tasks × runs and grade results."""
+        batch = TrialBatch(started_at=datetime.utcnow())
+        semaphore = asyncio.Semaphore(self.config.max_concurrency)
+
+        # Build work items: (task, run_index)
+        work_items: list[tuple[Task, int]] = []
+        for task in eval_set.tasks:
+            for run_index in range(self.config.num_runs):
+                work_items.append((task, run_index))
+
+        # Run all concurrently with semaphore
+        tasks = [
+            self._run_one(task, run_index, semaphore, batch)
+            for task, run_index in work_items
+        ]
+        await asyncio.gather(*tasks)
+
+        batch.completed_at = datetime.utcnow()
+        return batch
+
+    async def _run_one(
+        self,
+        task: Task,
+        run_index: int,
+        semaphore: asyncio.Semaphore,
+        batch: TrialBatch,
+    ) -> None:
+        """Execute a single trial with timeout and error handling."""
+        trial = Trial(
+            task_id=task.task_id,
+            run_index=run_index,
+            total_runs=self.config.num_runs,
+            status=TrialStatus.RUNNING,
+            started_at=datetime.utcnow(),
+        )
+
+        async with semaphore:
+            try:
+                transcript = await asyncio.wait_for(
+                    self.adapter.run(task),
+                    timeout=self.config.timeout_seconds,
+                )
+                trial.transcript = transcript
+                trial.status = TrialStatus.COMPLETED
+            except asyncio.TimeoutError:
+                trial.status = TrialStatus.TIMEOUT
+                trial.error_message = (
+                    f"Trial timed out after {self.config.timeout_seconds}s"
+                )
+            except Exception as exc:
+                trial.status = TrialStatus.FAILED
+                trial.error_message = str(exc)
+
+        trial.completed_at = datetime.utcnow()
+
+        # Grade if we have a transcript
+        if trial.transcript is not None:
+            await self._grade_trial(trial, task)
+
+        batch.add_trial(trial)
+
+    async def _grade_trial(self, trial: Trial, task: Task) -> None:
+        """Run all graders on a trial's transcript."""
+        assert trial.transcript is not None
+        for grader in self.graders:
+            try:
+                outcome = await grader.grade(trial.transcript, task)
+                trial.add_outcome(outcome)
+            except Exception as exc:
+                # Grader failure → failed outcome
+                trial.add_outcome(Outcome(
+                    trial_id=trial.trial_id,
+                    grader_id=grader.grader_id,
+                    passed=False,
+                    score=0.0,
+                    feedback=f"Grader error: {exc}",
+                ))
