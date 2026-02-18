@@ -5,14 +5,20 @@ A Transcript is a complete record of an agent's execution, including:
 - Final and intermediate outputs
 - Timing and token usage
 - Errors encountered
+- Decision specification (for reproducibility)
 """
+
+from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import uuid
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from agent_eval.core.decision_spec import DecisionSpec
 
 
 class StepType(str, Enum):
@@ -112,6 +118,12 @@ class Transcript(BaseModel):
     agent_version: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    # Reproducibility
+    decision_spec: DecisionSpec | None = Field(
+        default=None,
+        description="DecisionSpec capturing all parameters affecting agent behavior",
+    )
+
     @property
     def duration_ms(self) -> float | None:
         """Calculate execution duration in milliseconds."""
@@ -170,7 +182,7 @@ class Transcript(BaseModel):
 
     def to_summary(self) -> dict[str, Any]:
         """Create a summary dict for reporting."""
-        return {
+        summary = {
             "task_id": self.task_id,
             "agent_name": self.agent_name,
             "duration_ms": self.duration_ms,
@@ -180,3 +192,16 @@ class Transcript(BaseModel):
             "has_errors": self.has_errors,
             "error_count": len(self.errors),
         }
+        if self.decision_spec:
+            summary["fingerprint"] = self.decision_spec.fingerprint_short
+        return summary
+
+
+# Rebuild model to resolve forward reference to DecisionSpec
+def _rebuild_transcript_model() -> None:
+    """Rebuild Transcript model with DecisionSpec reference resolved."""
+    from agent_eval.core.decision_spec import DecisionSpec
+    Transcript.model_rebuild()
+
+
+_rebuild_transcript_model()

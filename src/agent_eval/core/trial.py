@@ -115,6 +115,20 @@ class Trial(BaseModel):
         """Check if trial completed without errors."""
         return self.status == TrialStatus.COMPLETED and not self.error_message
 
+    @property
+    def fingerprint(self) -> str | None:
+        """Get decision spec fingerprint from transcript."""
+        if self.transcript and self.transcript.decision_spec:
+            return self.transcript.decision_spec.fingerprint
+        return None
+
+    @property
+    def fingerprint_short(self) -> str | None:
+        """Get short decision spec fingerprint from transcript."""
+        if self.transcript and self.transcript.decision_spec:
+            return self.transcript.decision_spec.fingerprint_short
+        return None
+
     def add_outcome(self, outcome: Outcome) -> None:
         """Add a grading outcome to this trial."""
         outcome.trial_id = self.trial_id
@@ -136,7 +150,7 @@ class Trial(BaseModel):
 
     def to_summary_dict(self) -> dict[str, Any]:
         """Return a summary suitable for reporting."""
-        return {
+        summary = {
             "trial_id": self.trial_id,
             "task_id": self.task_id,
             "run_index": self.run_index,
@@ -146,16 +160,22 @@ class Trial(BaseModel):
             "duration_ms": self.duration_ms,
             "outcomes": [o.to_summary_dict() for o in self.outcomes],
         }
+        if self.fingerprint_short:
+            summary["fingerprint"] = self.fingerprint_short
+        return summary
 
     def to_ci_dict(self) -> dict[str, Any]:
         """Return a compact dict for CI output."""
-        return {
+        result = {
             "task": self.task_id,
             "run": f"{self.run_index + 1}/{self.total_runs}",
             "status": self.status.value,
             "passed": self.passed,
             "score": round(self.aggregate_score, 4) if self.aggregate_score else None,
         }
+        if self.fingerprint_short:
+            result["fp"] = self.fingerprint_short
+        return result
 
 
 class TrialBatch(BaseModel):
