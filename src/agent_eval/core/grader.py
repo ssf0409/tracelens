@@ -27,6 +27,22 @@ class GraderType(str, Enum):
     COMPOSITE = "composite"        # Combination of multiple graders
 
 
+class GraderRole(str, Enum):
+    """Role of a grader in composite scoring.
+
+    MUST_PASS: Safety/constraint graders. If ANY must-pass grader fails,
+               the entire trial fails regardless of other scores.
+               Example: safety checks, constraint validation, format validation
+
+    SCORE_CONTRIBUTOR: Quality/style graders. Contribute to weighted average.
+                       Failure reduces score but doesn't automatically fail trial.
+                       Example: quality metrics, style, personalization
+    """
+
+    MUST_PASS = "must_pass"
+    SCORE_CONTRIBUTOR = "score_contributor"
+
+
 class GraderConfig(BaseModel):
     """Configuration for a grader."""
 
@@ -41,6 +57,9 @@ class GraderConfig(BaseModel):
 
     # For composite graders
     weight: float = 1.0
+
+    # Role in composite grading
+    role: GraderRole = GraderRole.SCORE_CONTRIBUTOR
 
 
 class Grader(ABC):
@@ -86,6 +105,21 @@ class Grader(ABC):
     def requires_human(self) -> bool:
         """Whether this grader requires human input."""
         return self.grader_type == GraderType.HUMAN
+
+    @property
+    def role(self) -> GraderRole:
+        """Role of this grader in composite scoring."""
+        return self.config.role
+
+    @property
+    def is_must_pass(self) -> bool:
+        """Whether this grader must pass for trial to pass."""
+        return self.role == GraderRole.MUST_PASS
+
+    @property
+    def is_score_contributor(self) -> bool:
+        """Whether this grader contributes to score average."""
+        return self.role == GraderRole.SCORE_CONTRIBUTOR
 
     @abstractmethod
     async def grade(
@@ -285,17 +319,29 @@ class LLMGrader(Grader):
 
 
 class CompositeGrader(Grader):
-    """Combines multiple graders with weighted scoring.
+    """Combines multiple graders with role-based aggregation.
 
-    Use to combine multiple evaluation dimensions into a single outcome.
+    Supports two types of graders:
+    - MUST_PASS: Any failure causes entire trial to fail (safety, constraints)
+    - SCORE_CONTRIBUTOR: Contributes to weighted score average (quality, style)
+
+    The overall trial passes only if ALL must-pass graders pass.
+    The score is a weighted average of all graders (must-pass get full score if pass).
 
     Example:
-        grader = CompositeGrader(
+        # Safety grader (must pass)
+        safety_config = GraderConfig(role=GraderRole.MUST_PASS)
+        safety_grader = SafetyGrader("safety", config=safety_config)
+
+        # Quality graders (contribute to score)
+        quality_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)
+        quality_grader = QualityGrader("quality", config=quality_config)
+
+        composite = CompositeGrader(
             grader_id="combined",
             graders=[
-                (specificity_grader, 0.4),
-                (personalization_grader, 0.3),
-                (actionability_grader, 0.3),
+                (safety_grader, 0.2),     # Weight for must-pass still affects score
+                (quality_grader, 0.8),    # Higher weight for quality
             ],
         )
     """
@@ -320,13 +366,33 @@ class CompositeGrader(Grader):
     def grader_type(self) -> GraderType:
         return GraderType.COMPOSITE
 
+    @property
+    def must_pass_graders(self) -> list[tuple[Grader, float]]:
+        """Get all must-pass graders."""
+        return [(g, w) for g, w in self.graders if g.is_must_pass]
+
+    @property
+    def score_contributor_graders(self) -> list[tuple[Grader, float]]:
+        """Get all score-contributor graders."""
+        return [(g, w) for g, w in self.graders if g.is_score_contributor]
+
     async def grade(self, transcript: Transcript, task: Task) -> Outcome:
-        """Grade using all sub-graders and combine results."""
+        """Grade using role-based aggregation.
+
+        1. Run all must-pass graders - any failure causes trial to fail
+        2. Run all score-contributor graders
+        3. Compute weighted score from all graders
+        4. Overall pass requires all must-pass graders to pass
+        """
         all_metrics: dict[str, float] = {}
         total_score = 0.0
-        all_passed = True
         feedbacks: list[str] = []
 
+        # Track must-pass results
+        must_pass_results: list[tuple[Grader, Outcome]] = []
+        score_contributor_results: list[tuple[Grader, float, Outcome]] = []
+
+        # Run all graders and collect results
         for grader, weight in self.graders:
             outcome = await grader.grade(transcript, task)
 
@@ -334,15 +400,47 @@ class CompositeGrader(Grader):
             for metric, value in outcome.metrics.items():
                 all_metrics[f"{grader.grader_id}.{metric}"] = value
 
+            # Compute weighted score contribution
             total_score += outcome.score * weight
-            all_passed = all_passed and outcome.passed
 
             if outcome.feedback:
-                feedbacks.append(f"[{grader.grader_id}] {outcome.feedback}")
+                role_prefix = "[MUST-PASS]" if grader.is_must_pass else ""
+                feedbacks.append(
+                    f"{role_prefix}[{grader.grader_id}] {outcome.feedback}"
+                )
+
+            # Track by role
+            if grader.is_must_pass:
+                must_pass_results.append((grader, outcome))
+            else:
+                score_contributor_results.append((grader, weight, outcome))
+
+        # Determine overall pass/fail
+        # ALL must-pass graders must pass for trial to pass
+        must_pass_all_passed = all(
+            outcome.passed for _, outcome in must_pass_results
+        )
+
+        # Add metadata about must-pass failures
+        failed_must_pass = [
+            grader.grader_id
+            for grader, outcome in must_pass_results
+            if not outcome.passed
+        ]
+
+        if failed_must_pass:
+            all_metrics["_failed_must_pass"] = len(failed_must_pass)
+            feedbacks.insert(
+                0,
+                f"MUST-PASS FAILURE: {', '.join(failed_must_pass)}"
+            )
+
+        # Overall pass requires all must-pass to pass
+        overall_passed = must_pass_all_passed
 
         return self.create_outcome(
             trial_id=transcript.task_id,
-            passed=all_passed,
+            passed=overall_passed,
             score=total_score,
             metrics=all_metrics,
             feedback="\n".join(feedbacks) if feedbacks else None,
