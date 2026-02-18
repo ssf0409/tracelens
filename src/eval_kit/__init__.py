@@ -1,4 +1,4 @@
-"""Agent Evaluation Framework.
+"""eval-kit: Evaluation framework for AI agents.
 
 A common evaluation framework for AI agents with support for:
 - Code-based deterministic grading
@@ -10,7 +10,7 @@ A common evaluation framework for AI agents with support for:
 """
 
 from eval_kit.core.task import Task, TaskLoader, EvalSet
-from eval_kit.core.trial import Trial, TrialStatus
+from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 from eval_kit.core.grader import (
     Grader,
     CodeGrader,
@@ -30,6 +30,8 @@ from eval_kit.core.decision_spec import (
     AgentSpec,
     EnvironmentSpec,
 )
+from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
+from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 
 __version__ = "0.1.0"
 
@@ -39,6 +41,7 @@ __all__ = [
     "TaskLoader",
     "EvalSet",
     "Trial",
+    "TrialBatch",
     "TrialStatus",
     "Grader",
     "CodeGrader",
@@ -58,4 +61,9 @@ __all__ = [
     "ToolSpec",
     "AgentSpec",
     "EnvironmentSpec",
+    # Execution
+    "AgentAdapter",
+    "SimpleAdapter",
+    "EvaluationRunner",
+    "RunnerConfig",
 ]
