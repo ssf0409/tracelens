@@ -70,3 +70,7 @@ Thumbs.db
 *.log
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Generated reports
+examples/report.html
+report.html

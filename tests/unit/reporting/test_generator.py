@@ -4,7 +4,15 @@ import pytest
 
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
-from eval_kit.reporting.generator import ReportData, ReportGenerator, TaskSummary
+from eval_kit.reporting.generator import (
+    ReportData,
+    ReportGenerator,
+    TaskSummary,
+    _html_card,
+    _pass_rate_color,
+    _svg_bar_chart,
+    _svg_histogram,
+)
 
 
 def _make_batch(task_configs: dict[str, list[tuple[bool, float]]]) -> TrialBatch:
@@ -152,3 +160,128 @@ class TestReportGenerator:
         assert report.total_trials == 0
         assert report.total_tasks == 0
         assert report.overall_pass_rate == 0.0
+
+    def test_render_html_basic(self):
+        """HTML report is a valid self-contained document."""
+        batch = _make_batch({
+            "t1": [(True, 0.9), (True, 0.8), (False, 0.3)],
+            "t2": [(True, 0.7), (True, 0.6)],
+        })
+
+        gen = ReportGenerator()
+        report = gen.build_report(batch)
+        html = gen.render_html(report)
+
+        assert "<!DOCTYPE html>" in html
+        assert "<title>eval-kit Report</title>" in html
+        assert "eval-kit v0.1.0" in html
+
+    def test_render_html_contains_summary_cards(self):
+        """HTML report has summary cards with correct values."""
+        batch = _make_batch({
+            "t1": [(True, 0.9), (False, 0.4)],
+        })
+
+        gen = ReportGenerator()
+        report = gen.build_report(batch)
+        html = gen.render_html(report)
+
+        assert "Tasks" in html
+        assert "Trials" in html
+        assert "Pass Rate" in html
+        assert "Mean Score" in html
+
+    def test_render_html_contains_task_table(self):
+        """HTML report has per-task results table."""
+        batch = _make_batch({
+            "task-alpha": [(True, 0.9)],
+            "task-beta": [(False, 0.3)],
+        })
+
+        gen = ReportGenerator()
+        report = gen.build_report(batch)
+        html = gen.render_html(report)
+
+        assert "task-alpha" in html
+        assert "task-beta" in html
+        assert "Per-Task Results" in html
+
+    def test_render_html_contains_svg_charts(self):
+        """HTML report contains SVG chart elements."""
+        batch = _make_batch({
+            "t1": [(True, 0.9), (True, 0.8), (False, 0.3)],
+        })
+
+        gen = ReportGenerator(k_values=[1, 3])
+        report = gen.build_report(batch)
+        html = gen.render_html(report)
+
+        assert "<svg" in html
+        assert "pass@1" in html
+
+    def test_render_html_empty_report(self):
+        """HTML report handles empty data gracefully."""
+        gen = ReportGenerator()
+        report = ReportData()
+        html = gen.render_html(report)
+
+        assert "<!DOCTYPE html>" in html
+        assert "0" in html  # zero tasks/trials
+
+    def test_render_html_escapes_task_ids(self):
+        """HTML report escapes special characters in task IDs."""
+        batch = _make_batch({
+            "task<script>": [(True, 0.9)],
+        })
+
+        gen = ReportGenerator()
+        report = gen.build_report(batch)
+        html = gen.render_html(report)
+
+        assert "task<script>" not in html
+        assert "task&lt;script&gt;" in html
+
+
+class TestSvgHelpers:
+    def test_pass_rate_color_green(self):
+        assert _pass_rate_color(0.9) == "#22c55e"
+        assert _pass_rate_color(0.8) == "#22c55e"
+
+    def test_pass_rate_color_yellow(self):
+        assert _pass_rate_color(0.6) == "#eab308"
+        assert _pass_rate_color(0.5) == "#eab308"
+
+    def test_pass_rate_color_red(self):
+        assert _pass_rate_color(0.3) == "#ef4444"
+        assert _pass_rate_color(0.0) == "#ef4444"
+
+    def test_html_card(self):
+        card = _html_card("Tasks", "5", "#3b82f6")
+        assert "Tasks" in card
+        assert "5" in card
+        assert "#3b82f6" in card
+
+    def test_svg_bar_chart_basic(self):
+        svg = _svg_bar_chart(["a", "b"], [0.5, 0.8], 1.0)
+        assert "<svg" in svg
+        assert "a" in svg
+        assert "b" in svg
+
+    def test_svg_bar_chart_empty(self):
+        assert _svg_bar_chart([], [], 1.0) == ""
+
+    def test_svg_bar_chart_custom_colors(self):
+        svg = _svg_bar_chart(["x"], [0.5], 1.0, ["#ff0000"])
+        assert "#ff0000" in svg
+
+    def test_svg_histogram_basic(self):
+        svg = _svg_histogram([0.1, 0.3, 0.5, 0.7, 0.9], bins=5)
+        assert "<svg" in svg
+        assert "<rect" in svg
+
+    def test_svg_histogram_empty(self):
+        assert _svg_histogram([]) == ""
+
+    def test_svg_histogram_single_value(self):
+        svg = _svg_histogram([0.5, 0.5, 0.5])
+        assert "<svg" in svg

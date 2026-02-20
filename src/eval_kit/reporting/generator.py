@@ -2,9 +2,12 @@
 
 Transforms TrialBatch data into structured reports with per-task
 summaries, statistical analysis, and optional regression detection.
+Supports markdown, CI summary, and self-contained HTML dashboard output.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from html import escape
 from typing import Any
 
 import numpy as np
@@ -241,3 +244,283 @@ class ReportGenerator:
             )
 
         return "\n".join(lines)
+
+    def render_html(self, report: ReportData) -> str:
+        """Render a self-contained HTML dashboard with inline CSS and SVG charts."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        pass_rate_pct = report.overall_pass_rate * 100
+        pass_rate_color = _pass_rate_color(report.overall_pass_rate)
+
+        # --- Summary cards ---
+        cards_html = (
+            _html_card("Tasks", str(report.total_tasks), "#3b82f6")
+            + _html_card("Trials", str(report.total_trials), "#6366f1")
+            + _html_card("Pass Rate", f"{pass_rate_pct:.1f}%", pass_rate_color)
+            + _html_card("Mean Score", f"{report.overall_mean_score:.4f}", "#8b5cf6")
+        )
+
+        # --- Capability / Reliability bar charts ---
+        capability_svg = ""
+        if report.pass_at_k:
+            labels = sorted(report.pass_at_k.keys())
+            values = [report.pass_at_k[k] for k in labels]
+            capability_svg = _svg_bar_chart(labels, values, 1.0)
+
+        reliability_svg = ""
+        if report.reliability:
+            labels = sorted(report.reliability.keys())
+            values = [report.reliability[k] for k in labels]
+            reliability_svg = _svg_bar_chart(labels, values, 1.0)
+
+        # --- Per-task table ---
+        task_rows = ""
+        for s in report.task_summaries:
+            pr_color = _pass_rate_color(s.pass_rate)
+            task_rows += (
+                f'<tr><td>{escape(s.task_id)}</td>'
+                f"<td>{s.num_trials}</td>"
+                f'<td style="color:{pr_color};font-weight:600">'
+                f"{s.pass_rate:.1%}</td>"
+                f"<td>{s.mean_score:.4f}</td>"
+                f"<td>{s.std_score:.4f}</td></tr>\n"
+            )
+
+        # --- Pass rate distribution chart ---
+        pass_rate_chart = ""
+        if report.task_summaries:
+            pr_labels = [s.task_id for s in report.task_summaries]
+            pr_values = [s.pass_rate for s in report.task_summaries]
+            pr_colors = [_pass_rate_color(v) for v in pr_values]
+            pass_rate_chart = _svg_bar_chart(pr_labels, pr_values, 1.0, pr_colors)
+
+        # --- Score distribution histogram ---
+        all_scores = [
+            s.mean_score for s in report.task_summaries if s.mean_score > 0
+        ]
+        score_histogram = ""
+        if all_scores:
+            score_histogram = _svg_histogram(all_scores, bins=10)
+
+        # --- Regression alert ---
+        regression_html = ""
+        if report.regression_report and report.regression_report.has_regression:
+            severity = report.regression_report.overall_severity.value.upper()
+            sev_color = {"MINOR": "#eab308", "MODERATE": "#f97316", "SEVERE": "#ef4444"}.get(
+                severity, "#6b7280"
+            )
+            reg_rows = ""
+            for r in report.regression_report.regressions:
+                reg_rows += (
+                    f"<tr><td>{escape(r.metric_name)}</td>"
+                    f"<td>{r.baseline_mean:.4f}</td>"
+                    f"<td>{r.current_mean:.4f}</td>"
+                    f"<td>{r.delta_percent:+.1f}%</td>"
+                    f"<td>{r.severity.value}</td></tr>\n"
+                )
+            imp_rows = ""
+            for i in report.regression_report.improvements:
+                imp_rows += (
+                    f"<tr><td>{escape(i.metric_name)}</td>"
+                    f"<td>{i.baseline_mean:.4f}</td>"
+                    f"<td>{i.current_mean:.4f}</td>"
+                    f"<td>{i.delta_percent:+.1f}%</td></tr>\n"
+                )
+            regression_html = f"""
+    <section>
+      <h2>Regression Alert
+        <span style="background:{sev_color};color:#fff;padding:2px 10px;
+          border-radius:12px;font-size:0.75em;margin-left:8px">{severity}</span>
+      </h2>
+      <table><thead><tr>
+        <th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th><th>Severity</th>
+      </tr></thead><tbody>{reg_rows}</tbody></table>
+      {"<h3>Improvements</h3><table><thead><tr><th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th></tr></thead><tbody>" + imp_rows + "</tbody></table>" if imp_rows else ""}
+    </section>"""
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eval-kit Report</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  body {{ font-family: system-ui, -apple-system, sans-serif; margin: 0;
+         padding: 20px; background: #f8fafc; color: #1e293b; }}
+  h1 {{ font-size: 1.5em; margin: 0 0 4px; }}
+  h2 {{ font-size: 1.15em; margin: 24px 0 12px; border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 4px; }}
+  .subtitle {{ color: #64748b; font-size: 0.85em; margin-bottom: 16px; }}
+  .cards {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }}
+  .card {{ background: #fff; border-radius: 8px; padding: 14px 20px;
+           box-shadow: 0 1px 3px rgba(0,0,0,.08); min-width: 140px; flex: 1; }}
+  .card .label {{ font-size: 0.75em; color: #64748b; text-transform: uppercase;
+                  letter-spacing: 0.05em; }}
+  .card .value {{ font-size: 1.6em; font-weight: 700; margin-top: 2px; }}
+  section {{ background: #fff; border-radius: 8px; padding: 16px 20px;
+             box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.9em; }}
+  th {{ text-align: left; padding: 8px 10px; border-bottom: 2px solid #e2e8f0;
+        color: #475569; font-weight: 600; }}
+  td {{ padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }}
+  tr:hover {{ background: #f8fafc; }}
+  .chart-row {{ display: flex; gap: 16px; flex-wrap: wrap; }}
+  .chart-row > div {{ flex: 1; min-width: 280px; }}
+  svg text {{ font-family: system-ui, sans-serif; }}
+  @media print {{ body {{ background: #fff; }} section {{ box-shadow: none;
+    border: 1px solid #e2e8f0; }} }}
+</style>
+</head>
+<body>
+<h1>eval-kit Evaluation Report</h1>
+<div class="subtitle">Generated {escape(timestamp)} &middot; eval-kit v0.1.0</div>
+
+<div class="cards">{cards_html}</div>
+
+{"<section><h2>Capability (pass@k)</h2>" + capability_svg + "</section>" if capability_svg else ""}
+{"<section><h2>Reliability (pass^k)</h2>" + reliability_svg + "</section>" if reliability_svg else ""}
+
+<div class="chart-row">
+{"<div><section><h2>Capability &amp; Reliability</h2>" + capability_svg + reliability_svg + "</section></div>" if False else ""}
+</div>
+
+{"<section><h2>Per-Task Results</h2><table><thead><tr><th>Task</th><th>Trials</th><th>Pass Rate</th><th>Mean Score</th><th>Std Score</th></tr></thead><tbody>" + task_rows + "</tbody></table></section>" if task_rows else ""}
+
+{"<section><h2>Pass Rate Distribution</h2>" + pass_rate_chart + "</section>" if pass_rate_chart else ""}
+
+{"<section><h2>Score Distribution</h2>" + score_histogram + "</section>" if score_histogram else ""}
+
+{regression_html}
+
+<div class="subtitle" style="margin-top:24px;text-align:center">
+  eval-kit v0.1.0 &middot; {escape(timestamp)}
+</div>
+</body>
+</html>"""
+
+
+def _pass_rate_color(rate: float) -> str:
+    """Return a color hex based on pass rate."""
+    if rate >= 0.8:
+        return "#22c55e"
+    if rate >= 0.5:
+        return "#eab308"
+    return "#ef4444"
+
+
+def _html_card(label: str, value: str, color: str) -> str:
+    """Render a summary card."""
+    return (
+        f'<div class="card"><div class="label">{escape(label)}</div>'
+        f'<div class="value" style="color:{color}">{escape(value)}</div></div>'
+    )
+
+
+def _svg_bar_chart(
+    labels: list[str],
+    values: list[float],
+    max_value: float,
+    colors: list[str] | None = None,
+) -> str:
+    """Generate an inline SVG horizontal bar chart."""
+    if not labels:
+        return ""
+
+    bar_height = 28
+    gap = 6
+    label_width = 100
+    chart_width = 500
+    total_height = len(labels) * (bar_height + gap) + 10
+
+    default_color = "#3b82f6"
+    if colors is None:
+        colors = [default_color] * len(labels)
+
+    bars = ""
+    for i, (label, val, color) in enumerate(zip(labels, values, colors)):
+        y = i * (bar_height + gap) + 5
+        bar_w = max(2, (val / max_value) * (chart_width - label_width - 60)) if max_value > 0 else 2
+        text_val = f"{val:.2f}" if val < 10 else f"{val:.0f}"
+
+        bars += (
+            f'<text x="0" y="{y + bar_height * 0.7}" '
+            f'font-size="12" fill="#475569">{escape(label)}</text>'
+            f'<rect x="{label_width}" y="{y}" width="{bar_w:.1f}" '
+            f'height="{bar_height}" rx="4" fill="{color}" opacity="0.85"/>'
+            f'<text x="{label_width + bar_w + 6:.1f}" y="{y + bar_height * 0.7}" '
+            f'font-size="12" fill="#1e293b" font-weight="600">{text_val}</text>'
+        )
+
+    return (
+        f'<svg width="100%" viewBox="0 0 {chart_width} {total_height}" '
+        f'xmlns="http://www.w3.org/2000/svg">{bars}</svg>'
+    )
+
+
+def _svg_histogram(values: list[float], bins: int = 10) -> str:
+    """Generate an inline SVG histogram."""
+    if not values:
+        return ""
+
+    min_val = min(values)
+    max_val = max(values)
+
+    if min_val == max_val:
+        counts = [len(values)]
+        bin_edges = [min_val, max_val + 1]
+    else:
+        counts_arr, bin_edges_arr = np.histogram(values, bins=bins)
+        counts = counts_arr.tolist()
+        bin_edges = bin_edges_arr.tolist()
+
+    max_count = max(counts) if counts else 1
+
+    chart_width = 500
+    chart_height = 200
+    margin_bottom = 30
+    margin_left = 40
+    margin_top = 10
+    bar_area_width = chart_width - margin_left - 10
+    bar_area_height = chart_height - margin_bottom - margin_top
+
+    bar_width = bar_area_width / len(counts)
+
+    bars = ""
+    for i, count in enumerate(counts):
+        x = margin_left + i * bar_width
+        h = (count / max_count) * bar_area_height if max_count > 0 else 0
+        y = margin_top + bar_area_height - h
+        color = _pass_rate_color(bin_edges[i] if i < len(bin_edges) else 0.5)
+
+        bars += (
+            f'<rect x="{x:.1f}" y="{y:.1f}" '
+            f'width="{max(bar_width - 2, 1):.1f}" height="{h:.1f}" '
+            f'rx="2" fill="{color}" opacity="0.85"/>'
+        )
+
+    # X-axis labels (first, middle, last)
+    x_labels = ""
+    for idx in [0, len(counts) // 2, len(counts)]:
+        if idx < len(bin_edges):
+            x_pos = margin_left + idx * bar_width
+            x_labels += (
+                f'<text x="{x_pos:.1f}" y="{chart_height - 5}" '
+                f'font-size="11" fill="#64748b" text-anchor="middle">'
+                f"{bin_edges[idx]:.2f}</text>"
+            )
+
+    # Y-axis labels
+    y_labels = ""
+    for frac in [0, 0.5, 1.0]:
+        y_pos = margin_top + bar_area_height * (1 - frac)
+        val = int(max_count * frac)
+        y_labels += (
+            f'<text x="{margin_left - 5}" y="{y_pos + 4:.1f}" '
+            f'font-size="11" fill="#64748b" text-anchor="end">{val}</text>'
+        )
+
+    return (
+        f'<svg width="100%" viewBox="0 0 {chart_width} {chart_height}" '
+        f'xmlns="http://www.w3.org/2000/svg">'
+        f"{y_labels}{bars}{x_labels}</svg>"
+    )

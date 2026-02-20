@@ -14,30 +14,32 @@ This framework provides a unified evaluation methodology for AI agent projects. 
 ## Architecture
 
 ```
-eval-kit/
+src/eval_kit/
 ├── core/                    # Abstract interfaces
-│   ├── task.py              # Task, TaskLoader, EvalSet ABCs
-│   ├── trial.py             # Trial execution model
-│   ├── grader.py            # Grader ABC hierarchy (CodeGrader, LLMGrader, CompositeGrader)
+│   ├── task.py              # Task, TaskLoader, EvalSet
+│   ├── trial.py             # Trial, TrialBatch execution model
+│   ├── grader.py            # Grader ABCs (CodeGrader, LLMGrader, CompositeGrader)
 │   ├── transcript.py        # Agent execution logging
 │   ├── decision_spec.py     # Reproducibility fingerprinting
 │   └── outcome.py           # Grading results
 ├── execution/               # Trial runner
-│   ├── runner.py            # Parallel/concurrent execution
-│   └── agent_adapter.py     # Agent invocation interface
+│   ├── runner.py            # EvaluationRunner - parallel/concurrent execution
+│   ├── agent_adapter.py     # AgentAdapter ABC, SimpleAdapter
+│   └── registry.py          # Plugin loading via dotted import paths
 ├── statistics/              # Non-determinism handling
 │   ├── pass_at_k.py         # Capability ceiling (pass@k)
 │   ├── consistency.py       # Reliability (pass^k)
 │   └── inference.py         # Bootstrap CI, significance testing
 ├── baselines/               # Regression detection
 │   ├── manager.py           # Baseline storage, promotion semantics
-│   └── comparison.py        # Regression detection
-├── human_eval/              # Weekly calibration
-│   ├── sampler.py           # Sample selection
-│   └── reconciliation.py    # LLM-human comparison
-└── reporting/               # Output
-    └── ci_output.py         # CI-friendly reporting
+│   └── comparison.py        # RegressionDetector, severity levels
+├── reporting/               # Output
+│   └── generator.py         # ReportGenerator (markdown, CI summary, HTML)
+└── cli/                     # Command-line interface
+    └── main.py              # eval-kit run / eval-kit report
 ```
+
+> **Planned modules**: `human_eval/` (sample selection, LLM-human reconciliation) is designed but not yet implemented.
 
 ## Core Concepts
 
@@ -371,26 +373,18 @@ THRESHOLDS = {
 }
 ```
 
-## Human Evaluation Calibration
+## Human Evaluation Calibration (Planned)
+
+> The `human_eval/` module is planned but not yet implemented. The recommended workflow:
 
 Weekly process to calibrate LLM graders:
 
-1. **Sample Selection**: Auto-select 20 diverse samples
+1. **Sample Selection**: Select 20 diverse samples from recent eval runs
 2. **Human Rating**: Rate on 1-10 scale per dimension
 3. **Correlation Analysis**: Compare LLM vs human scores
 4. **Grader Tuning**: Adjust prompts if correlation < 0.7
 
-```python
-from eval_kit.human_eval import HumanEvalSampler, Reconciler
-
-sampler = HumanEvalSampler(strategy="diverse", sample_size=20)
-samples = sampler.select(trials)
-
-# After human evaluation...
-reconciler = Reconciler()
-report = reconciler.analyze(human_grades, llm_grades)
-print(f"Correlation: {report.score_correlation:.2f}")
-```
+See [docs/accuracy.md](docs/accuracy.md) for calibration best practices.
 
 ## Installation
 
@@ -427,39 +421,55 @@ docker compose run --rm test
 ## Quick Start
 
 ```python
-from eval_kit import Task, EvalSet, Trial
-from eval_kit.execution import EvaluationRunner
-
-# Define tasks
-tasks = [
-    Task(name="Task 1", input_data={"goal": "..."}),
-    Task(name="Task 2", input_data={"goal": "..."}),
-]
-
-# Create eval set
-eval_set = EvalSet(name="My Suite", tasks=tasks)
-
-# Run evaluation
-runner = EvaluationRunner(
-    graders=[my_grader],
-    adapter=my_agent_adapter,
-    num_runs=5,
+import asyncio
+from eval_kit import (
+    Task, EvalSet, SimpleAdapter, CodeGrader,
+    EvaluationRunner, RunnerConfig, Transcript,
 )
-results = await runner.run(eval_set)
+from eval_kit.reporting.generator import ReportGenerator
 
-# Analyze
-print(f"Pass rate: {results.pass_rate:.2%}")
-print(f"Pass@5: {results.pass_at_k[5]:.2%}")
+# 1. Define tasks
+tasks = [
+    Task(name="Add 2+3", input_data={"a": 2, "b": 3}, metadata={"expected": 5}),
+    Task(name="Add 10+20", input_data={"a": 10, "b": 20}, metadata={"expected": 30}),
+]
+eval_set = EvalSet(name="Math Suite", tasks=tasks)
+
+# 2. Write a simple agent
+async def math_agent(input_data: dict) -> dict:
+    return {"answer": input_data["a"] + input_data["b"]}
+
+adapter = SimpleAdapter(math_agent)
+
+# 3. Write a grader
+class MathGrader(CodeGrader):
+    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
+        expected = task.metadata["expected"]
+        actual = transcript.final_output["answer"]
+        return {"correct": float(actual == expected)}
+
+    def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
+        return metrics["correct"] == 1.0, metrics["correct"]
+
+# 4. Run evaluation
+runner = EvaluationRunner(adapter, [MathGrader("math")], RunnerConfig(num_runs=3))
+batch = asyncio.run(runner.run(eval_set))
+
+# 5. Generate report
+gen = ReportGenerator()
+report = gen.build_report(batch)
+print(gen.render_markdown(report))
 ```
+
+> See [docs/quickstart.md](docs/quickstart.md) for a full 10-minute walkthrough.
 
 ## Documentation
 
-### Integration Guides
-
-- **[Installation Guide](docs/installation.md)** - How to install and use the framework
-- **[StrideAI Integration](docs/strideai-integration.md)** - Phase 2A: LLM graders for goal decomposition
-- **[Crypto-Trading Integration](docs/crypto-trading-integration.md)** - Phase 2B: Financial metrics graders
-- **[CI/CD Integration](docs/ci-cd-integration.md)** - Phase 3: Automated evaluation pipelines
+- **[Quickstart](docs/quickstart.md)** - Get running in 10 minutes
+- **[User Guide](docs/user-guide.md)** - Comprehensive framework guide
+- **[Evaluation Levels](docs/evaluation-levels.md)** - Function, task, and system-level evaluation architecture
+- **[Accuracy Best Practices](docs/accuracy.md)** - Evaluation accuracy and calibration
+- **[Examples](examples/)** - Working example scripts and data files
 
 ### References
 

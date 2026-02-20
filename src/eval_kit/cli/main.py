@@ -75,6 +75,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--report", default=None,
         help="Path to write markdown report",
     )
+    run_parser.add_argument(
+        "--html-report", default=None,
+        help="Path to write HTML dashboard report",
+    )
 
     # -- eval-kit report --
     report_parser = subparsers.add_parser(
@@ -85,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to JSON results file",
     )
     report_parser.add_argument(
-        "--format", default="markdown", choices=["markdown", "json"],
+        "--format", default="markdown", choices=["markdown", "json", "html"],
         help="Output format (default: markdown)",
     )
 
@@ -138,6 +142,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         with open(args.report, "w") as f:
             f.write(gen.render_markdown(report))
 
+    if args.html_report:
+        Path(args.html_report).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.html_report, "w") as f:
+            f.write(gen.render_html(report))
+
     # CI summary to stdout
     print(gen.render_ci_summary(report))
 
@@ -176,6 +185,8 @@ def cmd_report(args: argparse.Namespace) -> int:
 
     if args.format == "markdown":
         print(gen.render_markdown(report))
+    elif args.format == "html":
+        print(gen.render_html(report))
     else:
         print(json.dumps(report.to_dict(), indent=2, default=str))
 

@@ -1,0 +1,54 @@
+{
+  "tasks": [
+    {
+      "task_id": "math-add-simple",
+      "name": "Simple addition",
+      "description": "Add two small integers",
+      "input_data": {"a": 2, "b": 3},
+      "category": "arithmetic",
+      "tags": ["addition", "easy"],
+      "difficulty": "easy",
+      "metadata": {"expected": 5}
+    },
+    {
+      "task_id": "math-add-large",
+      "name": "Large number addition",
+      "description": "Add two larger integers",
+      "input_data": {"a": 1234, "b": 5678},
+      "category": "arithmetic",
+      "tags": ["addition", "medium"],
+      "difficulty": "medium",
+      "metadata": {"expected": 6912}
+    },
+    {
+      "task_id": "math-multiply",
+      "name": "Multiplication",
+      "description": "Multiply two integers",
+      "input_data": {"a": 7, "b": 8, "operation": "multiply"},
+      "category": "arithmetic",
+      "tags": ["multiplication", "easy"],
+      "difficulty": "easy",
+      "metadata": {"expected": 56}
+    },
+    {
+      "task_id": "math-negative",
+      "name": "Negative number addition",
+      "description": "Add a negative and positive number",
+      "input_data": {"a": -15, "b": 10},
+      "category": "arithmetic",
+      "tags": ["addition", "negative", "medium"],
+      "difficulty": "medium",
+      "metadata": {"expected": -5}
+    },
+    {
+      "task_id": "math-zero",
+      "name": "Zero addition",
+      "description": "Add zero to a number (identity property)",
+      "input_data": {"a": 42, "b": 0},
+      "category": "arithmetic",
+      "tags": ["addition", "edge-case"],
+      "difficulty": "easy",
+      "metadata": {"expected": 42}
+    }
+  ]
+}

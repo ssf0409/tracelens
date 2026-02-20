@@ -29,25 +29,29 @@ This is a **common evaluation framework** for AI agents, designed to be used by:
 src/eval_kit/
 ├── core/
 │   ├── task.py          # Task, TaskLoader, EvalSet - test case definitions
-│   ├── trial.py         # Trial - single execution of a task
-│   ├── grader.py        # Grader ABCs - CodeGrader, LLMGrader
+│   ├── trial.py         # Trial, TrialBatch - execution tracking
+│   ├── grader.py        # Grader ABCs - CodeGrader, LLMGrader, CompositeGrader
 │   ├── transcript.py    # Transcript - execution record
+│   ├── decision_spec.py # DecisionSpec - reproducibility fingerprinting
 │   └── outcome.py       # Outcome - grading result
 ├── execution/
 │   ├── runner.py        # EvaluationRunner - parallel execution
-│   └── agent_adapter.py # AgentAdapter ABC - invoke agents
+│   ├── agent_adapter.py # AgentAdapter ABC, SimpleAdapter
+│   └── registry.py      # Plugin loading via dotted import paths
 ├── statistics/
 │   ├── pass_at_k.py     # pass@k - capability ceiling
-│   └── consistency.py   # pass^k - reliability measurement
+│   ├── consistency.py   # pass^k - reliability measurement
+│   └── inference.py     # Bootstrap CI, significance testing
 ├── baselines/
 │   ├── manager.py       # BaselineManager - store/retrieve baselines
 │   └── comparison.py    # RegressionDetector - detect regressions
-├── human_eval/
-│   ├── sampler.py       # HumanEvalSampler - select calibration samples
-│   └── reconciliation.py # Reconciler - LLM vs human comparison
-└── reporting/
-    └── ci_output.py     # CI-friendly output formats
+├── reporting/
+│   └── generator.py     # ReportGenerator - markdown, CI summary, HTML
+└── cli/
+    └── main.py          # eval-kit run / eval-kit report
 ```
+
+> **Planned**: `human_eval/` (sampler.py, reconciliation.py) is designed but not yet implemented.
 
 ## Grader Types
 
