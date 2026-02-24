@@ -6,16 +6,21 @@ Graders evaluate Transcripts and produce Outcomes. There are three main types:
 - HumanGrader: Human evaluation (for calibration)
 """
 
+from __future__ import annotations
+
+import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any
-import uuid
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import Transcript
+
+if TYPE_CHECKING:
+    from eval_kit.llm.provider import LLMProvider
 
 
 class GraderType(str, Enum):
@@ -27,16 +32,23 @@ class GraderType(str, Enum):
     COMPOSITE = "composite"        # Combination of multiple graders
 
 
+class EvalPolicy(str, Enum):
+    """Three-way policy for how a grader's result affects CI.
+
+    GATE:  Fails CI on violation. Use for hard constraints (valid JSON, no PII).
+    WARN:  Warning by default, configurable CI fail. Use for regressions.
+    TRACK: Never fails CI, just produces signals. Use for quality tracking.
+    """
+
+    GATE = "gate"
+    WARN = "warn"
+    TRACK = "track"
+
+
 class GraderRole(str, Enum):
-    """Role of a grader in composite scoring.
+    """Deprecated: use EvalPolicy instead.
 
-    MUST_PASS: Safety/constraint graders. If ANY must-pass grader fails,
-               the entire trial fails regardless of other scores.
-               Example: safety checks, constraint validation, format validation
-
-    SCORE_CONTRIBUTOR: Quality/style graders. Contribute to weighted average.
-                       Failure reduces score but doesn't automatically fail trial.
-                       Example: quality metrics, style, personalization
+    Kept for backward compatibility. MUST_PASS maps to GATE, SCORE_CONTRIBUTOR maps to TRACK.
     """
 
     MUST_PASS = "must_pass"
@@ -58,7 +70,11 @@ class GraderConfig(BaseModel):
     # For composite graders
     weight: float = 1.0
 
-    # Role in composite grading
+    # Three-way eval policy (replaces role for new code)
+    policy: EvalPolicy = EvalPolicy.TRACK
+    threshold: float | None = None
+
+    # Deprecated: role in composite grading (kept for backward compat)
     role: GraderRole = GraderRole.SCORE_CONTRIBUTOR
 
 
@@ -120,6 +136,26 @@ class Grader(ABC):
     def is_score_contributor(self) -> bool:
         """Whether this grader contributes to score average."""
         return self.role == GraderRole.SCORE_CONTRIBUTOR
+
+    @property
+    def policy(self) -> EvalPolicy:
+        """Three-way eval policy for this grader."""
+        return self.config.policy
+
+    @property
+    def is_gate(self) -> bool:
+        """Whether this grader is a gate (fails CI on violation)."""
+        return self.policy == EvalPolicy.GATE
+
+    @property
+    def is_warn(self) -> bool:
+        """Whether this grader is a warning."""
+        return self.policy == EvalPolicy.WARN
+
+    @property
+    def is_track(self) -> bool:
+        """Whether this grader is tracking-only."""
+        return self.policy == EvalPolicy.TRACK
 
     @abstractmethod
     async def grade(
@@ -256,9 +292,11 @@ class LLMGrader(Grader):
         grader_id: str,
         model: str = "gpt-4",
         config: GraderConfig | None = None,
+        provider: LLMProvider | None = None,
     ):
         super().__init__(grader_id, config)
         self.model = model
+        self._provider = provider
 
     @property
     def grader_type(self) -> GraderType:
@@ -291,13 +329,15 @@ class LLMGrader(Grader):
         pass
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call the LLM. Override this to use your preferred client.
+        """Call the LLM via injected provider, or raise if none available.
 
-        Default implementation raises NotImplementedError.
-        In practice, integrate with OpenAI, Anthropic, or LiteLLM.
+        Override this in subclasses for custom LLM integration, or pass
+        a ``provider`` to ``__init__`` to use the provider abstraction.
         """
+        if self._provider is not None:
+            return await self._provider.complete(prompt)
         raise NotImplementedError(
-            "Subclass must implement _call_llm or use a mixin"
+            "Pass a provider to __init__ or override _call_llm in a subclass"
         )
 
     async def grade(self, transcript: Transcript, task: Task) -> Outcome:
@@ -319,31 +359,16 @@ class LLMGrader(Grader):
 
 
 class CompositeGrader(Grader):
-    """Combines multiple graders with role-based aggregation.
+    """Combines multiple graders with policy-aware aggregation.
 
-    Supports two types of graders:
-    - MUST_PASS: Any failure causes entire trial to fail (safety, constraints)
-    - SCORE_CONTRIBUTOR: Contributes to weighted score average (quality, style)
+    Supports three policy tiers:
+    - GATE: Any failure causes entire trial to fail (safety, constraints)
+    - WARN: Failures emit warnings but don't fail by default
+    - TRACK: Pure signals, never affect pass/fail
 
-    The overall trial passes only if ALL must-pass graders pass.
-    The score is a weighted average of all graders (must-pass get full score if pass).
+    Also supports legacy GraderRole (MUST_PASS maps to GATE behavior).
 
-    Example:
-        # Safety grader (must pass)
-        safety_config = GraderConfig(role=GraderRole.MUST_PASS)
-        safety_grader = SafetyGrader("safety", config=safety_config)
-
-        # Quality graders (contribute to score)
-        quality_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)
-        quality_grader = QualityGrader("quality", config=quality_config)
-
-        composite = CompositeGrader(
-            grader_id="combined",
-            graders=[
-                (safety_grader, 0.2),     # Weight for must-pass still affects score
-                (quality_grader, 0.8),    # Higher weight for quality
-            ],
-        )
+    The score is always a weighted average of all graders regardless of policy.
     """
 
     def __init__(
@@ -366,33 +391,58 @@ class CompositeGrader(Grader):
     def grader_type(self) -> GraderType:
         return GraderType.COMPOSITE
 
+    # Legacy properties (backward compat)
+
     @property
     def must_pass_graders(self) -> list[tuple[Grader, float]]:
-        """Get all must-pass graders."""
-        return [(g, w) for g, w in self.graders if g.is_must_pass]
+        """Get all must-pass graders (legacy + gate)."""
+        return [(g, w) for g, w in self.graders if g.is_must_pass or g.is_gate]
 
     @property
     def score_contributor_graders(self) -> list[tuple[Grader, float]]:
-        """Get all score-contributor graders."""
+        """Get all score-contributor graders (legacy)."""
         return [(g, w) for g, w in self.graders if g.is_score_contributor]
 
-    async def grade(self, transcript: Transcript, task: Task) -> Outcome:
-        """Grade using role-based aggregation.
+    # Policy-based properties
 
-        1. Run all must-pass graders - any failure causes trial to fail
-        2. Run all score-contributor graders
-        3. Compute weighted score from all graders
-        4. Overall pass requires all must-pass graders to pass
+    @property
+    def gate_graders(self) -> list[tuple[Grader, float]]:
+        """Get all gate graders."""
+        return [(g, w) for g, w in self.graders if g.is_gate]
+
+    @property
+    def warn_graders(self) -> list[tuple[Grader, float]]:
+        """Get all warn graders."""
+        return [(g, w) for g, w in self.graders if g.is_warn]
+
+    @property
+    def track_graders(self) -> list[tuple[Grader, float]]:
+        """Get all track graders."""
+        return [(g, w) for g, w in self.graders if g.is_track]
+
+    def _is_blocking_grader(self, grader: Grader) -> bool:
+        """Check if a grader failure should block the overall result.
+
+        GATE policy or legacy MUST_PASS role → blocking.
+        """
+        return grader.is_gate or grader.is_must_pass
+
+    async def grade(self, transcript: Transcript, task: Task) -> Outcome:
+        """Grade using policy-aware aggregation.
+
+        1. Run all graders and collect outcomes
+        2. Compute weighted score from all graders
+        3. Only GATE (or legacy MUST_PASS) failures cause overall failure
+        4. WARN failures are recorded in feedback
+        5. TRACK results are pure signals
         """
         all_metrics: dict[str, float] = {}
         total_score = 0.0
         feedbacks: list[str] = []
 
-        # Track must-pass results
-        must_pass_results: list[tuple[Grader, Outcome]] = []
-        score_contributor_results: list[tuple[Grader, float, Outcome]] = []
+        blocking_results: list[tuple[Grader, Outcome]] = []
+        warn_results: list[tuple[Grader, Outcome]] = []
 
-        # Run all graders and collect results
         for grader, weight in self.graders:
             outcome = await grader.grade(transcript, task)
 
@@ -400,43 +450,47 @@ class CompositeGrader(Grader):
             for metric, value in outcome.metrics.items():
                 all_metrics[f"{grader.grader_id}.{metric}"] = value
 
-            # Compute weighted score contribution
             total_score += outcome.score * weight
 
             if outcome.feedback:
-                role_prefix = "[MUST-PASS]" if grader.is_must_pass else ""
-                feedbacks.append(
-                    f"{role_prefix}[{grader.grader_id}] {outcome.feedback}"
-                )
+                is_policy_tagged = grader.is_gate or grader.is_warn
+                policy_tag = f"[{grader.policy.value.upper()}]" if is_policy_tagged else ""
+                legacy_tag = "[MUST-PASS]" if grader.is_must_pass and not grader.is_gate else ""
+                prefix = policy_tag or legacy_tag
+                feedbacks.append(f"{prefix}[{grader.grader_id}] {outcome.feedback}")
 
-            # Track by role
-            if grader.is_must_pass:
-                must_pass_results.append((grader, outcome))
-            else:
-                score_contributor_results.append((grader, weight, outcome))
+            if self._is_blocking_grader(grader):
+                blocking_results.append((grader, outcome))
+            elif grader.is_warn:
+                warn_results.append((grader, outcome))
 
-        # Determine overall pass/fail
-        # ALL must-pass graders must pass for trial to pass
-        must_pass_all_passed = all(
-            outcome.passed for _, outcome in must_pass_results
+        # GATE/MUST_PASS failures block
+        all_blocking_passed = all(
+            outcome.passed for _, outcome in blocking_results
         )
-
-        # Add metadata about must-pass failures
-        failed_must_pass = [
+        failed_blocking = [
             grader.grader_id
-            for grader, outcome in must_pass_results
+            for grader, outcome in blocking_results
             if not outcome.passed
         ]
+        if failed_blocking:
+            all_metrics["_failed_must_pass"] = len(failed_blocking)
+            feedbacks.insert(0, f"MUST-PASS FAILURE: {', '.join(failed_blocking)}")
 
-        if failed_must_pass:
-            all_metrics["_failed_must_pass"] = len(failed_must_pass)
+        # WARN failures recorded but don't block
+        failed_warn = [
+            grader.grader_id
+            for grader, outcome in warn_results
+            if not outcome.passed
+        ]
+        if failed_warn:
+            all_metrics["_failed_warn"] = len(failed_warn)
             feedbacks.insert(
-                0,
-                f"MUST-PASS FAILURE: {', '.join(failed_must_pass)}"
+                len(failed_blocking),  # After blocking failures
+                f"WARNING: {', '.join(failed_warn)}",
             )
 
-        # Overall pass requires all must-pass to pass
-        overall_passed = must_pass_all_passed
+        overall_passed = all_blocking_passed
 
         return self.create_outcome(
             trial_id=transcript.task_id,

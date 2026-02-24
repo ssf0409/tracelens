@@ -79,6 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--html-report", default=None,
         help="Path to write HTML dashboard report",
     )
+    run_parser.add_argument(
+        "--save-trials", default=None,
+        help="Path to write raw trial data (JSON) for replay and comparison",
+    )
 
     # -- eval-kit report --
     report_parser = subparsers.add_parser(
@@ -146,6 +150,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         Path(args.html_report).parent.mkdir(parents=True, exist_ok=True)
         with open(args.html_report, "w") as f:
             f.write(gen.render_html(report))
+
+    # Save raw trial data for replay and comparison
+    if args.save_trials:
+        Path(args.save_trials).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.save_trials, "w") as f:
+            json.dump(batch.to_dict(), f, indent=2)
 
     # CI summary to stdout
     print(gen.render_ci_summary(report))

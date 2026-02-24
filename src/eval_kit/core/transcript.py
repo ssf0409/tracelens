@@ -180,6 +180,15 @@ class Transcript(BaseModel):
         """Get all steps of a specific type."""
         return [s for s in self.steps if s.step_type == step_type]
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict with full round-trip fidelity."""
+        return self.model_dump(mode="json")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Transcript":
+        """Reconstruct a Transcript from a dict produced by to_dict()."""
+        return cls.model_validate(data)
+
     def to_summary(self) -> dict[str, Any]:
         """Create a summary dict for reporting."""
         summary = {
