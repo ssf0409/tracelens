@@ -58,6 +58,9 @@ Thumbs.db
 # Claude
 .claude/
 
+# Worktrees
+.worktrees/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
