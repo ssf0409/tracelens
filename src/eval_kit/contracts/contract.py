@@ -15,7 +15,12 @@ from pydantic import BaseModel
 
 from eval_kit.core.grader import EvalPolicy, Grader
 from eval_kit.metrics.budgets import LatencyGrader, TokenBudgetGrader, ToolCallGrader
-from eval_kit.metrics.validators import ConstraintGrader, ContainsGrader, JsonSchemaGrader
+from eval_kit.metrics.validators import (
+    ConstraintGrader,
+    ContainsGrader,
+    JsonSchemaGrader,
+    StructuredOutputGrader,
+)
 
 
 class BehaviorContract(BaseModel):
@@ -48,12 +53,13 @@ class BehaviorContract(BaseModel):
 
         Each non-empty contract section produces one grader with an
         appropriate default policy:
-        - output_schema  -> JsonSchemaGrader  (GATE)
-        - tools_*        -> ToolCallGrader    (GATE)
-        - max_latency_ms -> LatencyGrader     (WARN)
-        - max_tokens     -> TokenBudgetGrader (WARN)
+        - output_schema  -> JsonSchemaGrader       (GATE)
+        - output_model   -> StructuredOutputGrader  (GATE)
+        - tools_*        -> ToolCallGrader          (GATE)
+        - max_latency_ms -> LatencyGrader           (WARN)
+        - max_tokens     -> TokenBudgetGrader       (WARN)
         - must_include/must_not_include -> ContainsGrader (TRACK)
-        - custom_constraints -> ConstraintGrader (GATE)
+        - custom_constraints -> ConstraintGrader    (GATE)
         """
         result: list[tuple[Grader, EvalPolicy]] = []
         prefix = self.contract_id
@@ -62,6 +68,13 @@ class BehaviorContract(BaseModel):
             grader = JsonSchemaGrader(
                 f"{prefix}.json_schema",
                 schema=self.output_schema,
+            )
+            result.append((grader, grader.policy))
+
+        if self.output_model is not None:
+            grader = StructuredOutputGrader(
+                f"{prefix}.structured_output",
+                model_path=self.output_model,
             )
             result.append((grader, grader.policy))
 

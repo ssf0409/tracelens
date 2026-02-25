@@ -42,6 +42,12 @@ class JsonSchemaGrader(CodeGrader):
         if config is None:
             config = GraderConfig(policy=EvalPolicy.GATE)
         super().__init__(grader_id, config=config)
+        try:
+            jsonschema.Draft7Validator.check_schema(schema)
+        except jsonschema.SchemaError as exc:
+            raise ValueError(
+                f"JsonSchemaGrader '{grader_id}': invalid schema: {exc.message}"
+            ) from exc
         self.schema = schema
 
     def compute_metrics(

@@ -157,6 +157,32 @@ class TestBehaviorContractToGraders:
         # Should have: json_schema, tool_call, latency, token_budget, contains, constraint
         assert len(graders) >= 5  # At least 5 different grader types
 
+    def test_output_model_produces_structured_output_grader(self) -> None:
+        contract = BehaviorContract(
+            contract_id="test",
+            version="1.0",
+            output_model="eval_kit.core.transcript.ToolCall",
+        )
+        graders = contract.to_graders()
+
+        struct_graders = [g for g, p in graders if "structured_output" in g.grader_id]
+        assert len(struct_graders) == 1
+        policies = [p for g, p in graders if "structured_output" in g.grader_id]
+        assert policies[0] == EvalPolicy.GATE
+
+    def test_output_schema_and_model_produce_both_graders(self) -> None:
+        contract = BehaviorContract(
+            contract_id="test",
+            version="1.0",
+            output_schema={"type": "object"},
+            output_model="eval_kit.core.transcript.ToolCall",
+        )
+        graders = contract.to_graders()
+
+        grader_ids = [g.grader_id for g, _ in graders]
+        assert "test.json_schema" in grader_ids
+        assert "test.structured_output" in grader_ids
+
     def test_to_graders_returns_grader_policy_pairs(self) -> None:
         contract = BehaviorContract(
             contract_id="test",

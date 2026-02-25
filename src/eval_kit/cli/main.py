@@ -182,17 +182,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.save_trials:
         Path(args.save_trials).parent.mkdir(parents=True, exist_ok=True)
         trial_data = batch.to_dict()
-        try:
-            with open(args.save_trials, "w") as f:
-                json.dump(trial_data, f, indent=2)
-        except TypeError:
-            print(
-                f"Warning: trial data contained non-serializable values, "
-                f"falling back to string coercion for {args.save_trials}",
-                file=sys.stderr,
-            )
-            with open(args.save_trials, "w") as f:
-                json.dump(trial_data, f, indent=2, default=str)
+        with open(args.save_trials, "w") as f:
+            json.dump(trial_data, f, indent=2)
 
     # CI summary to stdout
     print(gen.render_ci_summary(report))

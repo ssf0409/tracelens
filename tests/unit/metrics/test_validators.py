@@ -114,6 +114,13 @@ class TestJsonSchemaGrader:
         assert _run(grader.grade(valid, _make_task())).passed is True
         assert _run(grader.grade(invalid, _make_task())).passed is False
 
+    def test_invalid_schema_raises_at_construction(self) -> None:
+        with pytest.raises(ValueError, match="invalid schema"):
+            JsonSchemaGrader(
+                "bad-schema",
+                schema={"type": "not_a_real_type"},
+            )
+
 
 # ===========================================================================
 # StructuredOutputGrader
