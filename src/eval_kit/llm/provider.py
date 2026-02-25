@@ -24,6 +24,8 @@ class InMemoryProvider(LLMProvider):
     """
 
     def __init__(self, responses: list[str]) -> None:
+        if not responses:
+            raise ValueError("InMemoryProvider requires at least one response")
         self.responses = responses
         self.prompts: list[str] = []
         self._index = 0
@@ -33,25 +35,3 @@ class InMemoryProvider(LLMProvider):
         response = self.responses[self._index % len(self.responses)]
         self._index += 1
         return response
-
-
-class LiteLLMProvider(LLMProvider):
-    """Provider backed by LiteLLM (supports 100+ model providers).
-
-    Requires ``litellm`` in the ``[llm]`` optional dependency group.
-    """
-
-    def __init__(self, model: str, **default_kwargs: Any) -> None:
-        self.model = model
-        self.default_kwargs = default_kwargs
-
-    async def complete(self, prompt: str, **kwargs: Any) -> str:
-        import litellm
-
-        merged = {**self.default_kwargs, **kwargs}
-        response = await litellm.acompletion(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            **merged,
-        )
-        return response.choices[0].message.content

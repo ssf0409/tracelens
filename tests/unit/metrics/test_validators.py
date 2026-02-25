@@ -7,7 +7,6 @@ RegexMatchGrader, and ConstraintGrader.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
 
 import pytest
 
@@ -105,26 +104,6 @@ class TestJsonSchemaGrader:
         assert outcome.passed is False
         assert outcome.metrics["schema_valid"] == 0.0
 
-    def test_basic_fallback_when_jsonschema_unavailable(self) -> None:
-        """When jsonschema is not importable, basic type checking is used."""
-        grader = JsonSchemaGrader("json-schema", schema=self.SIMPLE_SCHEMA)
-        transcript = _make_transcript({"name": "Alice", "age": 30})
-
-        with patch.dict("sys.modules", {"jsonschema": None}):
-            metrics = grader.compute_metrics(transcript, _make_task())
-
-        assert metrics["schema_valid"] == 1.0
-
-    def test_basic_fallback_wrong_top_level_type(self) -> None:
-        """Basic fallback correctly fails for wrong top-level type."""
-        grader = JsonSchemaGrader("json-schema", schema=self.SIMPLE_SCHEMA)
-        transcript = _make_transcript("just a string")
-
-        with patch.dict("sys.modules", {"jsonschema": None}):
-            metrics = grader.compute_metrics(transcript, _make_task())
-
-        assert metrics["schema_valid"] == 0.0
-
     def test_array_schema(self) -> None:
         schema = {"type": "array", "items": {"type": "integer"}}
         grader = JsonSchemaGrader("json-schema", schema=schema)
@@ -179,15 +158,13 @@ class TestStructuredOutputGrader:
         assert outcome.passed is False
         assert outcome.metrics["parse_valid"] == 0.0
 
-    def test_bad_model_path_fails(self) -> None:
+    def test_bad_model_path_raises_runtime_error(self) -> None:
         grader = StructuredOutputGrader(
             "structured", model_path="nonexistent.module.Model",
         )
         transcript = _make_transcript({"foo": "bar"})
-        outcome = _run(grader.grade(transcript, _make_task()))
-
-        assert outcome.passed is False
-        assert outcome.metrics["parse_valid"] == 0.0
+        with pytest.raises(RuntimeError, match="cannot load model"):
+            _run(grader.grade(transcript, _make_task()))
 
 
 # ===========================================================================
@@ -315,6 +292,10 @@ class TestRegexMatchGrader:
         outcome = _run(grader.grade(transcript, _make_task()))
 
         assert outcome.passed is True
+
+    def test_invalid_pattern_raises(self) -> None:
+        with pytest.raises(ValueError, match="pattern\\[0\\] is invalid"):
+            RegexMatchGrader("regex", patterns=[r"[invalid"])
 
 
 # ===========================================================================
@@ -512,13 +493,9 @@ class TestConstraintGrader:
         assert outcome.passed is True
         assert outcome.score == 1.0
 
-    def test_unknown_constraint_type_treated_as_violation(self) -> None:
-        grader = ConstraintGrader(
-            "constraint",
-            constraints=[{"type": "unknown_type", "value": "x"}],
-        )
-        transcript = _make_transcript("anything")
-        outcome = _run(grader.grade(transcript, _make_task()))
-
-        assert outcome.passed is False
-        assert outcome.metrics["violations"] == 1.0
+    def test_unknown_constraint_type_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="unknown type 'unknown_type'"):
+            ConstraintGrader(
+                "constraint",
+                constraints=[{"type": "unknown_type", "value": "x"}],
+            )

@@ -9,51 +9,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import jsonschema
+from pydantic import ValidationError as PydanticValidationError
+
 from eval_kit.core.grader import CodeGrader, EvalPolicy, GraderConfig
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.execution.registry import load_class
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
-    "object": dict,
-    "array": list,
-    "string": str,
-    "integer": int,
-    "number": (int, float),
-    "boolean": bool,
-    "null": type(None),
-}
-
-
-def _basic_type_check(data: Any, schema: dict[str, Any]) -> list[str]:
-    """Minimal JSON Schema type checking when ``jsonschema`` is unavailable.
-
-    Only validates the top-level ``type`` and ``required`` keywords.
-    Returns a list of error messages (empty means valid).
-    """
-    errors: list[str] = []
-
-    expected_type = schema.get("type")
-    if expected_type and expected_type in _JSON_TYPE_MAP:
-        allowed = _JSON_TYPE_MAP[expected_type]
-        if not isinstance(data, allowed):
-            errors.append(
-                f"Expected top-level type '{expected_type}', "
-                f"got {type(data).__name__}"
-            )
-            return errors
-
-    if expected_type == "object" and isinstance(data, dict):
-        for key in schema.get("required", []):
-            if key not in data:
-                errors.append(f"Missing required field: '{key}'")
-
-    return errors
-
+_VALID_CONSTRAINT_TYPES = {"must_include", "must_not_include", "numeric_range", "enum"}
 
 # ===========================================================================
 # JsonSchemaGrader
@@ -63,8 +27,7 @@ def _basic_type_check(data: Any, schema: dict[str, Any]) -> list[str]:
 class JsonSchemaGrader(CodeGrader):
     """Validate ``transcript.final_output`` against a JSON Schema.
 
-    Uses the ``jsonschema`` library when available; otherwise falls back to
-    basic top-level type and required-field checking.
+    Uses the ``jsonschema`` library for full schema validation.
 
     Default policy: GATE (schema violations block CI).
     """
@@ -90,15 +53,9 @@ class JsonSchemaGrader(CodeGrader):
         errors: list[str] = []
 
         try:
-            import jsonschema as _js  # noqa: N813
-
-            if _js is None:
-                raise ImportError
-            _js.validate(instance=data, schema=self.schema)
-        except ImportError:
-            errors = _basic_type_check(data, self.schema)
-        except Exception as exc:  # noqa: BLE001
-            errors = [str(exc)]
+            jsonschema.validate(instance=data, schema=self.schema)
+        except jsonschema.ValidationError as exc:
+            errors = [exc.message]
 
         return {
             "schema_valid": 1.0 if not errors else 0.0,
@@ -150,8 +107,12 @@ class StructuredOutputGrader(CodeGrader):
 
         try:
             model_cls = load_class(self.model_path)
-        except (ImportError, AttributeError):
-            return {"parse_valid": 0.0, "validation_errors": 1.0}
+        except (ImportError, AttributeError) as exc:
+            raise RuntimeError(
+                f"StructuredOutputGrader '{self.grader_id}' cannot load model "
+                f"'{self.model_path}': {exc}. Verify the dotted path is correct "
+                f"and the module is importable."
+            ) from exc
 
         if not isinstance(data, dict):
             return {"parse_valid": 0.0, "validation_errors": 1.0}
@@ -159,15 +120,8 @@ class StructuredOutputGrader(CodeGrader):
         try:
             model_cls.model_validate(data)
             return {"parse_valid": 1.0, "validation_errors": 0.0}
-        except Exception as exc:  # noqa: BLE001
-            error_count = 1.0
-            if hasattr(exc, "error_count"):
-                error_count = float(exc.error_count())
-            elif hasattr(exc, "errors"):
-                err_list = exc.errors()
-                if isinstance(err_list, list):
-                    error_count = float(len(err_list))
-            return {"parse_valid": 0.0, "validation_errors": error_count}
+        except PydanticValidationError as exc:
+            return {"parse_valid": 0.0, "validation_errors": float(exc.error_count())}
 
     def determine_pass(
         self,
@@ -257,6 +211,14 @@ class RegexMatchGrader(CodeGrader):
         if config is None:
             config = GraderConfig(policy=EvalPolicy.TRACK)
         super().__init__(grader_id, config=config)
+        for i, p in enumerate(patterns):
+            try:
+                re.compile(p)
+            except re.error as exc:
+                raise ValueError(
+                    f"RegexMatchGrader '{grader_id}': pattern[{i}] is invalid: "
+                    f"'{p}' -- {exc}"
+                ) from exc
         self.patterns = patterns
 
     def compute_metrics(
@@ -306,6 +268,14 @@ class ConstraintGrader(CodeGrader):
         if config is None:
             config = GraderConfig(policy=EvalPolicy.GATE)
         super().__init__(grader_id, config=config)
+        for i, c in enumerate(constraints):
+            ctype = c.get("type")
+            if ctype not in _VALID_CONSTRAINT_TYPES:
+                raise ValueError(
+                    f"ConstraintGrader '{grader_id}': constraint[{i}] has "
+                    f"unknown type '{ctype}'. "
+                    f"Valid types: {sorted(_VALID_CONSTRAINT_TYPES)}"
+                )
         self.constraints = constraints
 
     def compute_metrics(

@@ -4,11 +4,12 @@ An Outcome represents the result of grading a Trial - whether it passed,
 the score achieved, and detailed metrics.
 """
 
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any
-import uuid
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 
@@ -142,8 +143,6 @@ class AggregatedOutcome(BaseModel):
         """Compute aggregated statistics from a list of outcomes."""
         if not outcomes:
             return cls()
-
-        import numpy as np
 
         scores = [o.score for o in outcomes]
         passed_count = sum(1 for o in outcomes if o.passed)

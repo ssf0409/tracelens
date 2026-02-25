@@ -25,6 +25,10 @@ class LatencyGrader(CodeGrader):
         max_ms: float,
         config: GraderConfig | None = None,
     ) -> None:
+        if max_ms <= 0:
+            raise ValueError(
+                f"LatencyGrader '{grader_id}': max_ms must be positive, got {max_ms}"
+            )
         if config is None:
             config = GraderConfig(policy=EvalPolicy.WARN)
         super().__init__(grader_id, config)
@@ -66,6 +70,10 @@ class TokenBudgetGrader(CodeGrader):
         max_tokens: int,
         config: GraderConfig | None = None,
     ) -> None:
+        if max_tokens <= 0:
+            raise ValueError(
+                f"TokenBudgetGrader '{grader_id}': max_tokens must be positive, got {max_tokens}"
+            )
         if config is None:
             config = GraderConfig(policy=EvalPolicy.WARN)
         super().__init__(grader_id, config)

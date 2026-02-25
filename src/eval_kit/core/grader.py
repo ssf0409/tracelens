@@ -8,6 +8,8 @@ Graders evaluate Transcripts and produce Outcomes. There are three main types:
 
 from __future__ import annotations
 
+import logging
+import traceback
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -21,6 +23,8 @@ from eval_kit.core.transcript import Transcript
 
 if TYPE_CHECKING:
     from eval_kit.llm.provider import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 class GraderType(str, Enum):
@@ -346,7 +350,14 @@ class LLMGrader(Grader):
 
         response = await self._call_llm(prompt)
 
-        passed, score, metrics, feedback = self.parse_llm_response(response, task)
+        try:
+            passed, score, metrics, feedback = self.parse_llm_response(response, task)
+        except Exception as exc:
+            preview = response[:200]
+            raise RuntimeError(
+                f"parse_llm_response failed for grader '{self.grader_id}': {exc}. "
+                f"LLM response preview: {preview!r}"
+            ) from exc
 
         return self.create_outcome(
             trial_id=transcript.task_id,
@@ -444,7 +455,22 @@ class CompositeGrader(Grader):
         warn_results: list[tuple[Grader, Outcome]] = []
 
         for grader, weight in self.graders:
-            outcome = await grader.grade(transcript, task)
+            try:
+                outcome = await grader.grade(transcript, task)
+            except Exception as exc:
+                logger.error(
+                    "Sub-grader '%s' crashed: %s\n%s",
+                    grader.grader_id,
+                    exc,
+                    traceback.format_exc(),
+                )
+                outcome = self.create_outcome(
+                    trial_id=transcript.task_id,
+                    passed=False,
+                    score=0.0,
+                    feedback=f"Sub-grader '{grader.grader_id}' crashed: {exc}",
+                    metrics={"_grader_error": 1.0},
+                )
 
             # Prefix metrics with grader ID
             for metric, value in outcome.metrics.items():
@@ -486,7 +512,7 @@ class CompositeGrader(Grader):
         if failed_warn:
             all_metrics["_failed_warn"] = len(failed_warn)
             feedbacks.insert(
-                len(failed_blocking),  # After blocking failures
+                1 if failed_blocking else 0,  # After the single blocking-failure line
                 f"WARNING: {', '.join(failed_warn)}",
             )
 

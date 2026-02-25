@@ -14,6 +14,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from eval_kit.core.grader import EvalPolicy, Grader
+from eval_kit.metrics.budgets import LatencyGrader, TokenBudgetGrader, ToolCallGrader
+from eval_kit.metrics.validators import ConstraintGrader, ContainsGrader, JsonSchemaGrader
 
 
 class BehaviorContract(BaseModel):
@@ -50,12 +52,9 @@ class BehaviorContract(BaseModel):
         - tools_*        -> ToolCallGrader    (GATE)
         - max_latency_ms -> LatencyGrader     (WARN)
         - max_tokens     -> TokenBudgetGrader (WARN)
-        - must_include/must_not_include -> ContainsGrader (GATE)
+        - must_include/must_not_include -> ContainsGrader (TRACK)
         - custom_constraints -> ConstraintGrader (GATE)
         """
-        from eval_kit.metrics.budgets import LatencyGrader, TokenBudgetGrader, ToolCallGrader
-        from eval_kit.metrics.validators import ConstraintGrader, ContainsGrader, JsonSchemaGrader
-
         result: list[tuple[Grader, EvalPolicy]] = []
         prefix = self.contract_id
 

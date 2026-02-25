@@ -73,6 +73,14 @@ class TestLatencyGrader:
         grader = LatencyGrader("latency", max_ms=1000.0, config=cfg)
         assert grader.policy == EvalPolicy.GATE
 
+    def test_zero_max_ms_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_ms must be positive"):
+            LatencyGrader("latency", max_ms=0.0)
+
+    def test_negative_max_ms_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_ms must be positive"):
+            LatencyGrader("latency", max_ms=-100.0)
+
     def test_pass_under_budget(self, task: Task) -> None:
         grader = LatencyGrader("latency", max_ms=1000.0)
         transcript = _make_transcript(duration_ms=500.0)
@@ -135,6 +143,14 @@ class TestTokenBudgetGrader:
     def test_default_policy_is_warn(self) -> None:
         grader = TokenBudgetGrader("tokens", max_tokens=1000)
         assert grader.policy == EvalPolicy.WARN
+
+    def test_zero_max_tokens_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_tokens must be positive"):
+            TokenBudgetGrader("tokens", max_tokens=0)
+
+    def test_negative_max_tokens_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_tokens must be positive"):
+            TokenBudgetGrader("tokens", max_tokens=-10)
 
     def test_pass_under_budget(self, task: Task) -> None:
         grader = TokenBudgetGrader("tokens", max_tokens=1000)

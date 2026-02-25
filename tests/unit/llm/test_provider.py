@@ -2,8 +2,8 @@
 
 import pytest
 
-from eval_kit.llm.provider import LLMProvider, InMemoryProvider
 from eval_kit.llm.factory import create_provider
+from eval_kit.llm.provider import InMemoryProvider, LLMProvider
 
 
 class TestLLMProviderABC:
@@ -16,6 +16,10 @@ class TestLLMProviderABC:
 
 class TestInMemoryProvider:
     """Tests for InMemoryProvider (testing helper)."""
+
+    def test_empty_responses_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one response"):
+            InMemoryProvider(responses=[])
 
     @pytest.mark.asyncio
     async def test_returns_canned_response(self) -> None:
@@ -47,7 +51,7 @@ class TestFactory:
 
     def test_unknown_provider_creates_litellm_if_available(self) -> None:
         """When litellm is installed, any model string creates a LiteLLMProvider."""
-        from eval_kit.llm.provider import LiteLLMProvider
+        from eval_kit.llm.litellm_provider import LiteLLMProvider
         provider = create_provider("nonexistent/model")
         assert isinstance(provider, LiteLLMProvider)
         assert provider.model == "nonexistent/model"

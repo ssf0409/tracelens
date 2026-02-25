@@ -9,15 +9,18 @@ The EvaluationRunner orchestrates:
 """
 
 import asyncio
-from dataclasses import dataclass, field
+import logging
+import traceback
+from dataclasses import dataclass
 from datetime import datetime
 
 from eval_kit.core.grader import Grader
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import EvalSet, Task
-from eval_kit.core.transcript import Transcript
 from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 from eval_kit.execution.agent_adapter import AgentAdapter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -98,7 +101,7 @@ class EvaluationRunner:
                 )
                 trial.transcript = transcript
                 trial.status = TrialStatus.COMPLETED
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 trial.status = TrialStatus.TIMEOUT
                 trial.error_message = (
                     f"Trial timed out after {self.config.timeout_seconds}s"
@@ -106,6 +109,13 @@ class EvaluationRunner:
             except Exception as exc:
                 trial.status = TrialStatus.FAILED
                 trial.error_message = str(exc)
+                trial.error_traceback = traceback.format_exc()
+                logger.error(
+                    "Agent execution failed for task %s run %d: %s",
+                    task.task_id,
+                    run_index,
+                    exc,
+                )
 
         trial.completed_at = datetime.utcnow()
 
@@ -123,11 +133,18 @@ class EvaluationRunner:
                 outcome = await grader.grade(trial.transcript, task)
                 trial.add_outcome(outcome)
             except Exception as exc:
-                # Grader failure → failed outcome
+                # Grader failure → failed outcome (not an agent failure)
+                logger.error(
+                    "Grader %s crashed on trial %s: %s",
+                    grader.grader_id,
+                    trial.trial_id,
+                    exc,
+                )
                 trial.add_outcome(Outcome(
                     trial_id=trial.trial_id,
                     grader_id=grader.grader_id,
                     passed=False,
                     score=0.0,
-                    feedback=f"Grader error: {exc}",
+                    metrics={"_grader_error": 1.0},
+                    feedback=f"GRADER CRASH (not an agent failure): {exc}",
                 ))

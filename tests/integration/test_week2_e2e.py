@@ -24,12 +24,17 @@ from eval_kit.core.trial import TrialBatch, TrialStatus
 from eval_kit.execution.agent_adapter import SimpleAdapter
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 from eval_kit.metrics.budgets import (
+    LatencyGrader,
+    TokenBudgetGrader,
     ToolCallGrader,
+    TraceConsistencyGrader,
 )
 from eval_kit.metrics.validators import (
     ConstraintGrader,
     ContainsGrader,
     JsonSchemaGrader,
+    RegexMatchGrader,
+    StructuredOutputGrader,
 )
 from eval_kit.reporting.generator import ReportGenerator
 
@@ -436,3 +441,323 @@ class TestWeek2ContractE2E:
                 assert p_orig == p_rest
         finally:
             path.unlink()
+
+
+# ── E2E gap coverage tests ────────────────────────────────────
+
+
+class TestGraderCoverageE2E:
+    """E2E tests for graders that previously had zero pipeline coverage."""
+
+    @pytest.fixture
+    def eval_set(self) -> EvalSet:
+        return EvalSet(
+            name="grader-coverage-test",
+            tasks=[
+                Task(task_id=f"t-{i}", name=f"Task {i}", input_data={"query": f"q{i}"})
+                for i in range(3)
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_latency_grader_in_pipeline(self, eval_set: EvalSet) -> None:
+        """LatencyGrader runs through EvaluationRunner and grades duration."""
+        adapter = SimpleAdapter(structured_agent)
+        graders = [LatencyGrader("latency_check", max_ms=10000.0)]
+
+        runner = EvaluationRunner(adapter, graders, RunnerConfig(num_runs=1))
+        batch = await runner.run(eval_set)
+
+        assert batch.total_count == 3
+        assert batch.all_complete
+        for trial in batch.trials:
+            assert len(trial.outcomes) == 1
+            outcome = trial.outcomes[0]
+            assert outcome.grader_id == "latency_check"
+            assert outcome.passed is True
+            assert outcome.metrics["duration_ms"] >= 0
+            assert outcome.metrics["budget_ratio"] < 1.0
+
+    @pytest.mark.asyncio
+    async def test_token_budget_grader_in_pipeline(self, eval_set: EvalSet) -> None:
+        """TokenBudgetGrader runs through EvaluationRunner and grades token usage."""
+
+        async def token_heavy_agent(input_data: dict) -> dict:
+            return {"result": "done"}
+
+        adapter = SimpleAdapter(token_heavy_agent)
+        graders = [TokenBudgetGrader("token_check", max_tokens=50000)]
+
+        runner = EvaluationRunner(adapter, graders, RunnerConfig(num_runs=1))
+        batch = await runner.run(eval_set)
+
+        assert batch.total_count == 3
+        assert batch.all_complete
+        for trial in batch.trials:
+            assert len(trial.outcomes) == 1
+            outcome = trial.outcomes[0]
+            assert outcome.grader_id == "token_check"
+            assert outcome.passed is True
+            assert outcome.metrics["total_tokens"] >= 0
+            assert outcome.metrics["budget_ratio"] <= 1.0
+
+    @pytest.mark.asyncio
+    async def test_regex_match_grader_standalone(self) -> None:
+        """RegexMatchGrader validates output against regex patterns."""
+        task = Task(task_id="t1", name="Test", input_data={})
+        transcript = Transcript(
+            task_id="t1",
+            final_output="Order #12345 confirmed on 2025-01-15",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+
+        # All patterns match
+        grader = RegexMatchGrader(
+            "regex_check",
+            patterns=[r"Order #\d+", r"\d{4}-\d{2}-\d{2}"],
+        )
+        outcome = await grader.grade(transcript, task)
+        assert outcome.passed is True
+        assert outcome.metrics["patterns_matched"] == 1.0
+
+        # One pattern fails
+        grader_partial = RegexMatchGrader(
+            "regex_partial",
+            patterns=[r"Order #\d+", r"MISSING_PATTERN"],
+        )
+        outcome_partial = await grader_partial.grade(transcript, task)
+        assert outcome_partial.passed is False
+        assert outcome_partial.metrics["patterns_matched"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_trace_consistency_grader_standalone(self) -> None:
+        """TraceConsistencyGrader checks tool usage patterns and error rates."""
+        task = Task(task_id="t1", name="Test", input_data={})
+
+        transcript = Transcript(
+            task_id="t1",
+            final_output="analysis complete",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        # Add a successful tool call
+        transcript.add_step(TranscriptStep(
+            step_type=StepType.TOOL_CALL,
+            content="search",
+            tool_call=ToolCall(
+                tool_name="search",
+                arguments={"q": "test"},
+                result="found",
+            ),
+        ))
+        # Add an agent output step after tool call
+        transcript.add_step(TranscriptStep(
+            step_type=StepType.AGENT_OUTPUT,
+            content="Based on search results...",
+        ))
+        # Add a tool call with an error
+        transcript.add_step(TranscriptStep(
+            step_type=StepType.TOOL_CALL,
+            content="bad call",
+            tool_call=ToolCall(
+                tool_name="search",
+                arguments={"q": "broken"},
+                error="timeout",
+            ),
+        ))
+
+        grader = TraceConsistencyGrader(
+            "trace_check",
+            expected_tools=["search"],
+        )
+        outcome = await grader.grade(transcript, task)
+        # 1 out of 2 tool calls errored -> error_rate = 0.5
+        # error_rate < 0.5 is required to pass, so 0.5 fails
+        assert outcome.passed is False
+        assert outcome.metrics["tool_error_rate"] == 0.5
+        assert outcome.metrics["phantom_calls"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_structured_output_grader_standalone(self) -> None:
+        """StructuredOutputGrader validates output against a Pydantic model."""
+        task = Task(task_id="t1", name="Test", input_data={})
+
+        # Valid output matching ToolCall schema
+        transcript_valid = Transcript(
+            task_id="t1",
+            final_output={"tool_name": "search", "arguments": {"q": "test"}},
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        grader = StructuredOutputGrader(
+            "struct_check",
+            model_path="eval_kit.core.transcript.ToolCall",
+        )
+        outcome = await grader.grade(transcript_valid, task)
+        assert outcome.passed is True
+        assert outcome.metrics["parse_valid"] == 1.0
+
+        # Invalid output: missing required field
+        transcript_invalid = Transcript(
+            task_id="t1",
+            final_output={"tool_name": "search"},  # missing 'arguments'
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        outcome_invalid = await grader.grade(transcript_invalid, task)
+        assert outcome_invalid.passed is False
+        assert outcome_invalid.metrics["validation_errors"] >= 1.0
+
+
+class TestErrorPathsE2E:
+    """E2E tests for error paths and edge cases not previously covered."""
+
+    @pytest.mark.asyncio
+    async def test_json_schema_grader_invalid_output(self) -> None:
+        """JsonSchemaGrader fails on output that violates the schema."""
+        task = Task(task_id="t1", name="Test", input_data={})
+
+        schema = {
+            "type": "object",
+            "required": ["result", "score"],
+            "properties": {
+                "result": {"type": "string"},
+                "score": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+        }
+        grader = JsonSchemaGrader("schema_strict", schema=schema)
+
+        # Missing required fields
+        transcript = Transcript(
+            task_id="t1",
+            final_output={"answer": "hello"},
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        outcome = await grader.grade(transcript, task)
+        assert outcome.passed is False
+        assert outcome.metrics["schema_valid"] == 0.0
+        assert outcome.metrics["error_count"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_bad_agent_through_contract_runner(self) -> None:
+        """Bad agent output detected as failures through full runner pipeline."""
+        eval_set = EvalSet(
+            name="bad-agent-test",
+            tasks=[Task(task_id="t1", name="Bad test", input_data={"query": "test"})],
+        )
+
+        contract = BehaviorContract(
+            contract_id="strict-contract",
+            version="1.0",
+            output_schema={"type": "object", "required": ["result"]},
+            must_include=["disclaimer"],
+            must_not_include=["secret_key"],
+            custom_constraints=[
+                {"type": "numeric_range", "field": "confidence", "min": 0.0, "max": 1.0},
+                {"type": "enum", "field": "status", "values": ["success", "partial", "failed"]},
+            ],
+        )
+
+        grader_pairs = contract.to_graders()
+        graders = [g for g, _ in grader_pairs]
+
+        adapter = SimpleAdapter(bad_agent)
+        runner = EvaluationRunner(adapter, graders, RunnerConfig(num_runs=1))
+        batch = await runner.run(eval_set)
+
+        assert batch.total_count == 1
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.COMPLETED
+
+        # Check individual grader outcomes
+        outcomes_by_grader = {o.grader_id: o for o in trial.outcomes}
+
+        # Schema should fail: missing "result" key
+        assert outcomes_by_grader["strict-contract.json_schema"].passed is False
+
+        # Contains should fail: has "secret_key", missing "disclaimer"
+        assert outcomes_by_grader["strict-contract.contains"].passed is False
+
+        # Constraint should fail: confidence > 1.0, status not in enum
+        assert outcomes_by_grader["strict-contract.constraint"].passed is False
+
+    @pytest.mark.asyncio
+    async def test_multiple_graders_mixed_pass_fail(self) -> None:
+        """Some graders pass and others fail for the same trial."""
+        eval_set = EvalSet(
+            name="mixed-test",
+            tasks=[Task(task_id="t1", name="Mixed", input_data={"query": "test"})],
+        )
+
+        adapter = SimpleAdapter(structured_agent)
+
+        # Schema grader should pass (structured_agent returns 'result')
+        schema_grader = JsonSchemaGrader(
+            "schema_pass",
+            schema={"type": "object", "required": ["result"]},
+        )
+        # Regex grader should fail (structured_agent doesn't return "XYZZY_NEVER")
+        regex_grader = RegexMatchGrader(
+            "regex_fail",
+            patterns=[r"XYZZY_NEVER_MATCHES"],
+        )
+        # Contains grader should pass (structured_agent includes "disclaimer")
+        contains_grader = ContainsGrader(
+            "contains_pass",
+            required=["disclaimer"],
+        )
+
+        runner = EvaluationRunner(
+            adapter, [schema_grader, regex_grader, contains_grader],
+            RunnerConfig(num_runs=1),
+        )
+        batch = await runner.run(eval_set)
+
+        trial = batch.trials[0]
+        assert len(trial.outcomes) == 3
+
+        outcomes_by_grader = {o.grader_id: o for o in trial.outcomes}
+        assert outcomes_by_grader["schema_pass"].passed is True
+        assert outcomes_by_grader["regex_fail"].passed is False
+        assert outcomes_by_grader["contains_pass"].passed is True
+
+    @pytest.mark.asyncio
+    async def test_tool_call_grader_forbidden_tools(self) -> None:
+        """ToolCallGrader detects forbidden tool usage."""
+        task = Task(task_id="t1", name="Test", input_data={})
+
+        transcript = Transcript(
+            task_id="t1",
+            final_output={"result": "done"},
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        transcript.add_step(TranscriptStep(
+            step_type=StepType.TOOL_CALL,
+            content="safe call",
+            tool_call=ToolCall(
+                tool_name="search",
+                arguments={"q": "test"},
+                result="ok",
+            ),
+        ))
+        transcript.add_step(TranscriptStep(
+            step_type=StepType.TOOL_CALL,
+            content="dangerous call",
+            tool_call=ToolCall(
+                tool_name="delete_database",
+                arguments={"target": "production"},
+                result="deleted",
+            ),
+        ))
+
+        grader = ToolCallGrader(
+            "forbidden_check",
+            forbidden_tools=["delete_database", "drop_table"],
+        )
+
+        outcome = await grader.grade(transcript, task)
+        assert outcome.passed is False
+        assert outcome.metrics["forbidden_calls"] == 1.0
