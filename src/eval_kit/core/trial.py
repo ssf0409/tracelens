@@ -227,6 +227,15 @@ class TrialBatch(BaseModel):
         """Get all trials for a specific task."""
         return [t for t in self.trials if t.task_id == task_id]
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict with full round-trip fidelity."""
+        return self.model_dump(mode="json")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TrialBatch":
+        """Reconstruct a TrialBatch from a dict produced by to_dict()."""
+        return cls.model_validate(data)
+
     def get_pass_results_by_task(self) -> dict[str, list[bool]]:
         """Get pass/fail results grouped by task.
 
