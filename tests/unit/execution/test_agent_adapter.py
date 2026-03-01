@@ -1,9 +1,11 @@
 """Tests for agent adapter module."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from eval_kit.core.task import Task
-from eval_kit.core.transcript import StepType
+from eval_kit.core.transcript import StepType, Transcript
 from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
 
 
@@ -88,17 +90,16 @@ class _LifecycleTrackingAdapter(AgentAdapter):
         if self.setup_error:
             raise self.setup_error
 
-    async def run(self, task: Task):
+    async def run(self, task: Task) -> Transcript:
         self.calls.append("run")
         if self.run_error:
             raise self.run_error
         transcript = self.start_transcript(task)
         transcript.final_output = "ok"
-        from datetime import datetime
-        transcript.completed_at = datetime.utcnow()
+        transcript.completed_at = datetime.now(UTC)
         return transcript
 
-    async def teardown(self, task: Task, transcript=None) -> None:
+    async def teardown(self, task: Task, transcript: Transcript | None = None) -> None:
         self.calls.append("teardown")
         if self.teardown_error:
             raise self.teardown_error

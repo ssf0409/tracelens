@@ -4,7 +4,7 @@ Iterates workflow steps in order, resolves inter-step templates,
 creates synthetic Tasks per step, and optionally grades each step.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from eval_kit.core.grader import Grader
 from eval_kit.core.task import Task
@@ -41,7 +41,7 @@ class WorkflowRunner:
         """Execute all workflow steps and return an aggregated transcript."""
         parent_transcript = Transcript(
             task_id=workflow_task.task_id,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         context = WorkflowContext()
 
@@ -125,7 +125,7 @@ class WorkflowRunner:
         if completed:
             parent_transcript.final_output = completed[-1].output
 
-        parent_transcript.completed_at = datetime.utcnow()
+        parent_transcript.completed_at = datetime.now(UTC)
         parent_transcript.metadata["workflow_steps"] = len(workflow_task.steps)
         parent_transcript.metadata["steps_completed"] = len(completed)
         parent_transcript.metadata["step_results"] = [

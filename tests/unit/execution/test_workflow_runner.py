@@ -1,16 +1,13 @@
 """Tests for WorkflowRunner and WorkflowAdapter."""
 
-from datetime import datetime
-from typing import Any
-
-import pytest
+from datetime import UTC, datetime
 
 from eval_kit.core.grader import CodeGrader
-from eval_kit.core.task import Task, EvalSet
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType
+from eval_kit.core.task import EvalSet, Task
+from eval_kit.core.transcript import StepType, Transcript, TranscriptStep
 from eval_kit.core.workflow import WorkflowStep, WorkflowTask
 from eval_kit.execution.agent_adapter import AgentAdapter
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
+from eval_kit.execution.runner import EvaluationRunner
 from eval_kit.execution.workflow_runner import WorkflowAdapter, WorkflowRunner
 
 
@@ -24,7 +21,7 @@ class _DictEchoAdapter(AgentAdapter):
             step_type=StepType.AGENT_OUTPUT,
             content=task.input_data,
         ))
-        transcript.completed_at = datetime.utcnow()
+        transcript.completed_at = datetime.now(UTC)
         return transcript
 
 
@@ -43,7 +40,7 @@ class _FailOnStepAdapter(AgentAdapter):
             step_type=StepType.AGENT_OUTPUT,
             content=task.input_data,
         ))
-        transcript.completed_at = datetime.utcnow()
+        transcript.completed_at = datetime.now(UTC)
         return transcript
 
 
@@ -95,8 +92,14 @@ class TestWorkflowRunner:
             input_data={},
             steps=[
                 WorkflowStep(step_id="s1", name="S1", input_data={"id": "abc"}),
-                WorkflowStep(step_id="s2", name="S2", input_data={"ref_id": "{steps.0.id}", "val": "42"}),
-                WorkflowStep(step_id="s3", name="S3", input_data={"combined": "{steps.0.id}-{steps.1.val}"}),
+                WorkflowStep(
+                    step_id="s2", name="S2",
+                    input_data={"ref_id": "{steps.0.id}", "val": "42"},
+                ),
+                WorkflowStep(
+                    step_id="s3", name="S3",
+                    input_data={"combined": "{steps.0.id}-{steps.1.val}"},
+                ),
             ],
         )
 

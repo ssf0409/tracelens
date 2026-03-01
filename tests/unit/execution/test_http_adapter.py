@@ -1,9 +1,9 @@
 """Tests for HTTP API adapter module."""
 
-import pytest
+from unittest.mock import AsyncMock, patch
 
 import httpx
-from unittest.mock import AsyncMock, patch
+import pytest
 
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import StepType
@@ -190,14 +190,23 @@ class TestHTTPAPIAdapter:
 
         await adapter.close()
 
-    async def test_teardown_closes_client(self, config: HTTPAdapterConfig, task: Task):
-        """teardown() closes the underlying httpx client."""
+    async def test_close_closes_client(self, config: HTTPAdapterConfig, task: Task):
+        """close() shuts down the underlying httpx client."""
         adapter = HTTPAPIAdapter(config)
         _ = adapter._get_client()  # Force client creation
         assert adapter._client is not None
 
-        await adapter.teardown(task, None)
+        await adapter.close()
         assert adapter._client is None
+
+    async def test_teardown_preserves_client(self, config: HTTPAdapterConfig, task: Task):
+        """teardown() is a no-op to preserve connection pooling across trials."""
+        adapter = HTTPAPIAdapter(config)
+        _ = adapter._get_client()
+        assert adapter._client is not None
+
+        await adapter.teardown(task, None)
+        assert adapter._client is not None
 
     async def test_default_request_body(self, config: HTTPAdapterConfig, task: Task):
         """Default build_request_body returns task.input_data."""

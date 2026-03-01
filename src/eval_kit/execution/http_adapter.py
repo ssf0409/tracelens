@@ -7,8 +7,8 @@ Requires the `http` optional dependency: pip install eval-kit[http]
 """
 
 import asyncio
-from datetime import datetime
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ except ImportError as e:
     ) from e
 
 
-class AuthScheme(str, Enum):
+class AuthScheme(StrEnum):
     """Supported authentication schemes."""
     BEARER = "bearer"
     API_KEY = "api_key"
@@ -54,10 +54,10 @@ class AuthConfig(BaseModel):
 
 class RetryConfig(BaseModel):
     """Retry configuration with exponential backoff."""
-    max_retries: int = 3
-    base_delay: float = 1.0
-    max_delay: float = 30.0
-    backoff_factor: float = 2.0
+    max_retries: int = Field(default=3, ge=0)
+    base_delay: float = Field(default=1.0, gt=0)
+    max_delay: float = Field(default=30.0, gt=0)
+    backoff_factor: float = Field(default=2.0, ge=1.0)
     retry_on_status_codes: list[int] = Field(default_factory=lambda: [429, 500, 502, 503, 504])
 
 
@@ -203,7 +203,7 @@ class HTTPAPIAdapter(AgentAdapter):
             self.record_error(transcript, exc)
             raise
         finally:
-            transcript.completed_at = datetime.utcnow()
+            transcript.completed_at = datetime.now(UTC)
 
         return transcript
 
@@ -214,5 +214,4 @@ class HTTPAPIAdapter(AgentAdapter):
             self._client = None
 
     async def teardown(self, task: Task, transcript: Transcript | None) -> None:
-        """Close the HTTP client on teardown."""
-        await self.close()
+        """No-op per trial — call close() explicitly when done with all trials."""

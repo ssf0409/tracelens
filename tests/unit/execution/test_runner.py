@@ -1,12 +1,9 @@
 """Tests for evaluation runner module."""
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 
-import pytest
-
-from eval_kit.core.grader import CodeGrader, GraderConfig, GraderRole
-from eval_kit.core.outcome import Outcome
+from eval_kit.core.grader import CodeGrader
 from eval_kit.core.task import EvalSet, Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.core.trial import TrialStatus
@@ -223,7 +220,7 @@ class _LifecycleTracker(AgentAdapter):
             raise self.run_error
         transcript = self.start_transcript(task)
         transcript.final_output = "ok"
-        transcript.completed_at = datetime.utcnow()
+        transcript.completed_at = datetime.now(UTC)
         return transcript
 
     async def teardown(self, task: Task, transcript: Transcript | None) -> None:
@@ -299,8 +296,6 @@ class TestRunnerLifecycleHooks:
         adapter = _LifecycleTracker()
 
         # Override run to sleep
-        original_run = adapter.run
-
         async def slow_run(task: Task) -> Transcript:
             adapter.calls.append("run")
             await asyncio.sleep(10)

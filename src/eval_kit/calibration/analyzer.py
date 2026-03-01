@@ -4,7 +4,7 @@ Computes correlation metrics (Pearson, Spearman), agreement (Cohen's kappa),
 and bias detection to determine if an LLM grader is drifting from human judgment.
 """
 
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -84,6 +84,7 @@ class CalibrationResult(BaseModel):
             "grader_bias": self.grader_bias,
             "threshold": self.threshold,
             "is_calibrated": self.is_calibrated,
+            "pairs": [p.model_dump() for p in self.pairs],
         }
 
     def render_table(self) -> str:
@@ -232,8 +233,9 @@ class CalibrationAnalyzer:
         return (po - pe) / (1.0 - pe)
 
 
-# Type alias for duck-typing outcome-like objects
-class OutcomeLike:
-    """Protocol-like interface — any object with .score and .passed."""
+@runtime_checkable
+class OutcomeLike(Protocol):
+    """Protocol for objects with .score and .passed attributes."""
+
     score: float
     passed: bool

@@ -5,7 +5,7 @@ in the expected order during agent execution.
 """
 
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ from eval_kit.core.task import Task
 from eval_kit.core.transcript import StepType, Transcript, TranscriptStep
 
 
-class EventMatchType(str, Enum):
+class EventMatchType(StrEnum):
     """How to match a transcript step against an expectation."""
 
     TOOL_NAME = "tool_name"
@@ -25,7 +25,7 @@ class EventMatchType(str, Enum):
     RESULT_REGEX = "result_regex"
 
 
-class OrderingMode(str, Enum):
+class OrderingMode(StrEnum):
     """How to enforce ordering of matched events."""
 
     STRICT = "strict"        # All events must appear in exact order
@@ -89,7 +89,12 @@ class EventChainVerifier(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
-        """Scan transcript and match against expected events."""
+        """Scan transcript and match against expected events.
+
+        Uses greedy first-match: each step is matched against the first
+        unmatched expectation it satisfies. Order expectations carefully
+        when multiple expectations could match the same step.
+        """
         expected = self.chain_config.expected_events
         found_ids: list[str] = []
         found_positions: dict[str, int] = {}
@@ -155,7 +160,7 @@ class EventChainVerifier(CodeGrader):
                 if expectation.content_pattern is None:
                     return False
                 content_str = str(step.content) if step.content is not None else ""
-                return bool(re.search(expectation.content_pattern, content_str))
+                return self._safe_search(expectation.content_pattern, content_str)
             case EventMatchType.STEP_TYPE:
                 return step.step_type == expectation.step_type
             case EventMatchType.RESULT_REGEX:
@@ -164,7 +169,17 @@ class EventChainVerifier(CodeGrader):
                 if step.tool_call is None or step.tool_call.result is None:
                     return False
                 result_str = str(step.tool_call.result)
-                return bool(re.search(expectation.content_pattern, result_str))
+                return self._safe_search(expectation.content_pattern, result_str)
+            case _:
+                return False
+
+    @staticmethod
+    def _safe_search(pattern: str, text: str) -> bool:
+        """Run regex search with error handling for invalid patterns."""
+        try:
+            return bool(re.search(pattern, text))
+        except re.error:
+            return False
 
     def _args_match(self, actual: dict[str, Any], patterns: dict[str, str]) -> bool:
         """Check if tool call arguments match patterns. Supports 're:' prefix for regex."""
@@ -173,7 +188,7 @@ class EventChainVerifier(CodeGrader):
                 return False
             actual_val = str(actual[key])
             if pattern.startswith("re:"):
-                if not re.search(pattern[3:], actual_val):
+                if not self._safe_search(pattern[3:], actual_val):
                     return False
             elif actual_val != pattern:
                 return False

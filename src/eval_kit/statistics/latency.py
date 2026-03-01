@@ -4,15 +4,15 @@ Computes first-token latency, throughput, and inter-token interval
 statistics from streaming events captured in Transcripts.
 """
 
-from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from eval_kit.core.transcript import StreamingEventType, Transcript
 
 
-@dataclass
-class LatencyMetrics:
+class LatencyMetrics(BaseModel):
     """Latency metrics for a single transcript's streaming data."""
 
     first_token_ms: float | None = None
@@ -24,21 +24,11 @@ class LatencyMetrics:
     inter_token_p99_ms: float | None = None
     total_tokens: int = 0
 
-    def to_dict(self) -> dict[str, float | int | None]:
-        return {
-            "first_token_ms": self.first_token_ms,
-            "time_to_complete_ms": self.time_to_complete_ms,
-            "tokens_per_second": self.tokens_per_second,
-            "inter_token_mean_ms": self.inter_token_mean_ms,
-            "inter_token_p50_ms": self.inter_token_p50_ms,
-            "inter_token_p95_ms": self.inter_token_p95_ms,
-            "inter_token_p99_ms": self.inter_token_p99_ms,
-            "total_tokens": self.total_tokens,
-        }
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
 
 
-@dataclass
-class AggregateLatencyMetrics:
+class AggregateLatencyMetrics(BaseModel):
     """Aggregated latency metrics across multiple transcripts."""
 
     count: int = 0
@@ -48,19 +38,10 @@ class AggregateLatencyMetrics:
     p50_first_token_ms: float | None = None
     p95_first_token_ms: float | None = None
     p99_first_token_ms: float | None = None
-    per_transcript: list[LatencyMetrics] = field(default_factory=list)
+    per_transcript: list[LatencyMetrics] = Field(default_factory=list)
 
-    def to_dict(self) -> dict[str, float | int | None | list[dict]]:
-        return {
-            "count": self.count,
-            "mean_first_token_ms": self.mean_first_token_ms,
-            "mean_time_to_complete_ms": self.mean_time_to_complete_ms,
-            "mean_tokens_per_second": self.mean_tokens_per_second,
-            "p50_first_token_ms": self.p50_first_token_ms,
-            "p95_first_token_ms": self.p95_first_token_ms,
-            "p99_first_token_ms": self.p99_first_token_ms,
-            "per_transcript": [m.to_dict() for m in self.per_transcript],
-        }
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
 
 
 class LatencyAnalyzer:
@@ -85,8 +66,15 @@ class LatencyAnalyzer:
 
         total_tokens = sum(e.token_count or 1 for e in token_events)
 
-        duration_seconds = time_to_complete_ms / 1000.0
-        tokens_per_second = total_tokens / duration_seconds if duration_seconds > 0 else None
+        # Compute TPS using generation window (first token to last event),
+        # excluding idle time before the first token arrived.
+        generation_ms = time_to_complete_ms - first_token_ms
+        generation_seconds = generation_ms / 1000.0
+        tokens_per_second = (
+            total_tokens / generation_seconds
+            if generation_seconds > 0
+            else None
+        )
 
         # Inter-token intervals
         inter_token_mean_ms: float | None = None

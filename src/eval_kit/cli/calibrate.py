@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
@@ -62,8 +63,6 @@ def add_calibrate_parser(subparsers: argparse._SubParsersAction) -> None:  # typ
 
 def cmd_calibrate(args: argparse.Namespace) -> int:
     """Execute the 'calibrate' subcommand."""
-    import asyncio
-
     # Load annotations
     with open(args.annotations) as f:
         annotations_data = json.load(f)

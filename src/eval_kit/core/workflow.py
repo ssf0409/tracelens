@@ -7,7 +7,7 @@ outputs from previous steps via template strings like {steps.0.goal_id}.
 from __future__ import annotations
 
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ from eval_kit.core.task import Task, TaskExpectation
 from eval_kit.core.transcript import Transcript
 
 
-class StepStatus(str, Enum):
+class StepStatus(StrEnum):
     """Status of a workflow step execution."""
 
     PENDING = "pending"
@@ -73,12 +73,6 @@ class WorkflowContext(BaseModel):
 
         Navigates dotted paths into step output (dict keys, list indices, object attributes).
         Raises ValueError on unresolvable references — fail-fast for clear debugging.
-
-        TODO: This is a meaningful design choice. Implement to match your preferences.
-        Options:
-          - Raise immediately (strict, fail-fast) ← current behavior
-          - Return placeholder like '<UNRESOLVED: steps.3.goal_id>' (lenient)
-          - Make configurable per WorkflowTask
         """
         def _replacer(match: re.Match[str]) -> str:
             step_idx = int(match.group(1))

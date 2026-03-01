@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from eval_kit.core.decision_spec import DecisionSpec
 
 
-class StepType(str, Enum):
+class StepType(StrEnum):
     """Types of execution steps."""
 
     LLM_CALL = "llm_call"
@@ -32,7 +32,7 @@ class StepType(str, Enum):
     INTERNAL = "internal"
 
 
-class StreamingEventType(str, Enum):
+class StreamingEventType(StrEnum):
     """Types of streaming events for real-time token delivery."""
 
     STREAM_START = "stream_start"
@@ -250,7 +250,7 @@ class Transcript(BaseModel):
         return self.model_dump(mode="json")
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Transcript":
+    def from_dict(cls, data: dict[str, Any]) -> Transcript:
         """Reconstruct a Transcript from a dict produced by to_dict()."""
         return cls.model_validate(data)
 
