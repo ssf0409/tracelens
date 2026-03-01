@@ -95,3 +95,49 @@ class TestBuildParser:
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["run"])
+
+
+class TestCalibrateParser:
+    def test_calibrate_required_args(self):
+        """Calibrate command requires grader, samples, and annotations."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "calibrate",
+            "--grader", "my.graders.QualityGrader",
+            "--samples", "samples.json",
+            "--annotations", "human_grades.json",
+        ])
+        assert args.command == "calibrate"
+        assert args.grader == "my.graders.QualityGrader"
+        assert args.samples == "samples.json"
+        assert args.annotations == "human_grades.json"
+
+    def test_calibrate_defaults(self):
+        """Calibrate command has sensible defaults."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "calibrate",
+            "--grader", "my.Grader",
+            "--samples", "s.json",
+            "--annotations", "a.json",
+        ])
+        assert args.threshold == 0.7
+        assert args.output is None
+        assert args.transcripts is None
+        assert args.results is None
+
+    def test_calibrate_with_all_options(self):
+        """Calibrate command accepts all optional args."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "calibrate",
+            "--grader", "my.Grader",
+            "--samples", "s.json",
+            "--annotations", "a.json",
+            "--transcripts", "transcripts.json",
+            "--threshold", "0.8",
+            "--output", "cal.json",
+        ])
+        assert args.threshold == 0.8
+        assert args.transcripts == "transcripts.json"
+        assert args.output == "cal.json"
