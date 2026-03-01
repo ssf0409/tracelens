@@ -5,11 +5,12 @@ on tasks and collect transcripts.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType
+from eval_kit.core.transcript import StepType, Transcript, TranscriptStep
 
 
 class AgentAdapter(ABC):
@@ -18,15 +19,30 @@ class AgentAdapter(ABC):
     Adapters bridge the evaluation runner to the agent being evaluated.
     Implement `run()` to invoke your agent and return a Transcript.
 
+    Optionally override `setup()` and `teardown()` for lifecycle management.
+    The runner guarantees teardown is called even if run() fails.
+
     Example:
         class MyAdapter(AgentAdapter):
+            async def setup(self, task: Task) -> None:
+                self.db = await create_test_database()
+
             async def run(self, task: Task) -> Transcript:
                 result = await my_agent.invoke(task.input_data)
                 transcript = self.start_transcript(task)
                 transcript.final_output = result
                 transcript.completed_at = datetime.utcnow()
                 return transcript
+
+            async def teardown(self, task: Task, transcript: Transcript | None) -> None:
+                await self.db.cleanup()
     """
+
+    async def setup(self, task: Task) -> None:
+        """Called before run(). Override for preparation. Default: no-op."""
+
+    async def teardown(self, task: Task, transcript: Transcript | None) -> None:
+        """Called after run(), even on failure. Override for cleanup. Default: no-op."""
 
     @abstractmethod
     async def run(self, task: Task) -> Transcript:

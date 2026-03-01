@@ -1,15 +1,13 @@
 """Tests for evaluation runner module."""
 
 import asyncio
+from datetime import UTC, datetime
 
-import pytest
-
-from eval_kit.core.grader import CodeGrader, GraderConfig, GraderRole
-from eval_kit.core.outcome import Outcome
+from eval_kit.core.grader import CodeGrader
 from eval_kit.core.task import EvalSet, Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.core.trial import TrialStatus
-from eval_kit.execution.agent_adapter import SimpleAdapter
+from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 
 
@@ -197,3 +195,117 @@ class TestEvaluationRunner:
         for task_id, passes in results.items():
             assert len(passes) == 3
             assert all(passes)
+
+
+# --- Lifecycle hooks integration with runner ---
+
+
+class _LifecycleTracker(AgentAdapter):
+    """Adapter that tracks lifecycle call order for runner integration tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.setup_error: Exception | None = None
+        self.run_error: Exception | None = None
+        self.teardown_error: Exception | None = None
+
+    async def setup(self, task: Task) -> None:
+        self.calls.append("setup")
+        if self.setup_error:
+            raise self.setup_error
+
+    async def run(self, task: Task) -> Transcript:
+        self.calls.append("run")
+        if self.run_error:
+            raise self.run_error
+        transcript = self.start_transcript(task)
+        transcript.final_output = "ok"
+        transcript.completed_at = datetime.now(UTC)
+        return transcript
+
+    async def teardown(self, task: Task, transcript: Transcript | None) -> None:
+        self.calls.append("teardown")
+        if self.teardown_error:
+            raise self.teardown_error
+
+
+class TestRunnerLifecycleHooks:
+    """Tests for lifecycle hooks integration with EvaluationRunner."""
+
+    async def test_happy_path_order(self):
+        """setup -> run -> teardown on success."""
+        adapter = _LifecycleTracker()
+        runner = EvaluationRunner(adapter, [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert adapter.calls == ["setup", "run", "teardown"]
+        assert batch.trials[0].status == TrialStatus.COMPLETED
+
+    async def test_setup_failure_skips_run(self):
+        """Setup failure skips run, teardown still called."""
+        adapter = _LifecycleTracker()
+        adapter.setup_error = RuntimeError("setup boom")
+
+        runner = EvaluationRunner(adapter, [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert adapter.calls == ["setup", "teardown"]
+        assert batch.trials[0].status == TrialStatus.FAILED
+        assert "Setup failed" in batch.trials[0].error_message
+
+    async def test_run_failure_still_calls_teardown(self):
+        """Run failure still calls teardown."""
+        adapter = _LifecycleTracker()
+        adapter.run_error = ValueError("run boom")
+
+        runner = EvaluationRunner(adapter, [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert adapter.calls == ["setup", "run", "teardown"]
+        assert batch.trials[0].status == TrialStatus.FAILED
+        assert "run boom" in batch.trials[0].error_message
+
+    async def test_teardown_failure_on_success_marks_failed(self):
+        """Teardown failure on an otherwise-successful trial marks it FAILED."""
+        adapter = _LifecycleTracker()
+        adapter.teardown_error = RuntimeError("teardown boom")
+
+        runner = EvaluationRunner(adapter, [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert adapter.calls == ["setup", "run", "teardown"]
+        assert batch.trials[0].status == TrialStatus.FAILED
+        assert "Teardown failed" in batch.trials[0].error_message
+
+    async def test_both_run_and_teardown_fail(self):
+        """Both run and teardown failures concatenate error messages."""
+        adapter = _LifecycleTracker()
+        adapter.run_error = ValueError("run boom")
+        adapter.teardown_error = RuntimeError("teardown boom")
+
+        runner = EvaluationRunner(adapter, [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.FAILED
+        assert "run boom" in trial.error_message
+        assert "Teardown also failed" in trial.error_message
+
+    async def test_timeout_still_calls_teardown(self):
+        """Timeout still calls teardown."""
+        adapter = _LifecycleTracker()
+
+        # Override run to sleep
+        async def slow_run(task: Task) -> Transcript:
+            adapter.calls.append("run")
+            await asyncio.sleep(10)
+            return adapter.start_transcript(task)
+
+        adapter.run = slow_run  # type: ignore[assignment]
+
+        config = RunnerConfig(timeout_seconds=0.05)
+        runner = EvaluationRunner(adapter, [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert "teardown" in adapter.calls
+        assert batch.trials[0].status == TrialStatus.TIMEOUT

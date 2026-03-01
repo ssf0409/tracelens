@@ -17,6 +17,7 @@ from datetime import datetime
 from eval_kit.core.grader import Grader
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import EvalSet, Task
+from eval_kit.core.transcript import Transcript
 from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 from eval_kit.execution.agent_adapter import AgentAdapter
 
@@ -84,7 +85,12 @@ class EvaluationRunner:
         semaphore: asyncio.Semaphore,
         batch: TrialBatch,
     ) -> None:
-        """Execute a single trial with timeout and error handling."""
+        """Execute a single trial with lifecycle hooks, timeout, and error handling.
+
+        Lifecycle: setup → run → teardown (always called).
+        If setup fails, run is skipped but teardown still runs.
+        If teardown fails on an otherwise-successful trial, the trial is marked FAILED.
+        """
         trial = Trial(
             task_id=task.task_id,
             run_index=run_index,
@@ -93,28 +99,70 @@ class EvaluationRunner:
             started_at=datetime.utcnow(),
         )
 
+        transcript: Transcript | None = None
+
         async with semaphore:
+            setup_failed = False
+
+            # --- setup ---
             try:
-                transcript = await asyncio.wait_for(
-                    self.adapter.run(task),
-                    timeout=self.config.timeout_seconds,
-                )
-                trial.transcript = transcript
-                trial.status = TrialStatus.COMPLETED
-            except TimeoutError:
-                trial.status = TrialStatus.TIMEOUT
-                trial.error_message = (
-                    f"Trial timed out after {self.config.timeout_seconds}s"
-                )
+                await self.adapter.setup(task)
             except Exception as exc:
+                setup_failed = True
                 trial.status = TrialStatus.FAILED
-                trial.error_message = str(exc)
+                trial.error_message = f"Setup failed: {exc}"
                 trial.error_traceback = traceback.format_exc()
                 logger.error(
-                    "Agent execution failed for task %s run %d: %s",
+                    "Setup failed for task %s run %d: %s",
                     task.task_id,
                     run_index,
                     exc,
+                )
+
+            # --- run (skipped if setup failed) ---
+            if not setup_failed:
+                try:
+                    transcript = await asyncio.wait_for(
+                        self.adapter.run(task),
+                        timeout=self.config.timeout_seconds,
+                    )
+                    trial.transcript = transcript
+                    trial.status = TrialStatus.COMPLETED
+                except TimeoutError:
+                    trial.status = TrialStatus.TIMEOUT
+                    trial.error_message = (
+                        f"Trial timed out after {self.config.timeout_seconds}s"
+                    )
+                except Exception as exc:
+                    trial.status = TrialStatus.FAILED
+                    trial.error_message = str(exc)
+                    trial.error_traceback = traceback.format_exc()
+                    logger.error(
+                        "Agent execution failed for task %s run %d: %s",
+                        task.task_id,
+                        run_index,
+                        exc,
+                    )
+
+            # --- teardown (always called) ---
+            try:
+                await self.adapter.teardown(task, transcript)
+            except Exception as teardown_exc:
+                if trial.status == TrialStatus.COMPLETED:
+                    trial.status = TrialStatus.FAILED
+                    trial.error_message = (
+                        f"Teardown failed: {teardown_exc}"
+                    )
+                else:
+                    trial.error_message = (
+                        f"{trial.error_message}; "
+                        f"Teardown also failed: {teardown_exc}"
+                    )
+                logger.error(
+                    "Teardown failed for task %s run %d: %s",
+                    task.task_id,
+                    run_index,
+                    teardown_exc,
                 )
 
         trial.completed_at = datetime.utcnow()

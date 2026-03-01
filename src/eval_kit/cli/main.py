@@ -14,6 +14,7 @@ from pathlib import Path
 
 from eval_kit.baselines.comparison import RegressionDetector, RegressionSeverity
 from eval_kit.baselines.manager import BaselineManager
+from eval_kit.cli.calibrate import add_calibrate_parser, cmd_calibrate
 from eval_kit.core.task import EvalSet, JSONTaskLoader
 from eval_kit.execution.agent_adapter import AgentAdapter
 from eval_kit.execution.registry import load_class
@@ -99,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--format", default="markdown", choices=["markdown", "json", "html"],
         help="Output format (default: markdown)",
     )
+
+    # -- eval-kit calibrate --
+    add_calibrate_parser(subparsers)
 
     return parser
 
@@ -240,6 +244,8 @@ def main() -> None:
         sys.exit(cmd_run(args))
     elif args.command == "report":
         sys.exit(cmd_report(args))
+    elif args.command == "calibrate":
+        sys.exit(cmd_calibrate(args))
     else:
         parser.print_help()
         sys.exit(1)
