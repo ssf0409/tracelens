@@ -4,6 +4,7 @@ Iterates workflow steps in order, resolves inter-step templates,
 creates synthetic Tasks per step, and optionally grades each step.
 """
 
+import logging
 from datetime import UTC, datetime
 
 from eval_kit.core.grader import Grader
@@ -16,6 +17,8 @@ from eval_kit.core.workflow import (
     WorkflowTask,
 )
 from eval_kit.execution.agent_adapter import AgentAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowRunner:
@@ -64,39 +67,55 @@ class WorkflowRunner:
                     timeout_seconds=step.timeout_seconds,
                 )
 
-                # Run adapter
+                # Lifecycle: setup → run → teardown (teardown always called)
                 step_transcript: Transcript | None = None
-                await self.adapter.setup(synthetic_task)
+                setup_failed = False
+
                 try:
-                    step_transcript = await self.adapter.run(synthetic_task)
-                finally:
-                    await self.adapter.teardown(
-                        synthetic_task, step_transcript
+                    await self.adapter.setup(synthetic_task)
+                except Exception as setup_exc:
+                    setup_failed = True
+                    logger.error(
+                        "Setup failed for step '%s': %s",
+                        step.step_id,
+                        setup_exc,
                     )
 
-                step_result.status = StepStatus.COMPLETED
-                step_result.output = step_transcript.final_output
-                step_result.transcript = step_transcript
-
-                # Record step in parent transcript
-                parent_transcript.add_step(TranscriptStep(
-                    step_type=StepType.INTERNAL,
-                    content={
-                        "workflow_step": step.step_id,
-                        "step_index": step_idx,
-                        "status": "completed",
-                    },
-                ))
-
-                # Merge step's transcript steps into parent
-                for child_step in step_transcript.steps:
-                    parent_transcript.add_step(child_step)
-
-                # Optional per-step grading
-                if step.grader_ids:
-                    for gid in step.grader_ids:
-                        if gid in self.graders:
-                            await self.graders[gid].grade(step_transcript, synthetic_task)
+                if not setup_failed:
+                    try:
+                        step_transcript = await self.adapter.run(synthetic_task)
+                    finally:
+                        try:
+                            await self.adapter.teardown(
+                                synthetic_task, step_transcript
+                            )
+                        except Exception as teardown_exc:
+                            logger.error(
+                                "Teardown failed for step '%s': %s",
+                                step.step_id,
+                                teardown_exc,
+                            )
+                            if step_transcript is not None:
+                                raise RuntimeError(
+                                    f"Teardown failed for step "
+                                    f"'{step.step_id}': {teardown_exc}"
+                                ) from teardown_exc
+                else:
+                    # Teardown still called even after setup failure
+                    try:
+                        await self.adapter.teardown(
+                            synthetic_task, step_transcript
+                        )
+                    except Exception as teardown_exc:
+                        logger.error(
+                            "Teardown failed for step '%s' "
+                            "(after setup failure): %s",
+                            step.step_id,
+                            teardown_exc,
+                        )
+                    raise RuntimeError(
+                        f"Setup failed for step '{step.step_id}'"
+                    )
 
             except Exception as exc:
                 step_result.status = StepStatus.FAILED
@@ -117,6 +136,47 @@ class WorkflowRunner:
                 if workflow_task.fail_fast:
                     break
                 continue
+
+            step_result.status = StepStatus.COMPLETED
+            step_result.output = step_transcript.final_output
+            step_result.transcript = step_transcript
+
+            # Record step in parent transcript
+            parent_transcript.add_step(TranscriptStep(
+                step_type=StepType.INTERNAL,
+                content={
+                    "workflow_step": step.step_id,
+                    "step_index": step_idx,
+                    "status": "completed",
+                },
+            ))
+
+            # Merge step's transcript steps into parent
+            for child_step in step_transcript.steps:
+                parent_transcript.add_step(child_step)
+
+            # Per-step grading (outside adapter try/except — grading failure
+            # should not mark the step as FAILED since the adapter succeeded)
+            if step.grader_ids:
+                for gid in step.grader_ids:
+                    if gid in self.graders:
+                        try:
+                            await self.graders[gid].grade(
+                                step_transcript, synthetic_task
+                            )
+                        except Exception as grading_exc:
+                            logger.error(
+                                "Grader '%s' failed on step '%s': %s",
+                                gid,
+                                step.step_id,
+                                grading_exc,
+                            )
+                    else:
+                        logger.warning(
+                            "Grader '%s' requested by step '%s' not found, skipping",
+                            gid,
+                            step.step_id,
+                        )
 
             context.step_results.append(step_result)
 

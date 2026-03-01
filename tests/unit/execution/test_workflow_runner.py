@@ -217,3 +217,117 @@ class TestWorkflowAdapter:
 
         assert batch.total_count == 2
         assert batch.passed_count == 2
+
+
+class _LifecycleTracker(AgentAdapter):
+    """Tracks setup/run/teardown call order."""
+
+    def __init__(
+        self,
+        setup_error: Exception | None = None,
+        run_error: Exception | None = None,
+        teardown_error: Exception | None = None,
+    ) -> None:
+        self.calls: list[str] = []
+        self.setup_error = setup_error
+        self.run_error = run_error
+        self.teardown_error = teardown_error
+
+    async def setup(self, task: Task) -> None:
+        self.calls.append("setup")
+        if self.setup_error:
+            raise self.setup_error
+
+    async def run(self, task: Task) -> Transcript:
+        self.calls.append("run")
+        if self.run_error:
+            raise self.run_error
+        transcript = self.start_transcript(task)
+        transcript.final_output = dict(task.input_data)
+        transcript.add_step(TranscriptStep(
+            step_type=StepType.AGENT_OUTPUT,
+            content=task.input_data,
+        ))
+        transcript.completed_at = datetime.now(UTC)
+        return transcript
+
+    async def teardown(self, task: Task, transcript: Transcript | None) -> None:
+        self.calls.append("teardown")
+        if self.teardown_error:
+            raise self.teardown_error
+
+
+class TestWorkflowRunnerLifecycle:
+    def _single_step_workflow(self) -> WorkflowTask:
+        return WorkflowTask(
+            task_id="wf_lc",
+            name="Lifecycle",
+            input_data={},
+            steps=[
+                WorkflowStep(step_id="s1", name="S1", input_data={"x": 1}),
+            ],
+        )
+
+    async def test_setup_teardown_called_on_success(self):
+        adapter = _LifecycleTracker()
+        runner = WorkflowRunner(adapter)
+        await runner.run(self._single_step_workflow())
+        assert adapter.calls == ["setup", "run", "teardown"]
+
+    async def test_teardown_called_when_setup_fails(self):
+        adapter = _LifecycleTracker(setup_error=RuntimeError("setup boom"))
+        runner = WorkflowRunner(adapter)
+        transcript = await runner.run(self._single_step_workflow())
+
+        assert "setup" in adapter.calls
+        assert "teardown" in adapter.calls
+        assert "run" not in adapter.calls
+        assert transcript.has_errors
+
+    async def test_teardown_called_when_run_fails(self):
+        adapter = _LifecycleTracker(run_error=RuntimeError("run boom"))
+        runner = WorkflowRunner(adapter)
+        transcript = await runner.run(self._single_step_workflow())
+
+        assert adapter.calls == ["setup", "run", "teardown"]
+        assert transcript.has_errors
+
+    async def test_teardown_error_does_not_swallow_run_error(self):
+        adapter = _LifecycleTracker(
+            run_error=RuntimeError("run failed"),
+            teardown_error=RuntimeError("teardown failed"),
+        )
+        runner = WorkflowRunner(adapter)
+        transcript = await runner.run(self._single_step_workflow())
+
+        # Both should have been called
+        assert adapter.calls == ["setup", "run", "teardown"]
+        # Step marked as failed — error message should reference run failure
+        error_steps = transcript.get_steps_by_type(StepType.ERROR)
+        assert len(error_steps) == 1
+        # The run error should be captured (teardown logged, not swallowed)
+        assert "run failed" in error_steps[0].error
+
+    async def test_missing_grader_logs_warning(self, caplog):
+        adapter = _LifecycleTracker()
+        runner = WorkflowRunner(adapter, graders={})
+
+        wt = WorkflowTask(
+            task_id="wf_mg",
+            name="Missing Grader",
+            input_data={},
+            steps=[
+                WorkflowStep(
+                    step_id="s1", name="S1",
+                    input_data={"x": 1},
+                    grader_ids=["nonexistent_grader"],
+                ),
+            ],
+        )
+
+        with caplog.at_level("WARNING"):
+            transcript = await runner.run(wt)
+
+        assert transcript.metadata["steps_completed"] == 1
+        assert "nonexistent_grader" in caplog.text
+        assert "not found" in caplog.text

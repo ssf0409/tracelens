@@ -1,9 +1,10 @@
 """Tests for EventChainVerifier grader."""
 
 import pytest
+from pydantic import ValidationError
 
 from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType, ToolCall
+from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
 from eval_kit.graders.event_chain import (
     EventChainConfig,
     EventChainVerifier,
@@ -312,3 +313,34 @@ class TestEventChainMatchTypes:
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True
+
+
+class TestEventExpectationValidation:
+    def test_tool_name_match_requires_tool_name(self):
+        with pytest.raises(ValidationError, match="requires 'tool_name'"):
+            EventExpectation(
+                event_id="x",
+                match_type=EventMatchType.TOOL_NAME,
+            )
+
+    def test_content_regex_requires_content_pattern(self):
+        with pytest.raises(ValidationError, match="requires 'content_pattern'"):
+            EventExpectation(
+                event_id="x",
+                match_type=EventMatchType.CONTENT_REGEX,
+            )
+
+    def test_step_type_requires_step_type(self):
+        with pytest.raises(ValidationError, match="requires 'step_type'"):
+            EventExpectation(
+                event_id="x",
+                match_type=EventMatchType.STEP_TYPE,
+            )
+
+    def test_valid_expectation_accepted(self):
+        e = EventExpectation(
+            event_id="x",
+            match_type=EventMatchType.TOOL_NAME,
+            tool_name="search",
+        )
+        assert e.tool_name == "search"

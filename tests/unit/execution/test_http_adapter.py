@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import StepType
@@ -68,6 +69,14 @@ class TestAuthConfig:
         headers: dict[str, str] = {}
         auth.apply_to_headers(headers)
         assert headers == {"X-Custom": "val1", "X-Other": "val2"}
+
+    def test_bearer_without_token_raises(self):
+        with pytest.raises(ValidationError, match="requires a non-empty 'token'"):
+            AuthConfig(scheme=AuthScheme.BEARER)
+
+    def test_api_key_without_value_raises(self):
+        with pytest.raises(ValidationError, match="requires a non-empty 'api_key_value'"):
+            AuthConfig(scheme=AuthScheme.API_KEY)
 
 
 class TestHTTPAPIAdapter:
@@ -213,3 +222,44 @@ class TestHTTPAPIAdapter:
         adapter = HTTPAPIAdapter(config)
         body = adapter.build_request_body(task)
         assert body == {"prompt": "hello"}
+
+    async def test_non_retryable_error_raises_immediately(
+        self, config: HTTPAdapterConfig, task: Task
+    ):
+        """Non-network errors (e.g. ValueError) are not retried."""
+        adapter = HTTPAPIAdapter(config)
+        call_count = 0
+
+        async def raise_value_error(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("bad request body")
+
+        with patch.object(httpx.AsyncClient, "request", side_effect=raise_value_error):
+            with pytest.raises(ValueError, match="bad request body"):
+                await adapter.run(task)
+
+        # Should NOT have retried — only 1 call
+        assert call_count == 1
+        await adapter.close()
+
+    async def test_connection_error_retried(
+        self, config: HTTPAdapterConfig, task: Task
+    ):
+        """Network errors like ConnectError are retried."""
+        adapter = HTTPAPIAdapter(config)
+        call_count = 0
+
+        async def flaky_connection(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise httpx.ConnectError("connection refused")
+            return _mock_response(200, {"result": "recovered"})
+
+        with patch.object(httpx.AsyncClient, "request", side_effect=flaky_connection):
+            transcript = await adapter.run(task)
+
+        assert call_count == 3
+        assert transcript.final_output == {"result": "recovered"}
+        await adapter.close()

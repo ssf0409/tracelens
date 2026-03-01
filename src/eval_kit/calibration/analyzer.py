@@ -4,18 +4,21 @@ Computes correlation metrics (Pearson, Spearman), agreement (Cohen's kappa),
 and bias detection to determine if an LLM grader is drifting from human judgment.
 """
 
+import logging
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 from pydantic import BaseModel, Field
 from scipy import stats
 
+logger = logging.getLogger(__name__)
+
 
 class HumanAnnotation(BaseModel):
     """A single human annotation for a graded sample."""
 
     task_id: str
-    human_score: float  # 0.0 - 1.0
+    human_score: float = Field(ge=0.0, le=1.0)
     human_passed: bool
     notes: str | None = None
 
@@ -53,7 +56,6 @@ class CalibrationResult(BaseModel):
     """Result of calibration analysis between grader and human annotations."""
 
     pairs: list[CalibrationPair] = Field(default_factory=list)
-    sample_count: int = 0
 
     # Correlation metrics
     pearson_r: float | None = None
@@ -71,6 +73,10 @@ class CalibrationResult(BaseModel):
     # Verdict
     threshold: float = 0.7
     is_calibrated: bool = False
+
+    @property
+    def sample_count(self) -> int:
+        return len(self.pairs)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,6 +150,10 @@ class CalibrationAnalyzer:
         for annotation in annotations.annotations:
             outcome = grader_outcomes.get(annotation.task_id)
             if outcome is None:
+                logger.warning(
+                    "Annotation for task '%s' has no matching grader outcome, skipping",
+                    annotation.task_id,
+                )
                 continue
 
             grader_score = outcome.score
@@ -162,7 +172,6 @@ class CalibrationAnalyzer:
         if len(pairs) < 2:
             return CalibrationResult(
                 pairs=pairs,
-                sample_count=len(pairs),
                 threshold=self.threshold,
                 is_calibrated=False,
             )

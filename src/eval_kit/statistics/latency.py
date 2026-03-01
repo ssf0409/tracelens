@@ -64,6 +64,8 @@ class LatencyAnalyzer:
         last_event = transcript.streaming_events[-1]
         time_to_complete_ms = last_event.timestamp_ms
 
+        # Each TOKEN event represents at least 1 token for throughput estimation,
+        # even if token_count wasn't explicitly set by the adapter.
         total_tokens = sum(e.token_count or 1 for e in token_events)
 
         # Compute TPS using generation window (first token to last event),

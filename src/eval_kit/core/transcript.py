@@ -53,9 +53,9 @@ class StreamingEvent(BaseModel):
 
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     event_type: StreamingEventType
-    timestamp_ms: float
+    timestamp_ms: float = Field(ge=0)
     content: str | None = None
-    token_count: int | None = None
+    token_count: int | None = Field(default=None, ge=0)
     sse_event: str | None = None
     sse_data: str | None = None
     tool_name: str | None = None

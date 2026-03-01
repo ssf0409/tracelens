@@ -8,7 +8,7 @@ import re
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from eval_kit.core.grader import CodeGrader
 from eval_kit.core.task import Task
@@ -43,6 +43,20 @@ class EventExpectation(BaseModel):
     content_pattern: str | None = None
     step_type: StepType | None = None
     after: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_match_type_fields(self) -> "EventExpectation":
+        mt = self.match_type
+        if mt in (EventMatchType.TOOL_NAME, EventMatchType.TOOL_NAME_AND_ARGS):
+            if not self.tool_name:
+                raise ValueError(f"match_type='{mt}' requires 'tool_name'")
+        if mt in (EventMatchType.CONTENT_REGEX, EventMatchType.RESULT_REGEX):
+            if not self.content_pattern:
+                raise ValueError(f"match_type='{mt}' requires 'content_pattern'")
+        if mt == EventMatchType.STEP_TYPE:
+            if self.step_type is None:
+                raise ValueError("match_type='step_type' requires 'step_type'")
+        return self
 
 
 class EventChainConfig(BaseModel):

@@ -13,6 +13,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 from eval_kit.calibration.analyzer import (
@@ -80,7 +81,8 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     elif args.transcripts:
         # Grade transcripts on the fly
         grader_cls = load_class(args.grader)
-        grader = grader_cls()
+        grader_id = args.grader.rsplit(".", 1)[-1]
+        grader = grader_cls(grader_id)
 
         with open(args.transcripts) as f:
             transcripts_data = json.load(f)
@@ -95,6 +97,11 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
                 transcript = Transcript(**transcript_data)
                 task = task_map.get(task_id)
                 if task is None:
+                    print(
+                        f"Warning: transcript task_id '{task_id}' "
+                        f"not found in samples file, skipping",
+                        file=sys.stderr,
+                    )
                     continue
                 outcome = await grader.grade(transcript, task)
                 outcomes[task_id] = outcome
@@ -102,7 +109,10 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
         grader_outcomes = asyncio.run(_grade_all())
     else:
-        print("Error: provide either --transcripts or --results")
+        print(
+            "Error: provide either --transcripts or --results",
+            file=sys.stderr,
+        )
         return 1
 
     # Analyze calibration

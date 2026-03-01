@@ -133,6 +133,12 @@ class EvaluationRunner:
                     trial.error_message = (
                         f"Trial timed out after {self.config.timeout_seconds}s"
                     )
+                    logger.warning(
+                        "Trial timed out for task %s run %d after %.1fs",
+                        task.task_id,
+                        run_index,
+                        self.config.timeout_seconds,
+                    )
                 except Exception as exc:
                     trial.status = TrialStatus.FAILED
                     trial.error_message = str(exc)
@@ -153,6 +159,7 @@ class EvaluationRunner:
                     trial.error_message = (
                         f"Teardown failed: {teardown_exc}"
                     )
+                    trial.error_traceback = traceback.format_exc()
                 else:
                     trial.error_message = (
                         f"{trial.error_message}; "

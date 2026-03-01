@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
@@ -40,6 +40,14 @@ class AuthConfig(BaseModel):
     api_key_header: str = "X-API-Key"
     api_key_value: str | None = None
     custom_headers: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_scheme_fields(self) -> "AuthConfig":
+        if self.scheme == AuthScheme.BEARER and not self.token:
+            raise ValueError("AuthConfig: scheme='bearer' requires a non-empty 'token'")
+        if self.scheme == AuthScheme.API_KEY and not self.api_key_value:
+            raise ValueError("AuthConfig: scheme='api_key' requires a non-empty 'api_key_value'")
+        return self
 
     def apply_to_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """Apply auth config to a headers dict, returning the updated dict."""
@@ -169,7 +177,8 @@ class HTTPAPIAdapter(AgentAdapter):
 
             except httpx.HTTPStatusError:
                 raise
-            except Exception as exc:
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
+                    httpx.PoolTimeout, httpx.ConnectTimeout) as exc:
                 last_error = exc
                 transcript.add_step(TranscriptStep(
                     step_type=StepType.ERROR,
