@@ -10,10 +10,10 @@ A Transcript is a complete record of an agent's execution, including:
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
-import uuid
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,35 @@ class StepType(str, Enum):
     AGENT_OUTPUT = "agent_output"
     ERROR = "error"
     INTERNAL = "internal"
+
+
+class StreamingEventType(str, Enum):
+    """Types of streaming events for real-time token delivery."""
+
+    STREAM_START = "stream_start"
+    TOKEN = "token"
+    CHUNK = "chunk"
+    TOOL_START = "tool_start"
+    TOOL_END = "tool_end"
+    STREAM_END = "stream_end"
+    ERROR = "error"
+
+
+class StreamingEvent(BaseModel):
+    """A single event in a streaming response.
+
+    Timestamps are in milliseconds since stream start for precise
+    inter-token latency analysis.
+    """
+
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    event_type: StreamingEventType
+    timestamp_ms: float
+    content: str | None = None
+    token_count: int | None = None
+    sse_event: str | None = None
+    sse_data: str | None = None
+    tool_name: str | None = None
 
 
 class ToolCall(BaseModel):
@@ -124,6 +153,42 @@ class Transcript(BaseModel):
         description="DecisionSpec capturing all parameters affecting agent behavior",
     )
 
+    # Streaming data
+    streaming_events: list[StreamingEvent] = Field(default_factory=list)
+
+    @property
+    def has_streaming_data(self) -> bool:
+        """Whether this transcript contains streaming events."""
+        return len(self.streaming_events) > 0
+
+    @property
+    def first_token_latency_ms(self) -> float | None:
+        """Time to first token event in milliseconds, or None if no streaming."""
+        for event in self.streaming_events:
+            if event.event_type == StreamingEventType.TOKEN:
+                return event.timestamp_ms
+        return None
+
+    @property
+    def streaming_duration_ms(self) -> float | None:
+        """Total streaming duration from first to last event, or None if no streaming."""
+        if not self.streaming_events:
+            return None
+        return self.streaming_events[-1].timestamp_ms - self.streaming_events[0].timestamp_ms
+
+    @property
+    def streaming_token_count(self) -> int:
+        """Total tokens across all streaming TOKEN events."""
+        return sum(
+            e.token_count or 0
+            for e in self.streaming_events
+            if e.event_type == StreamingEventType.TOKEN
+        )
+
+    def add_streaming_event(self, event: StreamingEvent) -> None:
+        """Append a streaming event to the transcript."""
+        self.streaming_events.append(event)
+
     @property
     def duration_ms(self) -> float | None:
         """Calculate execution duration in milliseconds."""
@@ -200,8 +265,9 @@ class Transcript(BaseModel):
 # Rebuild model to resolve forward reference to DecisionSpec
 def _rebuild_transcript_model() -> None:
     """Rebuild Transcript model with DecisionSpec reference resolved."""
-    from eval_kit.core.decision_spec import DecisionSpec
-    Transcript.model_rebuild()
+    from eval_kit.core.decision_spec import DecisionSpec  # noqa: PLC0415
+
+    Transcript.model_rebuild(_types_namespace={"DecisionSpec": DecisionSpec})
 
 
 _rebuild_transcript_model()
