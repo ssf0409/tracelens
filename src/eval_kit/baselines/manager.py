@@ -8,14 +8,19 @@ Supports two baseline types:
 - CAPABILITY: Can auto-update on improvements; tracks current capability
 """
 
+import json
+import subprocess
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
-import json
-import subprocess
 
 from pydantic import BaseModel, Field
+
+from eval_kit.statistics.inference import (
+    compare_to_baseline_summary,
+    estimate_metric,
+)
 
 
 class BaselineType(str, Enum):
@@ -544,7 +549,7 @@ class BaselineManager:
             )
             if result.returncode == 0:
                 return result.stdout.strip()[:12]
-        except Exception:
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
             pass
         return None
 
@@ -902,11 +907,6 @@ class BaselineManager:
             - is_regression: True if significant decline
             - cohens_d: Effect size
         """
-        from eval_kit.statistics.inference import (
-            estimate_metric,
-            compare_to_baseline_summary,
-        )
-
         baseline = self.get_baseline(task_id)
 
         if not baseline:

@@ -9,6 +9,8 @@ The EvaluationRunner orchestrates:
 """
 
 import asyncio
+import logging
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -18,6 +20,8 @@ from eval_kit.core.task import EvalSet, Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 from eval_kit.execution.agent_adapter import AgentAdapter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -107,6 +111,13 @@ class EvaluationRunner:
                 setup_failed = True
                 trial.status = TrialStatus.FAILED
                 trial.error_message = f"Setup failed: {exc}"
+                trial.error_traceback = traceback.format_exc()
+                logger.error(
+                    "Setup failed for task %s run %d: %s",
+                    task.task_id,
+                    run_index,
+                    exc,
+                )
 
             # --- run (skipped if setup failed) ---
             if not setup_failed:
@@ -125,20 +136,34 @@ class EvaluationRunner:
                 except Exception as exc:
                     trial.status = TrialStatus.FAILED
                     trial.error_message = str(exc)
+                    trial.error_traceback = traceback.format_exc()
+                    logger.error(
+                        "Agent execution failed for task %s run %d: %s",
+                        task.task_id,
+                        run_index,
+                        exc,
+                    )
 
             # --- teardown (always called) ---
             try:
                 await self.adapter.teardown(task, transcript)
             except Exception as teardown_exc:
                 if trial.status == TrialStatus.COMPLETED:
-                    # Teardown failure on otherwise-successful trial
                     trial.status = TrialStatus.FAILED
-                    trial.error_message = f"Teardown failed: {teardown_exc}"
-                else:
-                    # Both run and teardown failed — concatenate
                     trial.error_message = (
-                        f"{trial.error_message}; Teardown also failed: {teardown_exc}"
+                        f"Teardown failed: {teardown_exc}"
                     )
+                else:
+                    trial.error_message = (
+                        f"{trial.error_message}; "
+                        f"Teardown also failed: {teardown_exc}"
+                    )
+                logger.error(
+                    "Teardown failed for task %s run %d: %s",
+                    task.task_id,
+                    run_index,
+                    teardown_exc,
+                )
 
         trial.completed_at = datetime.utcnow()
 
@@ -156,11 +181,18 @@ class EvaluationRunner:
                 outcome = await grader.grade(trial.transcript, task)
                 trial.add_outcome(outcome)
             except Exception as exc:
-                # Grader failure → failed outcome
+                # Grader failure → failed outcome (not an agent failure)
+                logger.error(
+                    "Grader %s crashed on trial %s: %s",
+                    grader.grader_id,
+                    trial.trial_id,
+                    exc,
+                )
                 trial.add_outcome(Outcome(
                     trial_id=trial.trial_id,
                     grader_id=grader.grader_id,
                     passed=False,
                     score=0.0,
-                    feedback=f"Grader error: {exc}",
+                    metrics={"_grader_error": 1.0},
+                    feedback=f"GRADER CRASH (not an agent failure): {exc}",
                 ))

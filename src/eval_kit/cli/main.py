@@ -8,6 +8,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from eval_kit.execution.agent_adapter import AgentAdapter
 from eval_kit.execution.registry import load_class
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 from eval_kit.reporting.generator import ReportData, ReportGenerator
+
+logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--html-report", default=None,
         help="Path to write HTML dashboard report",
     )
+    run_parser.add_argument(
+        "--save-trials", default=None,
+        help="Path to write raw trial data (JSON) for replay and comparison",
+    )
 
     # -- eval-kit report --
     report_parser = subparsers.add_parser(
@@ -107,18 +114,42 @@ def _severity_from_str(s: str) -> RegressionSeverity:
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute the 'run' subcommand."""
     # Load eval set
-    loader = JSONTaskLoader()
-    tasks = loader.load(args.eval_set)
-    eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
+    try:
+        loader = JSONTaskLoader()
+        tasks = loader.load(args.eval_set)
+        eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
+    except FileNotFoundError:
+        print(f"Error: eval-set file not found: {args.eval_set}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as exc:
+        print(
+            f"Error: invalid JSON in eval-set file {args.eval_set}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
 
     # Load adapter and graders
-    adapter_cls = load_class(args.adapter)
-    adapter: AgentAdapter = adapter_cls()
+    try:
+        adapter_cls = load_class(args.adapter)
+        adapter: AgentAdapter = adapter_cls()
+    except (ImportError, AttributeError) as exc:
+        print(
+            f"Error: could not load adapter '{args.adapter}': {exc}",
+            file=sys.stderr,
+        )
+        return 1
 
     graders = []
     for grader_path in args.graders:
-        grader_cls = load_class(grader_path)
-        graders.append(grader_cls())
+        try:
+            grader_cls = load_class(grader_path)
+            graders.append(grader_cls())
+        except (ImportError, AttributeError) as exc:
+            print(
+                f"Error: could not load grader '{grader_path}': {exc}",
+                file=sys.stderr,
+            )
+            return 1
 
     # Build runner config
     config = RunnerConfig(
@@ -150,6 +181,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         Path(args.html_report).parent.mkdir(parents=True, exist_ok=True)
         with open(args.html_report, "w") as f:
             f.write(gen.render_html(report))
+
+    # Save raw trial data for replay and comparison
+    if args.save_trials:
+        Path(args.save_trials).parent.mkdir(parents=True, exist_ok=True)
+        trial_data = batch.to_dict()
+        with open(args.save_trials, "w") as f:
+            json.dump(trial_data, f, indent=2)
 
     # CI summary to stdout
     print(gen.render_ci_summary(report))

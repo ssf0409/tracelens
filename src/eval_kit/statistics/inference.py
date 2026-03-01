@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from scipy import stats
 
 
 @dataclass
@@ -473,8 +474,6 @@ def compare_to_baseline_summary(
     Returns:
         ComparisonResult (note: effect size may be less accurate)
     """
-    from scipy import stats
-
     baseline_est = MetricEstimate(
         mean=baseline_mean,
         std=baseline_std,
