@@ -81,3 +81,7 @@ pip-delete-this-directory.txt
 # Generated reports
 examples/report.html
 report.html
+
+# Benchmark artifacts — regenerate via benchmarks/*/README.md
+benchmarks/**/baseline_*.json
+benchmarks/**/run_*.json
