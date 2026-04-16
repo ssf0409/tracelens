@@ -285,3 +285,78 @@ class TestSvgHelpers:
     def test_svg_histogram_single_value(self):
         svg = _svg_histogram([0.5, 0.5, 0.5])
         assert "<svg" in svg
+
+
+class TestInfraErrorReporting:
+    """Reports should surface infra-error rate alongside pass rate so
+    infrastructure-driven failures aren't conflated with capability
+    regressions (Anthropic, Feb 2026)."""
+
+    def _batch_with_infra_errors(self):
+        from eval_kit.core.outcome import Outcome
+        from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+        trials = [
+            Trial(task_id="t1", status=TrialStatus.COMPLETED, outcomes=[
+                Outcome(trial_id="x", grader_id="g", passed=True, score=1.0),
+            ]),
+            Trial(task_id="t1", status=TrialStatus.INFRA_ERROR),
+            Trial(task_id="t2", status=TrialStatus.COMPLETED, outcomes=[
+                Outcome(trial_id="y", grader_id="g", passed=False, score=0.1),
+            ]),
+            Trial(task_id="t2", status=TrialStatus.INFRA_ERROR),
+        ]
+        return TrialBatch(trials=trials)
+
+    def test_build_report_populates_infra_metrics(self):
+        from eval_kit.reporting.generator import ReportGenerator
+
+        report = ReportGenerator().build_report(self._batch_with_infra_errors())
+
+        assert report.infra_error_count == 2
+        assert report.infra_error_rate == 0.5
+
+    def test_markdown_surfaces_infra_warning_when_rate_positive(self):
+        from eval_kit.reporting.generator import ReportGenerator
+
+        gen = ReportGenerator()
+        report = gen.build_report(self._batch_with_infra_errors())
+        md = gen.render_markdown(report)
+
+        assert "Infra-Error Rate" in md
+        assert "50.0%" in md
+        # The explanation is what gives readers context; ensure it appears.
+        assert "infrastructure" in md.lower()
+
+    def test_markdown_omits_infra_section_when_zero(self):
+        """No noise = no section. Don't clutter the default report."""
+        from eval_kit.core.outcome import Outcome
+        from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+        from eval_kit.reporting.generator import ReportGenerator
+
+        clean_batch = TrialBatch(trials=[
+            Trial(task_id="t1", status=TrialStatus.COMPLETED, outcomes=[
+                Outcome(trial_id="x", grader_id="g", passed=True, score=1.0),
+            ]),
+        ])
+        gen = ReportGenerator()
+        md = gen.render_markdown(gen.build_report(clean_batch))
+        assert "Infra-Error Rate" not in md
+
+    def test_ci_summary_includes_infra_errors_when_nonzero(self):
+        from eval_kit.reporting.generator import ReportGenerator
+
+        gen = ReportGenerator()
+        report = gen.build_report(self._batch_with_infra_errors())
+        ci = gen.render_ci_summary(report)
+
+        assert "infra_errors=50.0%" in ci
+
+    def test_to_dict_roundtrip_preserves_infra_fields(self):
+        from eval_kit.reporting.generator import ReportData, ReportGenerator
+
+        gen = ReportGenerator()
+        original = gen.build_report(self._batch_with_infra_errors())
+        restored = ReportData.from_dict(original.to_dict())
+
+        assert restored.infra_error_count == 2
+        assert restored.infra_error_rate == 0.5

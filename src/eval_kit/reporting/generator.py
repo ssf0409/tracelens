@@ -53,6 +53,12 @@ class ReportData:
     overall_pass_rate: float = 0.0
     overall_mean_score: float = 0.0
 
+    # Infrastructure-noise awareness (see Anthropic, Feb 2026).
+    # ``infra_error_rate`` is reported alongside pass_rate so a spike
+    # signals "re-check the eval config" rather than "model got worse."
+    infra_error_count: int = 0
+    infra_error_rate: float = 0.0
+
     # Per-task summaries
     task_summaries: list[TaskSummary] = field(default_factory=list)
 
@@ -69,6 +75,8 @@ class ReportData:
             "total_tasks": self.total_tasks,
             "overall_pass_rate": self.overall_pass_rate,
             "overall_mean_score": self.overall_mean_score,
+            "infra_error_count": self.infra_error_count,
+            "infra_error_rate": self.infra_error_rate,
             "pass_at_k": self.pass_at_k,
             "reliability": self.reliability,
             "task_summaries": [s.to_dict() for s in self.task_summaries],
@@ -78,6 +86,8 @@ class ReportData:
                 "has_regression": self.regression_report.has_regression,
                 "severity": self.regression_report.overall_severity.value,
                 "summary": self.regression_report.summary,
+                "infra_config_mismatch": self.regression_report.infra_config_mismatch,
+                "blocking_regressions": len(self.regression_report.blocking_regressions),
             }
         return result
 
@@ -91,6 +101,8 @@ class ReportData:
             total_tasks=data.get("total_tasks", 0),
             overall_pass_rate=data.get("overall_pass_rate", 0.0),
             overall_mean_score=data.get("overall_mean_score", 0.0),
+            infra_error_count=data.get("infra_error_count", 0),
+            infra_error_rate=data.get("infra_error_rate", 0.0),
             task_summaries=summaries,
             pass_at_k=data.get("pass_at_k", {}),
             reliability=data.get("reliability", {}),
@@ -167,6 +179,8 @@ class ReportGenerator:
             total_tasks=len(task_ids),
             overall_pass_rate=batch.pass_rate,
             overall_mean_score=float(np.mean(all_scores)) if all_scores else 0.0,
+            infra_error_count=batch.infra_error_count,
+            infra_error_rate=batch.infra_error_rate,
             task_summaries=task_summaries,
             pass_at_k=suite_pass_at_k,
             reliability=suite_reliability,
@@ -185,8 +199,18 @@ class ReportGenerator:
             f"- **Trials**: {report.total_trials}",
             f"- **Pass Rate**: {report.overall_pass_rate:.1%}",
             f"- **Mean Score**: {report.overall_mean_score:.4f}",
-            "",
         ]
+        if report.infra_error_count > 0:
+            lines.append(
+                f"- **Infra-Error Rate**: {report.infra_error_rate:.1%} "
+                f"({report.infra_error_count} of {report.total_trials} trials)"
+            )
+            lines.append(
+                "  - ⚠ A non-zero infra-error rate means some trials failed "
+                "due to infrastructure (OOM, network, sandbox) rather than "
+                "the agent. Cross-check resource config before blaming the model."
+            )
+        lines.append("")
 
         # pass@k summary
         if report.pass_at_k:
@@ -238,10 +262,21 @@ class ReportGenerator:
         for key, val in sorted(report.pass_at_k.items()):
             lines[0] += f", {key}={val:.4f}"
 
+        if report.infra_error_count > 0:
+            lines[0] += f", infra_errors={report.infra_error_rate:.1%}"
+
         if report.regression_report and report.regression_report.has_regression:
-            lines.append(
-                f"REGRESSION [{report.regression_report.overall_severity.value.upper()}]"
-            )
+            # Prefer the noise-aware "blocking" count if specs were provided.
+            n_blocking = len(report.regression_report.blocking_regressions)
+            n_total = len(report.regression_report.regressions)
+            severity = report.regression_report.overall_severity.value.upper()
+            if report.regression_report.infra_config_mismatch and n_blocking < n_total:
+                lines.append(
+                    f"REGRESSION [{severity}] — {n_blocking}/{n_total} blocking "
+                    f"({n_total - n_blocking} within infra-noise band; configs differ)"
+                )
+            else:
+                lines.append(f"REGRESSION [{severity}]")
 
         return "\n".join(lines)
 
@@ -258,6 +293,15 @@ class ReportGenerator:
             + _html_card("Pass Rate", f"{pass_rate_pct:.1f}%", pass_rate_color)
             + _html_card("Mean Score", f"{report.overall_mean_score:.4f}", "#8b5cf6")
         )
+        # Only surface the infra-error card when there's something to
+        # see — zero infra errors shouldn't clutter the dashboard.
+        if report.infra_error_count > 0:
+            infra_color = "#ef4444" if report.infra_error_rate >= 0.05 else "#f97316"
+            cards_html += _html_card(
+                "Infra Errors",
+                f"{report.infra_error_rate * 100:.1f}%",
+                infra_color,
+            )
 
         # --- Capability / Reliability bar charts ---
         capability_svg = ""
