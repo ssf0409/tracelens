@@ -1,0 +1,86 @@
+# Contributing to eval-kit
+
+Thanks for your interest in improving eval-kit. This project aims to be a *trustworthy* evaluation framework for autonomous AI agents, so contributions that improve reproducibility, reliability, or noise-awareness are especially welcome.
+
+## Ways to contribute
+
+- **Bug reports** — open an issue with a minimal repro (the smaller, the better).
+- **Feature requests** — describe the agent/eval scenario you're trying to support before proposing an API.
+- **Pull requests** — see below.
+- **Benchmark contributions** — new task packs for public benchmarks under `benchmarks/` are very welcome.
+
+## Development setup
+
+```bash
+git clone https://github.com/ssf0409/eval-kit.git
+cd eval-kit
+
+# Recommended: uv
+uv venv
+uv pip install -e ".[dev]"
+
+# Or plain pip
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### Optional dependency groups
+
+- `.[llm]` — LLM providers (openai, anthropic, litellm). Required to run tests in `tests/unit/llm/`.
+- `.[http]` — httpx. Required for `HTTPAPIAdapter`.
+- `.[dev]` — dev tools (pytest, ruff, mypy, httpx).
+
+Tests that depend on `litellm` are gated behind a skip marker — running `pytest` without the `[llm]` extra installed will SKIP them, not FAIL.
+
+### Running the verification gate
+
+```bash
+pytest -q                          # all tests
+ruff check src/ tests/             # lint
+mypy src/eval_kit/                 # type check (strict mode)
+```
+
+All three must pass before opening a PR.
+
+## Pull request guidelines
+
+1. **One change per PR.** If your branch touches the adapter layer *and* the statistics layer, split it.
+2. **Write tests first** (TDD). Failing tests go in the same commit as the fix/feature.
+3. **Don't mock at system boundaries.** Tests that pretend the HTTP adapter works without actually exercising it create false confidence.
+4. **Update public API exports deliberately.** Adding something to `src/eval_kit/__init__.py` is a stability promise. If you're unsure whether a symbol belongs in the public surface, leave it at the submodule path.
+5. **Document "why" in the PR body.** Commit messages should explain the user-visible behavior change; PR bodies should explain the motivation (what problem does this solve? what alternatives were considered?).
+6. **If you modify regression / baseline logic, add a backwards-compat note** to `CHANGELOG.md`. Baselines are a stability boundary.
+
+## Commit style
+
+- `feat:` / `fix:` / `docs:` / `test:` / `refactor:` / `chore:` prefixes (Conventional Commits, lenient).
+- Present tense, imperative mood. ("add X", not "added X".)
+- Keep commits small and logically atomic so `git blame` tells a useful story.
+
+## Code style
+
+- 4 spaces, no tabs.
+- Type hints on every function (including private helpers).
+- No wildcard imports except in `__init__.py`.
+- Keep line length ≤ 100 (ruff-enforced).
+- Module-level imports only; no imports inside functions.
+
+## Design principles
+
+These guide reviews; deviations should be justified in the PR description:
+
+1. **Grade outcomes, not paths.** If a new grader needs to inspect intermediate steps, think hard about whether you can grade the final artifact instead.
+2. **Explicit reproducibility.** Anything that affects agent behavior — model, prompt, tool availability, *infrastructure* — belongs in `DecisionSpec`.
+3. **Policies, not booleans.** Graders carry a policy (GATE / WARN / TRACK), not a hard-coded `is_critical` flag.
+4. **No silent fallbacks.** If a dependency is missing or a call fails, raise loudly with context.
+
+## Releasing (maintainers only)
+
+1. Bump version in `pyproject.toml` and `src/eval_kit/__init__.py`.
+2. Move `[Unreleased]` notes to a new dated section in `CHANGELOG.md`.
+3. `git tag vX.Y.Z && git push --tags`.
+4. The CI workflow publishes to PyPI on tag push.
+
+## Questions?
+
+Open a GitHub Discussion or issue. For security reports, see [SECURITY.md](SECURITY.md).

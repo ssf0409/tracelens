@@ -5,23 +5,45 @@ build-backend = "hatchling.build"
 [project]
 name = "eval-kit"
 version = "0.1.0"
-description = "Common evaluation framework for AI agents with support for LLM and code-based grading"
+description = "Trustworthy evaluation infrastructure for autonomous AI agents: reproducibility fingerprinting, regression gating, and calibration-aware grading."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
-    { name = "Your Name", email = "you@example.com" }
+    { name = "Stefan Song", email = "ssf0409@gmail.com" }
 ]
-keywords = ["ai", "agents", "evaluation", "llm", "testing"]
+keywords = [
+    "ai",
+    "agents",
+    "evaluation",
+    "llm",
+    "llm-as-judge",
+    "testing",
+    "regression-testing",
+    "reproducibility",
+    "agentic",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ssf0409/eval-kit"
+Repository = "https://github.com/ssf0409/eval-kit"
+Issues = "https://github.com/ssf0409/eval-kit/issues"
+Changelog = "https://github.com/ssf0409/eval-kit/blob/main/CHANGELOG.md"
 
 dependencies = [
     "pydantic>=2.0",
