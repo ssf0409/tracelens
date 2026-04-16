@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same branch/PR — keeps CI fast.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------
+  # core: install WITHOUT the [llm] extra and confirm the test suite
+  # still passes. Any test that needs litellm/openai/anthropic must be
+  # guarded with `pytest.mark.skipif` so it SKIPs cleanly here.
+  # ------------------------------------------------------------------
+  core:
+    name: core (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install (core + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,http]"
+      - name: Verify core-only import
+        run: |
+          python -c "import eval_kit; print(f'{len(eval_kit.__all__)} public exports')"
+      - name: Run tests
+        run: pytest -q --no-header
+
+  # ------------------------------------------------------------------
+  # with-llm: install the [llm] extra and run the full suite. This
+  # exercises LiteLLMProvider, OpenAI/Anthropic adapters, and any
+  # integration paths that were skipped above.
+  # ------------------------------------------------------------------
+  with-llm:
+    name: with-llm (py3.13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install (core + dev + llm + http)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,llm,http]"
+      - name: Run tests
+        run: pytest -q --no-header
+
+  # ------------------------------------------------------------------
+  # examples-smoke: end-to-end smoke test of the packaged example.
+  # Proves the CLI entry point is wired correctly and that a realistic
+  # user workflow (load tasks -> run agent -> grade -> report) works
+  # against the built package.
+  # ------------------------------------------------------------------
+  examples-smoke:
+    name: examples-smoke (py3.13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[http]"
+      - name: Run bundled example
+        run: python examples/run_eval.py
+      - name: Verify CLI entry point
+        run: eval-kit --help
+
+  # ------------------------------------------------------------------
+  # lint: ruff check on source + tests. Mypy is not gated yet (strict
+  # mode is enabled in pyproject.toml but not all modules are clean).
+  # ------------------------------------------------------------------
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install ruff
+        run: pip install "ruff>=0.1"
+      - name: ruff check
+        run: ruff check src/ tests/
