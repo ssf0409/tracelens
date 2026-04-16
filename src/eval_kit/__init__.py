@@ -51,6 +51,7 @@ from eval_kit.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
     EnvironmentSpec,
+    InfraConfig,
     ModelConfig,
     PromptSpec,
     ToolSpec,
@@ -196,6 +197,7 @@ __all__ = [
     "ToolSpec",
     "AgentSpec",
     "EnvironmentSpec",
+    "InfraConfig",
     # --- Workflow ---
     "WorkflowTask",
     "WorkflowStep",

@@ -1,9 +1,12 @@
 """Tests for DecisionSpec and related models."""
 
+from datetime import UTC, datetime
+
 from eval_kit.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
     EnvironmentSpec,
+    InfraConfig,
     ModelConfig,
     PromptSpec,
     ToolSpec,
@@ -407,4 +410,186 @@ class TestDecisionSpecIntegration:
         trial = Trial(task_id="test-task", transcript=transcript)
 
         assert trial.fingerprint is None
-        assert trial.fingerprint_short is None
+
+
+class TestInfraConfig:
+    """Tests for InfraConfig — the infrastructure-noise reproducibility spec."""
+
+    def test_creation_minimal(self):
+        """InfraConfig can be created with no fields (all optional)."""
+        infra = InfraConfig()
+        assert infra.cpu_guaranteed is None
+        assert infra.memory_hard_limit_mb is None
+        assert infra.runtime_platform is None
+
+    def test_creation_with_split_limits(self):
+        """The guaranteed/hard-limit split (Anthropic's core recommendation)
+        is a first-class concept: both are stored, not a single pinned value."""
+        infra = InfraConfig(
+            cpu_guaranteed=1.0,
+            cpu_hard_limit=3.0,
+            memory_guaranteed_mb=512,
+            memory_hard_limit_mb=1536,
+            time_budget_seconds=600.0,
+            concurrency_level=8,
+            runtime_platform="kubernetes",
+            sandbox_provider="gke",
+            harness_version="eval-kit-0.1.0",
+        )
+        assert infra.cpu_guaranteed == 1.0
+        assert infra.cpu_hard_limit == 3.0
+        assert infra.memory_guaranteed_mb == 512
+        assert infra.memory_hard_limit_mb == 1536
+        assert infra.time_budget_seconds == 600.0
+        assert infra.runtime_platform == "kubernetes"
+
+    def test_to_hash_dict_excludes_observational_fields(self):
+        """Hostname, container ID, and wall-clock start are present on the
+        model (for trace audits) but MUST NOT be part of the hash — two
+        runs with the same config on different hosts must collide."""
+        infra = InfraConfig(
+            cpu_hard_limit=2.0,
+            hostname="worker-42",
+            container_id="pod-abc123",
+            wall_clock_start_utc=datetime(2026, 4, 16, 14, 30, tzinfo=UTC),
+        )
+        hash_dict = infra.to_hash_dict()
+        assert "hostname" not in hash_dict
+        assert "container_id" not in hash_dict
+        assert "wall_clock_start_utc" not in hash_dict
+        assert hash_dict["cpu_hard_limit"] == 2.0
+
+    def test_identical_configs_on_different_hosts_hash_equal(self):
+        """Two runs with the same resource config but different hosts
+        should produce the same hash dict (i.e., same fingerprint)."""
+        a = InfraConfig(
+            cpu_hard_limit=3.0, memory_hard_limit_mb=2048,
+            hostname="host-a", container_id="pod-111",
+        )
+        b = InfraConfig(
+            cpu_hard_limit=3.0, memory_hard_limit_mb=2048,
+            hostname="host-b", container_id="pod-222",
+        )
+        assert a.to_hash_dict() == b.to_hash_dict()
+
+    def test_different_cpu_limits_hash_differently(self):
+        """Different resource budgets are a different experiment —
+        the hash must reflect that, so baselines don't get compared
+        across configs that shift scores by several percentage points."""
+        a = InfraConfig(cpu_hard_limit=1.0)
+        b = InfraConfig(cpu_hard_limit=3.0)
+        assert a.to_hash_dict() != b.to_hash_dict()
+
+    def test_different_memory_limits_hash_differently(self):
+        """Memory limits fall in the same "experimental variable" bucket
+        as CPU — Anthropic saw the strongest effect from memory changes."""
+        a = InfraConfig(memory_hard_limit_mb=1024)
+        b = InfraConfig(memory_hard_limit_mb=4096)
+        assert a.to_hash_dict() != b.to_hash_dict()
+
+    def test_sandbox_provider_affects_hash(self):
+        """Different sandboxing providers enforce resource limits with
+        different strictness — recording the provider is part of the
+        experimental variable per Anthropic's recommendation."""
+        a = InfraConfig(cpu_hard_limit=3.0, sandbox_provider="gke")
+        b = InfraConfig(cpu_hard_limit=3.0, sandbox_provider="terminal-bench-sandbox")
+        assert a.to_hash_dict() != b.to_hash_dict()
+
+
+class TestDecisionSpecWithInfra:
+    """Tests for DecisionSpec integration with InfraConfig."""
+
+    def test_fingerprint_stable_when_infra_omitted(self):
+        """Back-compat: specs without InfraConfig must produce the same
+        fingerprint as before InfraConfig was introduced. We enforce this
+        by only including 'infra' in the hash dict when it's non-None."""
+        spec = DecisionSpec(
+            model=ModelConfig(provider="anthropic", model_id="claude-3-opus"),
+        )
+        hash_dict = spec._to_hash_dict()
+        # The key must be absent (not present with a null value), otherwise
+        # any previously-stored baseline fingerprint would drift.
+        assert "infra" not in hash_dict
+
+    def test_fingerprint_changes_when_infra_added(self):
+        """Adding an InfraConfig to an existing spec changes the
+        fingerprint — infra is a first-class experimental variable."""
+        model = ModelConfig(provider="anthropic", model_id="claude-3-opus")
+        without = DecisionSpec(model=model)
+        with_infra = DecisionSpec(model=model, infra=InfraConfig(cpu_hard_limit=3.0))
+        assert without.fingerprint != with_infra.fingerprint
+
+    def test_fingerprint_differs_for_different_infra(self):
+        """Two specs identical except for InfraConfig must have
+        different fingerprints — this is the whole point."""
+        model = ModelConfig(provider="anthropic", model_id="claude-3-opus")
+        tight = DecisionSpec(model=model, infra=InfraConfig(cpu_hard_limit=1.0))
+        loose = DecisionSpec(model=model, infra=InfraConfig(cpu_hard_limit=5.0))
+        assert tight.fingerprint != loose.fingerprint
+
+    def test_fingerprint_same_for_observational_differences_only(self):
+        """Two runs of the same experiment on different machines /
+        at different times must collide to the same fingerprint."""
+        model = ModelConfig(provider="anthropic", model_id="claude-3-opus")
+        shared_infra_kwargs = dict(cpu_hard_limit=3.0, memory_hard_limit_mb=2048)
+        run_a = DecisionSpec(
+            model=model,
+            infra=InfraConfig(
+                **shared_infra_kwargs,
+                hostname="runner-1",
+                wall_clock_start_utc=datetime(2026, 4, 16, 9, 0, tzinfo=UTC),
+            ),
+        )
+        run_b = DecisionSpec(
+            model=model,
+            infra=InfraConfig(
+                **shared_infra_kwargs,
+                hostname="runner-2",
+                wall_clock_start_utc=datetime(2026, 4, 16, 21, 0, tzinfo=UTC),
+            ),
+        )
+        assert run_a.fingerprint == run_b.fingerprint
+
+    def test_diff_surfaces_infra_changes(self):
+        """DecisionSpec.diff() should highlight infra drift between
+        a baseline and a current run."""
+        baseline = DecisionSpec(
+            infra=InfraConfig(cpu_hard_limit=1.0, memory_hard_limit_mb=1024),
+        )
+        current = DecisionSpec(
+            infra=InfraConfig(cpu_hard_limit=3.0, memory_hard_limit_mb=1024),
+        )
+        diffs = baseline.diff(current)
+        assert "infra" in diffs
+        baseline_infra, current_infra = diffs["infra"]
+        assert baseline_infra["cpu_hard_limit"] == 1.0
+        assert current_infra["cpu_hard_limit"] == 3.0
+
+    def test_summary_exposes_infra_when_present(self):
+        """to_summary() should surface key infra fields so reports can
+        show the experimental configuration at a glance."""
+        spec = DecisionSpec(
+            model=ModelConfig(provider="anthropic", model_id="claude-3-opus"),
+            infra=InfraConfig(
+                cpu_guaranteed=1.0,
+                cpu_hard_limit=3.0,
+                memory_hard_limit_mb=2048,
+                time_budget_seconds=600.0,
+                runtime_platform="kubernetes",
+            ),
+        )
+        summary = spec.to_summary()
+        assert "infra" in summary
+        assert summary["infra"]["platform"] == "kubernetes"
+        # Guaranteed/hard-limit pair is rendered as "floor/ceiling".
+        assert summary["infra"]["cpu"] == "1.0/3.0"
+        assert summary["infra"]["time_budget_s"] == 600.0
+
+    def test_summary_omits_infra_when_absent(self):
+        """When no InfraConfig is attached, the 'infra' key must not
+        appear in the summary — keeps back-compat for existing callers."""
+        spec = DecisionSpec(
+            model=ModelConfig(provider="anthropic", model_id="claude-3-opus"),
+        )
+        summary = spec.to_summary()
+        assert "infra" not in summary

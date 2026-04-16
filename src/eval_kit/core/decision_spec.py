@@ -14,6 +14,7 @@ Research-grade evaluations require knowing:
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
@@ -251,6 +252,122 @@ class EnvironmentSpec(BaseModel):
         }
 
 
+class InfraConfig(BaseModel):
+    """Infrastructure / runtime-environment configuration.
+
+    Agentic evals are end-to-end system tests: the runtime environment is
+    part of the problem-solving process. Resource limits, time budgets, and
+    concurrency all influence what strategies an agent can use, which means
+    infrastructure configuration is a first-class experimental variable —
+    not passive scaffolding.
+
+    Anthropic's "Quantifying infrastructure noise in agentic coding evals"
+    (Feb 2026) showed that infrastructure config alone can swing
+    Terminal-Bench 2.0 scores by ~6 percentage points, often more than the
+    leaderboard gap between frontier models. Their recommendations are
+    baked into the shape of this spec:
+
+    1. Record **both** a guaranteed allocation and a separate hard kill
+       threshold, per task (see ``cpu_guaranteed`` / ``cpu_hard_limit``
+       and ``memory_guaranteed_mb`` / ``memory_hard_limit_mb``). Pinning
+       them to the same value leaves zero headroom for transient spikes
+       and produces spurious infra failures.
+    2. Capture the sandboxing provider, because enforcement semantics
+       differ across runtimes (Kubernetes vs. Docker vs. Fly.io vs. bare
+       containers).
+    3. Keep observational fields (``hostname``, ``container_id``,
+       ``wall_clock_start_utc``) out of the fingerprint so two runs with
+       identical resource configs on different hosts collide to the same
+       fingerprint.
+
+    See: https://www.anthropic.com/engineering/infrastructure-noise
+    """
+
+    # --- Behavior-affecting fields (included in fingerprint) ---
+
+    cpu_guaranteed: float | None = Field(
+        default=None,
+        description="Guaranteed CPU allocation in whole cores (e.g. 1.0 = 1 core).",
+    )
+    cpu_hard_limit: float | None = Field(
+        default=None,
+        description="CPU hard limit / kill threshold in whole cores.",
+    )
+    memory_guaranteed_mb: int | None = Field(
+        default=None,
+        description="Guaranteed memory allocation in MB.",
+    )
+    memory_hard_limit_mb: int | None = Field(
+        default=None,
+        description="Memory hard limit / OOM threshold in MB.",
+    )
+    time_budget_seconds: float | None = Field(
+        default=None,
+        description="Per-task wall-clock time budget in seconds.",
+    )
+    concurrency_level: int | None = Field(
+        default=None,
+        description="Max concurrent trials (affects resource contention).",
+    )
+    runtime_platform: str | None = Field(
+        default=None,
+        description=(
+            "Container / runtime platform "
+            "(e.g. 'kubernetes', 'docker', 'local', 'fly.io')."
+        ),
+    )
+    sandbox_provider: str | None = Field(
+        default=None,
+        description=(
+            "Sandboxing provider. Enforcement semantics "
+            "(e.g. lenient vs. strict OOM handling) vary by provider."
+        ),
+    )
+    harness_version: str | None = Field(
+        default=None,
+        description="Version of the eval harness (eval_kit or downstream wrapper).",
+    )
+
+    # --- Observational fields (NOT included in fingerprint) ---
+
+    hostname: str | None = Field(
+        default=None,
+        description="Host running the eval. Observational; not in fingerprint.",
+    )
+    container_id: str | None = Field(
+        default=None,
+        description="Container / pod ID. Observational; not in fingerprint.",
+    )
+    wall_clock_start_utc: datetime | None = Field(
+        default=None,
+        description=(
+            "UTC start time of the run. Useful for auditing "
+            "time-of-day effects (e.g. upstream API latency spikes); "
+            "not in fingerprint."
+        ),
+    )
+
+    def to_hash_dict(self) -> dict[str, Any]:
+        """Return dict of behavior-affecting fields for hashing.
+
+        Observational fields (``hostname``, ``container_id``,
+        ``wall_clock_start_utc``) are intentionally excluded: two runs
+        with identical resource configs on different hosts should
+        collide to the same fingerprint.
+        """
+        return {
+            "cpu_guaranteed": self.cpu_guaranteed,
+            "cpu_hard_limit": self.cpu_hard_limit,
+            "memory_guaranteed_mb": self.memory_guaranteed_mb,
+            "memory_hard_limit_mb": self.memory_hard_limit_mb,
+            "time_budget_seconds": self.time_budget_seconds,
+            "concurrency_level": self.concurrency_level,
+            "runtime_platform": self.runtime_platform,
+            "sandbox_provider": self.sandbox_provider,
+            "harness_version": self.harness_version,
+        }
+
+
 class DecisionSpec(BaseModel):
     """Complete specification of all decision-affecting parameters.
 
@@ -315,6 +432,17 @@ class DecisionSpec(BaseModel):
         description="Execution environment specification",
     )
 
+    # Infrastructure / runtime configuration (resource limits, platform, etc.)
+    infra: InfraConfig | None = Field(
+        default=None,
+        description=(
+            "Runtime infrastructure configuration. Included in the "
+            "fingerprint so runs with different resource budgets don't "
+            "collide. See InfraConfig docstring for the distinction "
+            "between behavior-affecting and observational fields."
+        ),
+    )
+
     # Global random seed
     global_seed: int | None = Field(
         default=None,
@@ -349,7 +477,7 @@ class DecisionSpec(BaseModel):
 
     def _to_hash_dict(self) -> dict[str, Any]:
         """Build dict for hashing."""
-        return {
+        result: dict[str, Any] = {
             "model": self.model.to_hash_dict() if self.model else None,
             "prompts": self.prompts.to_hash_dict() if self.prompts else None,
             "tools": [t.to_hash_dict() for t in sorted(self.tools, key=lambda t: t.name)],
@@ -358,6 +486,13 @@ class DecisionSpec(BaseModel):
             "global_seed": self.global_seed,
             "extra": self.extra,
         }
+        # Only include ``infra`` in the hash when it's explicitly set so
+        # fingerprints recorded before InfraConfig existed stay stable.
+        # Adding the key unconditionally (with a null value for specs
+        # without infra) would change every stored baseline's fingerprint.
+        if self.infra is not None:
+            result["infra"] = self.infra.to_hash_dict()
+        return result
 
     def is_compatible_with(self, other: "DecisionSpec") -> bool:
         """Check if two specs are compatible for comparison.
@@ -417,5 +552,28 @@ class DecisionSpec(BaseModel):
 
         if self.environment and self.environment.git_commit:
             summary["git_commit"] = self.environment.git_commit[:7]
+
+        if self.infra:
+            infra_summary: dict[str, Any] = {}
+            if self.infra.runtime_platform:
+                infra_summary["platform"] = self.infra.runtime_platform
+            if self.infra.cpu_hard_limit is not None:
+                infra_summary["cpu"] = (
+                    f"{self.infra.cpu_guaranteed}/{self.infra.cpu_hard_limit}"
+                    if self.infra.cpu_guaranteed is not None
+                    else str(self.infra.cpu_hard_limit)
+                )
+            if self.infra.memory_hard_limit_mb is not None:
+                infra_summary["memory_mb"] = (
+                    f"{self.infra.memory_guaranteed_mb}/{self.infra.memory_hard_limit_mb}"
+                    if self.infra.memory_guaranteed_mb is not None
+                    else str(self.infra.memory_hard_limit_mb)
+                )
+            if self.infra.time_budget_seconds is not None:
+                infra_summary["time_budget_s"] = self.infra.time_budget_seconds
+            if self.infra.concurrency_level is not None:
+                infra_summary["concurrency"] = self.infra.concurrency_level
+            if infra_summary:
+                summary["infra"] = infra_summary
 
         return summary
