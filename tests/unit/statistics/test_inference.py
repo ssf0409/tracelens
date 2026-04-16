@@ -1,18 +1,18 @@
 """Tests for statistical inference module."""
 
-import pytest
 import numpy as np
+import pytest
 
 from eval_kit.statistics.inference import (
-    MetricEstimate,
     ComparisonResult,
+    MetricEstimate,
     bootstrap_ci,
-    estimate_metric,
     bootstrap_difference_ci,
     cohens_d,
-    permutation_test,
     compare_metrics,
     compare_to_baseline_summary,
+    estimate_metric,
+    permutation_test,
 )
 
 

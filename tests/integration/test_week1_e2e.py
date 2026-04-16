@@ -9,7 +9,7 @@ Validates that all three Week 1 features work together in a realistic workflow:
 
 import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -29,7 +29,6 @@ from eval_kit.execution.agent_adapter import SimpleAdapter
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 from eval_kit.llm.provider import InMemoryProvider
 from eval_kit.reporting.generator import ReportGenerator
-
 
 # ── Test graders ───────────────────────────────────────────────
 
@@ -230,8 +229,8 @@ class TestWeek1E2E:
         transcript = Transcript(
             task_id="t1",
             final_output={"wrong_key": "no result key"},  # Will fail safety gate
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
 
         provider = InMemoryProvider(responses=['{"score": 9, "feedback": "Great"}'])
@@ -261,8 +260,8 @@ class TestWeek1E2E:
         transcript = Transcript(
             task_id="t1",
             final_output={"result": "valid"},
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
 
         # Legacy must-pass grader (should still block)

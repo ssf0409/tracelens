@@ -1,17 +1,13 @@
 """Tests for task module."""
 
 import json
-import pytest
 from pathlib import Path
-from datetime import datetime
 
 from eval_kit.core.task import (
+    EvalSet,
+    JSONTaskLoader,
     Task,
     TaskExpectation,
-    TaskLoader,
-    JSONTaskLoader,
-    EvalSet,
-    EvalSetMetadata,
 )
 
 

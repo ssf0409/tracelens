@@ -3,16 +3,13 @@
 import pytest
 
 from eval_kit.core.grader import (
-    Grader,
     CodeGrader,
     CompositeGrader,
-    GraderType,
-    GraderRole,
     GraderConfig,
+    GraderRole,
 )
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import Transcript
-from eval_kit.core.outcome import Outcome
 
 
 class SimpleScoreGrader(CodeGrader):

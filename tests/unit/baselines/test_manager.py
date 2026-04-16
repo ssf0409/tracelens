@@ -1,13 +1,13 @@
 """Tests for baseline manager."""
 
-import pytest
-import json
 from pathlib import Path
 
+import pytest
+
 from eval_kit.baselines.manager import (
+    BaselineManager,
     MetricBaseline,
     TaskBaseline,
-    BaselineManager,
 )
 
 

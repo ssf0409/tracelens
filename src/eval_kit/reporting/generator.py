@@ -6,7 +6,7 @@ Supports markdown, CI summary, and self-contained HTML dashboard output.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html import escape
 from typing import Any
 
@@ -15,8 +15,8 @@ import numpy as np
 from eval_kit.baselines.comparison import RegressionReport
 from eval_kit.baselines.manager import BaselineManager
 from eval_kit.core.trial import TrialBatch
-from eval_kit.statistics.pass_at_k import pass_at_k, PassAtKAnalyzer
 from eval_kit.statistics.consistency import ConsistencyAnalyzer
+from eval_kit.statistics.pass_at_k import PassAtKAnalyzer
 
 
 @dataclass
@@ -247,7 +247,7 @@ class ReportGenerator:
 
     def render_html(self, report: ReportData) -> str:
         """Render a self-contained HTML dashboard with inline CSS and SVG charts."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         pass_rate_pct = report.overall_pass_rate * 100
         pass_rate_color = _pass_rate_color(report.overall_pass_rate)
 

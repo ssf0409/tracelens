@@ -241,7 +241,7 @@ class TaskBaseline(BaseModel):
 
         # Check cooldown
         if self.in_cooldown:
-            return False, f"In promotion cooldown period"
+            return False, "In promotion cooldown period"
 
         # Check sample size
         if sample_size < self.promotion_policy.min_samples:

@@ -3,11 +3,11 @@
 import pytest
 
 from eval_kit.core.transcript import (
-    Transcript,
     StreamingEvent,
     StreamingEventType,
+    Transcript,
 )
-from eval_kit.statistics.latency import LatencyAnalyzer, LatencyMetrics
+from eval_kit.statistics.latency import LatencyAnalyzer
 
 
 def _make_streaming_transcript(

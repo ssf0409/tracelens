@@ -3,7 +3,6 @@
 import pytest
 
 from eval_kit.core.grader import CodeGrader
-from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import EvalSet, Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.core.trial import TrialStatus

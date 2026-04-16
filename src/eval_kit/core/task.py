@@ -4,12 +4,12 @@ Tasks are the fundamental unit of evaluation - they define what to test
 and what outcomes are expected.
 """
 
+import json
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import json
-import uuid
 
 from pydantic import BaseModel, Field
 

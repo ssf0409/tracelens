@@ -29,7 +29,32 @@ Optional dependencies:
 See the README for a 10-minute quickstart.
 """
 
-# --- Core models ------------------------------------------------------------
+# Imports are grouped alphabetically by module path (ruff-enforced).
+# The topical grouping lives in `__all__` below, which is the readable
+# index of the public API.
+
+from eval_kit.baselines.comparison import (
+    MetricRegression,
+    RegressionDetector,
+    RegressionReport,
+    RegressionSeverity,
+)
+from eval_kit.baselines.manager import (
+    BaselineManager,
+    BaselineType,
+    MetricBaseline,
+    PromotionPolicy,
+    TaskBaseline,
+)
+from eval_kit.contracts.contract import BehaviorContract
+from eval_kit.core.decision_spec import (
+    AgentSpec,
+    DecisionSpec,
+    EnvironmentSpec,
+    ModelConfig,
+    PromptSpec,
+    ToolSpec,
+)
 from eval_kit.core.grader import (
     CodeGrader,
     CompositeGrader,
@@ -54,26 +79,12 @@ from eval_kit.core.transcript import (
     TranscriptStep,
 )
 from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
-
-# --- Reproducibility --------------------------------------------------------
-from eval_kit.core.decision_spec import (
-    AgentSpec,
-    DecisionSpec,
-    EnvironmentSpec,
-    ModelConfig,
-    PromptSpec,
-    ToolSpec,
-)
-
-# --- Workflow (multi-step tasks) -------------------------------------------
 from eval_kit.core.workflow import (
     StepResult,
     WorkflowContext,
     WorkflowStep,
     WorkflowTask,
 )
-
-# --- Execution --------------------------------------------------------------
 from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
 from eval_kit.execution.http_adapter import (
     AuthConfig,
@@ -84,8 +95,6 @@ from eval_kit.execution.http_adapter import (
 )
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 from eval_kit.execution.workflow_runner import WorkflowAdapter, WorkflowRunner
-
-# --- Built-in graders -------------------------------------------------------
 from eval_kit.graders.event_chain import (
     EventChainConfig,
     EventChainVerifier,
@@ -93,6 +102,12 @@ from eval_kit.graders.event_chain import (
     EventMatchType,
     OrderingMode,
 )
+
+# LLM provider abstraction: core symbols only. LiteLLMProvider requires the
+# optional `[llm]` extra and is reachable via
+# `from eval_kit.llm.litellm_provider import LiteLLMProvider`.
+from eval_kit.llm.factory import create_provider
+from eval_kit.llm.provider import InMemoryProvider, LLMProvider
 from eval_kit.metrics.budgets import (
     LatencyGrader,
     TokenBudgetGrader,
@@ -106,29 +121,7 @@ from eval_kit.metrics.validators import (
     RegexMatchGrader,
     StructuredOutputGrader,
 )
-
-# --- Contracts --------------------------------------------------------------
-from eval_kit.contracts.contract import BehaviorContract
-
-# --- Baselines & regression detection --------------------------------------
-from eval_kit.baselines.comparison import (
-    MetricRegression,
-    RegressionDetector,
-    RegressionReport,
-    RegressionSeverity,
-)
-from eval_kit.baselines.manager import (
-    BaselineManager,
-    BaselineType,
-    MetricBaseline,
-    PromotionPolicy,
-    TaskBaseline,
-)
-
-# --- Reporting --------------------------------------------------------------
 from eval_kit.reporting.generator import ReportData, ReportGenerator, TaskSummary
-
-# --- Statistics -------------------------------------------------------------
 from eval_kit.statistics.consistency import (
     ConsistencyAnalyzer,
     pass_to_k,
@@ -152,10 +145,6 @@ from eval_kit.statistics.pass_at_k import (
     pass_at_k,
     pass_at_k_estimator,
 )
-
-# --- LLM provider abstraction (core symbols only; litellm is optional) -----
-from eval_kit.llm.factory import create_provider
-from eval_kit.llm.provider import InMemoryProvider, LLMProvider
 
 __version__ = "0.1.0"
 

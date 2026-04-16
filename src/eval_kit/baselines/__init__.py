@@ -1,17 +1,17 @@
 """Baseline management and regression detection."""
 
+from eval_kit.baselines.comparison import (
+    MetricRegression,
+    RegressionDetector,
+    RegressionReport,
+    RegressionSeverity,
+)
 from eval_kit.baselines.manager import (
-    MetricBaseline,
-    TaskBaseline,
     BaselineManager,
     BaselineType,
+    MetricBaseline,
     PromotionPolicy,
-)
-from eval_kit.baselines.comparison import (
-    RegressionSeverity,
-    MetricRegression,
-    RegressionReport,
-    RegressionDetector,
+    TaskBaseline,
 )
 
 __all__ = [

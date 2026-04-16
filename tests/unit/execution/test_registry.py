@@ -2,7 +2,7 @@
 
 import pytest
 
-from eval_kit.execution.registry import load_class, instantiate
+from eval_kit.execution.registry import instantiate, load_class
 
 
 class TestLoadClass:

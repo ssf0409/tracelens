@@ -3,9 +3,9 @@
 import pytest
 
 from eval_kit.statistics.consistency import (
+    ConsistencyAnalyzer,
     pass_to_k,
     pass_to_k_estimator,
-    ConsistencyAnalyzer,
 )
 
 

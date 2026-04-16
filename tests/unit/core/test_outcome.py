@@ -2,7 +2,7 @@
 
 import pytest
 
-from eval_kit.core.outcome import Outcome, GradeLevel, AggregatedOutcome
+from eval_kit.core.outcome import AggregatedOutcome, GradeLevel, Outcome
 
 
 class TestGradeLevel:

@@ -1,13 +1,11 @@
 """Tests for transcript module."""
 
-import pytest
-from datetime import datetime, timedelta
 
 from eval_kit.core.transcript import (
-    Transcript,
-    TranscriptStep,
     StepType,
     ToolCall,
+    Transcript,
+    TranscriptStep,
 )
 
 

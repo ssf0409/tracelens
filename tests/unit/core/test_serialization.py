@@ -1,7 +1,7 @@
 """Tests for result persistence: TrialBatch and Transcript round-trip serialization."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,8 +14,7 @@ from eval_kit.core.decision_spec import (
     ToolSpec,
 )
 from eval_kit.core.outcome import Outcome
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType, ToolCall
+from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
 from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 
 
@@ -49,7 +48,7 @@ class TestTranscriptSerialization:
 
     def test_transcript_timestamps_roundtrip(self) -> None:
         """Datetime fields serialize to ISO strings and back."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         t = Transcript(task_id="task-1", started_at=now, completed_at=now)
         data = t.to_dict()
 
@@ -174,8 +173,8 @@ class TestTrialBatchSerialization:
 
         batch = TrialBatch(
             trials=trials,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
         data = batch.to_dict()
         restored = TrialBatch.from_dict(data)
@@ -195,8 +194,8 @@ class TestTrialBatchSerialization:
         trial = Trial(
             task_id="t1",
             status=TrialStatus.COMPLETED,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
         trial.add_outcome(Outcome(
             trial_id=trial.trial_id,
@@ -206,8 +205,8 @@ class TestTrialBatchSerialization:
         ))
         batch = TrialBatch(
             trials=[trial],
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
         data = batch.to_dict()
         json_str = json.dumps(data)

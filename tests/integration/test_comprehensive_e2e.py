@@ -15,7 +15,6 @@ Tests cover:
 
 import asyncio
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -37,11 +36,10 @@ from eval_kit.core.grader import (
 )
 from eval_kit.core.task import EvalSet, JSONTaskLoader, Task
 from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import TrialBatch, TrialStatus
+from eval_kit.core.trial import TrialStatus
 from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 from eval_kit.reporting.generator import ReportData, ReportGenerator
-
 
 # ---------------------------------------------------------------------------
 # Test graders

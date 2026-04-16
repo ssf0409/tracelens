@@ -3,9 +3,9 @@
 import pytest
 
 from eval_kit.statistics.pass_at_k import (
+    PassAtKAnalyzer,
     pass_at_k,
     pass_at_k_estimator,
-    PassAtKAnalyzer,
 )
 
 

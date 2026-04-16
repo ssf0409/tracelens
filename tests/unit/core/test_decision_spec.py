@@ -1,13 +1,12 @@
 """Tests for DecisionSpec and related models."""
 
-import pytest
 from eval_kit.core.decision_spec import (
+    AgentSpec,
     DecisionSpec,
+    EnvironmentSpec,
     ModelConfig,
     PromptSpec,
     ToolSpec,
-    AgentSpec,
-    EnvironmentSpec,
 )
 
 

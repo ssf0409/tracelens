@@ -82,6 +82,13 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+# Baseline ignores — cleanup tracked as follow-up work.
+# - E501: 23 pre-existing long lines (HTML/SVG literals in generator.py,
+#   long test constructor calls). Re-enable after a targeted line-wrap pass.
+# - UP042: 7 `class X(str, Enum)` definitions that could become `StrEnum`.
+#   Deferred because StrEnum is Python 3.11+ and changing the bases is
+#   a minor but visible API change for downstream code.
+ignore = ["E501", "UP042"]
 
 [tool.mypy]
 python_version = "3.11"

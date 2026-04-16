@@ -1,12 +1,11 @@
 """Tests for regression detection."""
 
-import pytest
 
 from eval_kit.baselines.comparison import (
-    RegressionSeverity,
     MetricRegression,
-    RegressionReport,
     RegressionDetector,
+    RegressionReport,
+    RegressionSeverity,
 )
 from eval_kit.baselines.manager import TaskBaseline
 

@@ -6,10 +6,10 @@ A Trial represents a single execution of a Task, including:
 - Status and timing information
 """
 
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any
-import uuid
 
 from pydantic import BaseModel, Field
 

@@ -1,10 +1,10 @@
 """Tests for trial module."""
 
-import pytest
-from datetime import datetime
 
-from eval_kit.core.trial import Trial, TrialStatus, TrialBatch
+import pytest
+
 from eval_kit.core.outcome import Outcome
+from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
 
 
 class TestTrialStatus:

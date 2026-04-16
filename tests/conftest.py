@@ -1,15 +1,15 @@
 """Shared test fixtures and configuration."""
 
-import pytest
 from datetime import datetime
-import tempfile
 from pathlib import Path
 
-from eval_kit.core.task import Task, TaskExpectation, EvalSet
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType, ToolCall
-from eval_kit.core.outcome import Outcome, GradeLevel
+import pytest
+
+from eval_kit.baselines.manager import TaskBaseline
+from eval_kit.core.outcome import Outcome
+from eval_kit.core.task import Task, TaskExpectation
+from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
 from eval_kit.core.trial import Trial, TrialStatus
-from eval_kit.baselines.manager import TaskBaseline, MetricBaseline
 
 
 @pytest.fixture

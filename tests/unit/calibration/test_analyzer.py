@@ -5,7 +5,6 @@ import pytest
 from eval_kit.calibration.analyzer import (
     AnnotationSet,
     CalibrationAnalyzer,
-    CalibrationResult,
     HumanAnnotation,
 )
 from eval_kit.core.outcome import Outcome
