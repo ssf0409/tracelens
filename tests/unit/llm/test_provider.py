@@ -1,5 +1,6 @@
 """Tests for LLM provider abstraction."""
 
+import importlib.util
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -11,6 +12,14 @@ from eval_kit.core.task import Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.llm.factory import create_provider
 from eval_kit.llm.provider import InMemoryProvider, LLMProvider
+
+# `litellm` is an optional dependency (install with `pip install "eval-kit[llm]"`).
+# Tests that import LiteLLMProvider must be skipped when it's absent so the
+# core-only CI job stays green.
+requires_litellm = pytest.mark.skipif(
+    importlib.util.find_spec("litellm") is None,
+    reason="requires 'litellm' (install with: pip install 'eval-kit[llm]')",
+)
 
 
 class TestLLMProviderABC:
@@ -56,6 +65,7 @@ class TestFactory:
         provider = create_provider("in-memory", responses=["test"])
         assert isinstance(provider, InMemoryProvider)
 
+    @requires_litellm
     def test_unknown_provider_creates_litellm_if_available(self) -> None:
         """When litellm is installed, any model string creates a LiteLLMProvider."""
         from eval_kit.llm.litellm_provider import LiteLLMProvider
@@ -111,6 +121,7 @@ class TestLLMGraderWithProvider:
             await grader.grade(transcript, task)
 
 
+@requires_litellm
 class TestLiteLLMProvider:
     """Behavioral tests for LiteLLMProvider using mocked litellm."""
 
