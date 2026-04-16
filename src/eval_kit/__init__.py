@@ -79,7 +79,7 @@ from eval_kit.core.transcript import (
     Transcript,
     TranscriptStep,
 )
-from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from eval_kit.core.trial import InfraError, Trial, TrialBatch, TrialStatus
 from eval_kit.core.workflow import (
     StepResult,
     WorkflowContext,
@@ -158,6 +158,7 @@ __all__ = [
     "Trial",
     "TrialBatch",
     "TrialStatus",
+    "InfraError",
     "Transcript",
     "TranscriptStep",
     "StreamingEvent",

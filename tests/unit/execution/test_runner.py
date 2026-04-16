@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from eval_kit.core.grader import CodeGrader
 from eval_kit.core.task import EvalSet, Task
 from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import TrialStatus
+from eval_kit.core.trial import InfraError, TrialStatus
 from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
 
@@ -309,3 +309,113 @@ class TestRunnerLifecycleHooks:
 
         assert "teardown" in adapter.calls
         assert batch.trials[0].status == TrialStatus.TIMEOUT
+
+
+# --- Infra-error vs task-failure classification (Track 2 / Anthropic) ---
+
+
+class TestInfraErrorClassification:
+    """Runner must distinguish infrastructure failures from task failures
+    so the infra-error rate can be reported separately and regressions
+    aren't spuriously attributed to the agent."""
+
+    async def test_explicit_infra_error_marks_infra_error_status(self):
+        """Adapters can raise InfraError to self-report an infra failure."""
+        async def raises_infra(input_data: dict) -> dict:
+            raise InfraError("upstream API unreachable")
+
+        runner = EvaluationRunner(SimpleAdapter(raises_infra), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.INFRA_ERROR
+        assert trial.is_infra_failure is True
+        assert "upstream API unreachable" in trial.error_message
+        assert len(trial.outcomes) == 0  # No grading — we don't have a transcript
+        # Batch-level aggregation surfaces it.
+        assert batch.infra_error_count == 1
+        assert batch.infra_error_rate == 1.0
+
+    async def test_memory_error_classified_as_infra(self):
+        """OOM kills are the canonical Anthropic case — always infra."""
+        async def ooms(input_data: dict) -> dict:
+            raise MemoryError("out of memory")
+
+        runner = EvaluationRunner(SimpleAdapter(ooms), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
+        assert batch.infra_error_rate == 1.0
+
+    async def test_connection_error_classified_as_infra(self):
+        """Network failures are infra, not task-level."""
+        async def network_down(input_data: dict) -> dict:
+            raise ConnectionError("connection refused")
+
+        runner = EvaluationRunner(SimpleAdapter(network_down), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
+
+    async def test_generic_runtime_error_stays_task_failure(self):
+        """We don't want arbitrary RuntimeError bugs in the agent to
+        silently inflate the infra-error rate and mask regressions."""
+        async def generic_bug(input_data: dict) -> dict:
+            raise RuntimeError("agent bug")
+
+        runner = EvaluationRunner(SimpleAdapter(generic_bug), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.FAILED
+        assert batch.infra_error_count == 0
+        # But still surfaced in the error message for debugging.
+        assert "agent bug" in batch.trials[0].error_message
+
+    async def test_setup_infra_error_classified_correctly(self):
+        """Infra errors during setup should also be classified as INFRA_ERROR,
+        not as a task failure — the agent never got the chance to run."""
+
+        class _InfraFailSetup(AgentAdapter):
+            async def setup(self, task: Task) -> None:
+                raise InfraError("sandbox provisioning failed")
+
+            async def run(self, task: Task) -> Transcript:
+                return Transcript(task_id=task.task_id)
+
+            async def teardown(
+                self, task: Task, transcript: Transcript | None
+            ) -> None:
+                return
+
+        runner = EvaluationRunner(_InfraFailSetup(), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.INFRA_ERROR
+        assert "sandbox provisioning failed" in trial.error_message
+
+    async def test_mixed_batch_reports_partial_infra_rate(self):
+        """A mix of healthy and infra-failed trials gives a clean
+        infra_error_rate like 0.5, not just 0/1."""
+
+        call_count = {"n": 0}
+
+        async def flaky(input_data: dict) -> dict:
+            call_count["n"] += 1
+            if call_count["n"] % 2 == 0:
+                raise InfraError("transient OOM")
+            return {"ok": True}
+
+        runner = EvaluationRunner(
+            SimpleAdapter(flaky),
+            [_PassGrader()],
+            RunnerConfig(num_runs=4),
+        )
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.total_count == 4
+        # Exactly the even-indexed calls raised, so half the batch is infra.
+        assert batch.infra_error_count == 2
+        assert batch.infra_error_rate == 0.5
+        # The successful ones still pass-through to grading.
+        assert batch.passed_count == 2

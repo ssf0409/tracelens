@@ -4,7 +4,7 @@
 import pytest
 
 from eval_kit.core.outcome import Outcome
-from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from eval_kit.core.trial import InfraError, Trial, TrialBatch, TrialStatus
 
 
 class TestTrialStatus:
@@ -16,6 +16,7 @@ class TestTrialStatus:
         assert TrialStatus.RUNNING == "running"
         assert TrialStatus.COMPLETED == "completed"
         assert TrialStatus.FAILED == "failed"
+        assert TrialStatus.INFRA_ERROR == "infra_error"
         assert TrialStatus.TIMEOUT == "timeout"
         assert TrialStatus.SKIPPED == "skipped"
 
@@ -281,3 +282,50 @@ class TestTrialBatch:
         batch.add_trial(trial)
         assert batch.total_count == 1
         assert batch.trials[0].task_id == "t1"
+
+
+class TestInfraErrorClassification:
+    """Tests for the infra-error vs task-failure distinction."""
+
+    def test_infra_error_is_an_exception(self):
+        """InfraError is a regular exception adapters can raise."""
+        assert issubclass(InfraError, Exception)
+
+    def test_trial_is_infra_failure(self):
+        """is_infra_failure is True only when status is INFRA_ERROR."""
+        trial = Trial(task_id="t1", status=TrialStatus.INFRA_ERROR)
+        assert trial.is_infra_failure is True
+
+        for other_status in [
+            TrialStatus.COMPLETED,
+            TrialStatus.FAILED,
+            TrialStatus.TIMEOUT,
+            TrialStatus.SKIPPED,
+            TrialStatus.PENDING,
+        ]:
+            trial_other = Trial(task_id="t1", status=other_status)
+            assert trial_other.is_infra_failure is False
+
+    def test_is_complete_includes_infra_error(self):
+        """A trial with INFRA_ERROR status is 'complete' — it won't restart."""
+        trial = Trial(task_id="t1", status=TrialStatus.INFRA_ERROR)
+        assert trial.is_complete is True
+
+    def test_batch_infra_error_count_and_rate(self):
+        """TrialBatch surfaces infra_error_count and infra_error_rate so
+        reports can show infra noise alongside pass rate."""
+        trials = [
+            Trial(task_id="t1", status=TrialStatus.COMPLETED),
+            Trial(task_id="t1", status=TrialStatus.INFRA_ERROR),
+            Trial(task_id="t2", status=TrialStatus.FAILED),
+            Trial(task_id="t2", status=TrialStatus.INFRA_ERROR),
+        ]
+        batch = TrialBatch(trials=trials)
+        assert batch.infra_error_count == 2
+        assert batch.infra_error_rate == 0.5
+
+    def test_batch_infra_error_rate_zero_when_empty(self):
+        """Empty batch returns 0.0, not a ZeroDivisionError."""
+        batch = TrialBatch()
+        assert batch.infra_error_rate == 0.0
+        assert batch.infra_error_count == 0

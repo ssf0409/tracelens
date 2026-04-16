@@ -20,12 +20,41 @@ from eval_kit.core.transcript import Transcript
 class TrialStatus(str, Enum):
     """Status of a trial."""
 
-    PENDING = "pending"      # Not yet started
-    RUNNING = "running"      # Currently executing
-    COMPLETED = "completed"  # Finished successfully
-    FAILED = "failed"        # Execution failed
-    TIMEOUT = "timeout"      # Exceeded timeout
-    SKIPPED = "skipped"      # Skipped (e.g., due to filter)
+    PENDING = "pending"            # Not yet started
+    RUNNING = "running"            # Currently executing
+    COMPLETED = "completed"        # Finished successfully
+    FAILED = "failed"              # Task-level failure (agent couldn't solve it)
+    INFRA_ERROR = "infra_error"    # Infrastructure failure (OOM, network, sandbox)
+    TIMEOUT = "timeout"             # Exceeded timeout
+    SKIPPED = "skipped"             # Skipped (e.g., due to filter)
+
+
+class InfraError(Exception):
+    """Raised by adapters when a failure is known to be infrastructural.
+
+    Separating infra failures from task-level failures matters because they
+    mean different things for evaluation scores. A pod killed for exceeding
+    its memory limit tells you nothing about the agent's capability — but it
+    *does* tell you the eval's resource configuration is too tight (see
+    Anthropic's "Quantifying infrastructure noise in agentic coding evals",
+    which measured infra error rates dropping from 5.8% at strict enforcement
+    to 0.5% uncapped).
+
+    When the runner catches this exception (or other known-infra exception
+    types like ``MemoryError``, ``ConnectionError``, ``TimeoutError`` from
+    the network stack, or ``OSError``), the trial's status is set to
+    ``TrialStatus.INFRA_ERROR`` rather than ``FAILED``, and the infra error
+    rate is surfaced separately in reports so you can decide whether a
+    regression is real or a noise artefact.
+
+    Example:
+        class MyAdapter(AgentAdapter):
+            async def run(self, task):
+                try:
+                    return await do_work(task)
+                except httpx.ConnectError as exc:
+                    raise InfraError(f"upstream API unreachable: {exc}") from exc
+    """
 
 
 class Trial(BaseModel):
@@ -106,6 +135,7 @@ class Trial(BaseModel):
         return self.status in {
             TrialStatus.COMPLETED,
             TrialStatus.FAILED,
+            TrialStatus.INFRA_ERROR,
             TrialStatus.TIMEOUT,
             TrialStatus.SKIPPED,
         }
@@ -114,6 +144,16 @@ class Trial(BaseModel):
     def is_successful(self) -> bool:
         """Check if trial completed without errors."""
         return self.status == TrialStatus.COMPLETED and not self.error_message
+
+    @property
+    def is_infra_failure(self) -> bool:
+        """Whether this trial failed due to infrastructure, not the agent.
+
+        Infra failures (OOM kills, network errors, sandbox terminations)
+        should be counted separately from task failures when interpreting
+        scores — otherwise noisy infra inflates the apparent failure rate.
+        """
+        return self.status == TrialStatus.INFRA_ERROR
 
     @property
     def fingerprint(self) -> str | None:
@@ -213,6 +253,25 @@ class TrialBatch(BaseModel):
         if not self.trials:
             return 0.0
         return self.passed_count / len(self.trials)
+
+    @property
+    def infra_error_count(self) -> int:
+        """Number of trials that failed due to infrastructure issues."""
+        return sum(1 for t in self.trials if t.is_infra_failure)
+
+    @property
+    def infra_error_rate(self) -> float:
+        """Fraction of trials that hit infrastructure failures.
+
+        Report this alongside ``pass_rate``: Anthropic's infra-noise study
+        found that infra error rates can move by 5+ percentage points
+        purely from resource-configuration changes. A spike in
+        ``infra_error_rate`` between two baselines is a strong hint that
+        the regression is noise, not a real capability drop.
+        """
+        if not self.trials:
+            return 0.0
+        return self.infra_error_count / len(self.trials)
 
     @property
     def all_complete(self) -> bool:

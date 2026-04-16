@@ -18,10 +18,30 @@ from eval_kit.core.grader import Grader
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import EvalSet, Task
 from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from eval_kit.core.trial import InfraError, Trial, TrialBatch, TrialStatus
 from eval_kit.execution.agent_adapter import AgentAdapter
 
 logger = logging.getLogger(__name__)
+
+
+# Exceptions that the runner treats as infrastructure failures (as opposed
+# to task-level failures). Adapters can also raise ``InfraError`` explicitly
+# for cases the runner can't infer from the exception type.
+#
+# The list is intentionally conservative: we only include errors that are
+# almost always caused by the runtime (OOM, network, OS-level resource
+# issues). Arbitrary exceptions stay classified as FAILED so a buggy agent
+# doesn't silently inflate the infra-error rate and mask real regressions.
+_INFRA_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
+    InfraError,
+    MemoryError,
+    ConnectionError,
+)
+
+
+def _is_infra_exception(exc: BaseException) -> bool:
+    """Return True if the exception should classify the trial as INFRA_ERROR."""
+    return isinstance(exc, _INFRA_EXCEPTION_TYPES)
 
 
 @dataclass
@@ -109,11 +129,15 @@ class EvaluationRunner:
                 await self.adapter.setup(task)
             except Exception as exc:
                 setup_failed = True
-                trial.status = TrialStatus.FAILED
+                is_infra = _is_infra_exception(exc)
+                trial.status = (
+                    TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
+                )
                 trial.error_message = f"Setup failed: {exc}"
                 trial.error_traceback = traceback.format_exc()
                 logger.error(
-                    "Setup failed for task %s run %d: %s",
+                    "Setup %s for task %s run %d: %s",
+                    "hit an infra error" if is_infra else "failed",
                     task.task_id,
                     run_index,
                     exc,
@@ -140,11 +164,15 @@ class EvaluationRunner:
                         self.config.timeout_seconds,
                     )
                 except Exception as exc:
-                    trial.status = TrialStatus.FAILED
+                    is_infra = _is_infra_exception(exc)
+                    trial.status = (
+                        TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
+                    )
                     trial.error_message = str(exc)
                     trial.error_traceback = traceback.format_exc()
                     logger.error(
-                        "Agent execution failed for task %s run %d: %s",
+                        "Agent execution %s for task %s run %d: %s",
+                        "hit an infra error" if is_infra else "failed",
                         task.task_id,
                         run_index,
                         exc,
