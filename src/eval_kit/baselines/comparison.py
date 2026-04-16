@@ -13,6 +13,15 @@ from pydantic import BaseModel, Field
 from scipy import stats
 
 from eval_kit.baselines.manager import TaskBaseline
+from eval_kit.core.decision_spec import DecisionSpec
+
+# Default noise band in absolute metric units — i.e. 0.03 means "a score
+# change of 3 percentage points on a 0-1 metric." Comes from Anthropic's
+# "Quantifying infrastructure noise in agentic coding evals" (Feb 2026):
+# "Until resource methodology is standardized, our data suggests that
+# leaderboard differences below 3 percentage points deserve skepticism
+# until the eval configuration is documented and matched."
+DEFAULT_NOISE_BAND_ABSOLUTE: float = 0.03
 
 
 class RegressionSeverity(str, Enum):
@@ -42,6 +51,12 @@ class MetricRegression(BaseModel):
     # Which tasks were affected
     affected_tasks: list[str] = Field(default_factory=list)
 
+    # Noise-awareness: True if the absolute delta falls within the noise
+    # band AND the baseline/current infra configurations don't match.
+    # Deltas flagged this way are surfaced but do NOT block CI by default
+    # (see RegressionReport.blocking_regressions).
+    within_noise_band: bool = False
+
 
 class RegressionReport(BaseModel):
     """Complete regression analysis report."""
@@ -66,14 +81,40 @@ class RegressionReport(BaseModel):
     # Metadata
     generated_at: datetime = Field(default_factory=datetime.utcnow)
 
+    # --- Noise awareness -------------------------------------------------
+    # True when the baseline's DecisionSpec.infra differs from the current
+    # run's. Deltas below the noise band in this state are treated as
+    # "could be infra noise, not a real regression" (Anthropic, Feb 2026).
+    infra_config_mismatch: bool = False
+
+    # Raw diff of the two infra configs (baseline_value, current_value).
+    # Empty dict when configs match or when no specs were provided.
+    infra_config_diff: dict[str, tuple[Any, Any]] = Field(default_factory=dict)
+
+    @property
+    def blocking_regressions(self) -> list[MetricRegression]:
+        """Regressions that should actually block CI.
+
+        Excludes any regression marked ``within_noise_band`` — those are
+        within the infra-noise uncertainty and shouldn't gate merges
+        until the eval configuration is matched.
+        """
+        return [r for r in self.regressions if not r.within_noise_band]
+
     def should_block_ci(
         self,
         threshold: RegressionSeverity = RegressionSeverity.MODERATE,
+        ignore_noise_band: bool = True,
     ) -> bool:
         """Determine if CI should be blocked based on severity.
 
         Args:
             threshold: Minimum severity to block. Default: MODERATE
+            ignore_noise_band: If True (default), within-noise-band
+                regressions don't count — a 2pp drop under a mismatched
+                infra config is ambiguous and shouldn't auto-gate merges
+                per Anthropic's infra-noise guidance. Pass False to treat
+                every regression as blocking regardless of noise.
 
         Returns:
             True if CI should be blocked
@@ -84,7 +125,19 @@ class RegressionReport(BaseModel):
             RegressionSeverity.MODERATE,
             RegressionSeverity.SEVERE,
         ]
-        return severity_order.index(self.overall_severity) >= severity_order.index(threshold)
+        # When the regressions list is populated, recompute severity from
+        # the filtered list so noise-band-flagged entries drop out. When
+        # it's empty (e.g. a hand-constructed report where the caller
+        # only set overall_severity), fall back to the declared severity
+        # so existing callers keep working.
+        if ignore_noise_band and self.regressions:
+            effective_severity = max(
+                (r.severity for r in self.blocking_regressions),
+                default=RegressionSeverity.NONE,
+            )
+        else:
+            effective_severity = self.overall_severity
+        return severity_order.index(effective_severity) >= severity_order.index(threshold)
 
     def to_ci_output(self) -> str:
         """Generate CI-friendly output."""
@@ -132,15 +185,28 @@ class RegressionDetector:
         self,
         significance_level: float = 0.05,
         min_delta_percent: float = 5.0,
+        noise_band_absolute: float = DEFAULT_NOISE_BAND_ABSOLUTE,
+        noise_band_aware: bool = True,
     ):
         """Initialize the detector.
 
         Args:
             significance_level: P-value threshold for significance
             min_delta_percent: Minimum percentage change to consider
+            noise_band_absolute: Absolute delta below which a regression
+                on a pass-rate-style metric (0-1 scale) is considered
+                "within the infra-noise band" when the baseline and
+                current infra configs don't match. Defaults to 0.03
+                (3pp), following Anthropic's infra-noise study.
+            noise_band_aware: If True, compare_with_specs() will mark
+                sub-noise-band regressions as ``within_noise_band`` when
+                infra configs differ. Set to False to disable the
+                downgrade (always treat every delta as real).
         """
         self.significance_level = significance_level
         self.min_delta_percent = min_delta_percent
+        self.noise_band_absolute = noise_band_absolute
+        self.noise_band_aware = noise_band_aware
 
     def compare(
         self,
@@ -331,3 +397,73 @@ class RegressionDetector:
                 reports[task_id] = self.compare(baseline, results)
 
         return reports
+
+    def compare_with_specs(
+        self,
+        baseline: TaskBaseline,
+        current_results: list[dict[str, Any]],
+        baseline_spec: DecisionSpec | None = None,
+        current_spec: DecisionSpec | None = None,
+    ) -> RegressionReport:
+        """Compare with DecisionSpec awareness for infra-noise detection.
+
+        Wraps ``compare()`` and additionally:
+
+        1. Diffs the two DecisionSpecs' ``infra`` sections and records
+           any mismatch in ``report.infra_config_mismatch`` and
+           ``report.infra_config_diff``.
+        2. For each detected regression, if the **absolute** delta falls
+           within ``noise_band_absolute`` (default 3pp) AND the infra
+           configs don't match, mark the regression's
+           ``within_noise_band`` flag to True. Those regressions still
+           show up in the report but are excluded from
+           ``blocking_regressions`` so a default ``should_block_ci()``
+           call won't gate a merge on ambiguous noise.
+
+        When either spec is omitted, this degrades to ordinary
+        ``compare()`` behavior with ``infra_config_mismatch=False``.
+
+        Args:
+            baseline: TaskBaseline to compare against.
+            current_results: Current run's metric values.
+            baseline_spec: DecisionSpec captured when the baseline was
+                recorded. Optional but enables infra-noise reasoning.
+            current_spec: DecisionSpec for the current run. Optional
+                but enables infra-noise reasoning.
+
+        Returns:
+            RegressionReport with ``infra_config_mismatch``,
+            ``infra_config_diff``, and per-regression
+            ``within_noise_band`` annotations populated.
+        """
+        report = self.compare(baseline, current_results)
+
+        if not self.noise_band_aware or baseline_spec is None or current_spec is None:
+            return report
+
+        # Compare the infra sections of the two specs.
+        baseline_infra = baseline_spec.infra.to_hash_dict() if baseline_spec.infra else None
+        current_infra = current_spec.infra.to_hash_dict() if current_spec.infra else None
+
+        if baseline_infra != current_infra:
+            report.infra_config_mismatch = True
+            # Record a field-level diff of infra (only fields that changed).
+            keys = set((baseline_infra or {}).keys()) | set((current_infra or {}).keys())
+            diff: dict[str, tuple[Any, Any]] = {}
+            for key in keys:
+                b = (baseline_infra or {}).get(key)
+                c = (current_infra or {}).get(key)
+                if b != c:
+                    diff[key] = (b, c)
+            report.infra_config_diff = diff
+
+            # Downgrade regressions that fall within the noise band to
+            # "within_noise_band" rather than counting as blocking
+            # regressions. The absolute delta is what matters here;
+            # Anthropic's "3 percentage points" is in absolute units on
+            # a 0-1 metric, not a relative percentage.
+            for regression in report.regressions:
+                if abs(regression.delta) < self.noise_band_absolute:
+                    regression.within_noise_band = True
+
+        return report

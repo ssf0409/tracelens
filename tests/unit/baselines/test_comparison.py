@@ -225,3 +225,157 @@ class TestRegressionDetector:
         reports = detector.compare_multiple(baselines, current_results)
 
         assert "btc_backtest" in reports
+
+
+# --- Noise-aware regression detection (Track 2 / Anthropic infra-noise) ---
+
+
+class TestNoiseAwareRegression:
+    """Regression detection should distinguish real capability drops from
+    deltas small enough to be explained by infrastructure-config drift,
+    per Anthropic's "Quantifying infrastructure noise in agentic coding
+    evals" (3pp default band)."""
+
+    def _make_pass_rate_baseline(self, value: float = 0.75) -> TaskBaseline:
+        baseline = TaskBaseline(task_id="some_task")
+        baseline.add_metric(
+            metric_name="pass_rate",
+            value=value,
+            std=0.02,
+            sample_size=20,
+            higher_is_better=True,
+        )
+        return baseline
+
+    def test_noise_band_absolute_defaults_to_three_percentage_points(self):
+        """The default threshold is 3pp, matching Anthropic's guidance."""
+        detector = RegressionDetector()
+        assert detector.noise_band_absolute == 0.03
+        assert detector.noise_band_aware is True
+
+    def test_compare_with_specs_no_specs_degrades_to_plain_compare(self):
+        """When specs are not provided, compare_with_specs() must behave
+        exactly like compare() — infra_config_mismatch stays False."""
+        from eval_kit.baselines.comparison import RegressionDetector
+
+        detector = RegressionDetector(min_delta_percent=1.0)
+        baseline = self._make_pass_rate_baseline()
+        report = detector.compare_with_specs(
+            baseline,
+            current_results=[{"pass_rate": 0.70}] * 5,
+        )
+        assert report.infra_config_mismatch is False
+        assert report.infra_config_diff == {}
+
+    def test_matching_infra_configs_do_not_trigger_noise_band(self):
+        """Identical infra configs → infra_config_mismatch is False,
+        and regressions retain their original severity even if small."""
+        from eval_kit.baselines.comparison import RegressionDetector
+        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+
+        detector = RegressionDetector(min_delta_percent=1.0)
+        baseline = self._make_pass_rate_baseline()
+        shared_infra = InfraConfig(cpu_hard_limit=3.0, memory_hard_limit_mb=2048)
+        report = detector.compare_with_specs(
+            baseline,
+            current_results=[{"pass_rate": 0.72}] * 5,
+            baseline_spec=DecisionSpec(infra=shared_infra),
+            current_spec=DecisionSpec(infra=shared_infra),
+        )
+        assert report.infra_config_mismatch is False
+        for reg in report.regressions:
+            assert reg.within_noise_band is False
+
+    def test_mismatched_infra_and_small_delta_flagged_within_noise_band(self):
+        """Different infra + <3pp delta → regression is marked
+        within_noise_band and drops from blocking_regressions."""
+        from eval_kit.baselines.comparison import RegressionDetector
+        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+
+        detector = RegressionDetector(min_delta_percent=1.0)
+        # 2pp drop: 0.75 -> 0.73
+        baseline = self._make_pass_rate_baseline(value=0.75)
+        report = detector.compare_with_specs(
+            baseline,
+            current_results=[{"pass_rate": 0.73}] * 10,
+            baseline_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0)),
+            current_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=3.0)),
+        )
+        assert report.infra_config_mismatch is True
+        assert "cpu_hard_limit" in report.infra_config_diff
+        assert report.infra_config_diff["cpu_hard_limit"] == (1.0, 3.0)
+        # The 2pp regression is flagged as noise-band.
+        assert len(report.regressions) == 1
+        assert report.regressions[0].within_noise_band is True
+        # blocking_regressions excludes it, so CI won't block by default.
+        assert report.blocking_regressions == []
+        assert report.should_block_ci() is False
+
+    def test_mismatched_infra_but_large_delta_still_blocks(self):
+        """A 10pp drop with mismatched infra should still register as a
+        real regression — the noise-band applies only to small deltas."""
+        from eval_kit.baselines.comparison import RegressionDetector
+        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+
+        detector = RegressionDetector(min_delta_percent=1.0)
+        baseline = self._make_pass_rate_baseline(value=0.75)
+        # 10pp drop: 0.75 -> 0.65
+        report = detector.compare_with_specs(
+            baseline,
+            current_results=[{"pass_rate": 0.65}] * 10,
+            baseline_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0)),
+            current_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=3.0)),
+        )
+        assert report.infra_config_mismatch is True
+        assert len(report.regressions) == 1
+        assert report.regressions[0].within_noise_band is False
+        assert len(report.blocking_regressions) == 1
+
+    def test_should_block_ci_ignore_noise_band_false_still_blocks(self):
+        """Callers can opt out of noise-band leniency by passing
+        ignore_noise_band=False — then every regression counts even if
+        the infra configs differ."""
+        from eval_kit.baselines.comparison import RegressionDetector
+        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+
+        detector = RegressionDetector(min_delta_percent=1.0)
+        baseline = self._make_pass_rate_baseline(value=0.75)
+        # 2pp drop → MINOR severity; sits inside the 3pp noise band.
+        report = detector.compare_with_specs(
+            baseline,
+            current_results=[{"pass_rate": 0.73}] * 10,
+            baseline_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0)),
+            current_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=3.0)),
+        )
+        # Lenient path at the MINOR threshold: the within-noise-band
+        # regression is filtered out, so effective severity is NONE and
+        # the check passes.
+        assert report.should_block_ci(threshold=RegressionSeverity.MINOR) is False
+        # Strict path at the same threshold: the regression still counts
+        # as MINOR and the check blocks.
+        assert report.should_block_ci(
+            threshold=RegressionSeverity.MINOR,
+            ignore_noise_band=False,
+        ) is True
+
+    def test_noise_band_aware_false_disables_flagging(self):
+        """Setting noise_band_aware=False on the detector disables the
+        downgrade entirely, even when specs mismatch."""
+        from eval_kit.baselines.comparison import RegressionDetector
+        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+
+        detector = RegressionDetector(
+            min_delta_percent=1.0,
+            noise_band_aware=False,
+        )
+        baseline = self._make_pass_rate_baseline(value=0.75)
+        report = detector.compare_with_specs(
+            baseline,
+            current_results=[{"pass_rate": 0.73}] * 10,
+            baseline_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0)),
+            current_spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=3.0)),
+        )
+        # No flag, no diff — we asked for raw behavior.
+        assert report.infra_config_mismatch is False
+        for reg in report.regressions:
+            assert reg.within_noise_band is False
