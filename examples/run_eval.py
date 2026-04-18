@@ -24,7 +24,6 @@ from eval_kit import (
 from eval_kit.core.task import JSONTaskLoader, Task
 from eval_kit.reporting.generator import ReportGenerator
 
-
 # --- Grader ---
 
 class MathGrader(CodeGrader):
