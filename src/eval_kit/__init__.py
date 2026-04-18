@@ -16,7 +16,7 @@ The framework is organised around five concerns:
 - **Graders** — CodeGrader / LLMGrader abstractions plus a library of
   built-in graders (schema, budget, tool-use, event-chain, ...).
 - **Execution** — AgentAdapter + EvaluationRunner drive parallel trials;
-  HTTP and workflow adapters handle remote / multi-step agents.
+  HTTPAPIAdapter handles remote agents over HTTP.
 - **Regression detection** — BaselineManager + RegressionDetector gate
   CI with severity-aware, statistically-sound comparisons.
 
@@ -33,6 +33,7 @@ See the README for a 10-minute quickstart.
 # The topical grouping lives in `__all__` below, which is the readable
 # index of the public API.
 
+from eval_kit._version import __version__  # noqa: F401  (re-exported)
 from eval_kit.baselines.comparison import (
     MetricRegression,
     RegressionDetector,
@@ -141,8 +142,6 @@ from eval_kit.statistics.pass_at_k import (
     pass_at_k,
     pass_at_k_estimator,
 )
-
-__version__ = "0.1.0"
 
 __all__ = [
     # --- Core models ---

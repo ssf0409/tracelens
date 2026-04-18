@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from eval_kit._version import __version__
 from eval_kit.baselines.comparison import RegressionReport
 from eval_kit.baselines.manager import BaselineManager
 from eval_kit.core.trial import TrialBatch
@@ -417,16 +418,12 @@ class ReportGenerator:
 </head>
 <body>
 <h1>eval-kit Evaluation Report</h1>
-<div class="subtitle">Generated {escape(timestamp)} &middot; eval-kit v0.1.0</div>
+<div class="subtitle">Generated {escape(timestamp)} &middot; eval-kit v{__version__}</div>
 
 <div class="cards">{cards_html}</div>
 
 {"<section><h2>Capability (pass@k)</h2>" + capability_svg + "</section>" if capability_svg else ""}
 {"<section><h2>Reliability (pass^k)</h2>" + reliability_svg + "</section>" if reliability_svg else ""}
-
-<div class="chart-row">
-{"<div><section><h2>Capability &amp; Reliability</h2>" + capability_svg + reliability_svg + "</section></div>" if False else ""}
-</div>
 
 {"<section><h2>Per-Task Results</h2><table><thead><tr><th>Task</th><th>Trials</th><th>Pass Rate</th><th>Mean Score</th><th>Std Score</th></tr></thead><tbody>" + task_rows + "</tbody></table></section>" if task_rows else ""}
 
@@ -437,7 +434,7 @@ class ReportGenerator:
 {regression_html}
 
 <div class="subtitle" style="margin-top:24px;text-align:center">
-  eval-kit v0.1.0 &middot; {escape(timestamp)}
+  eval-kit v{__version__} &middot; {escape(timestamp)}
 </div>
 </body>
 </html>"""
