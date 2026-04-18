@@ -1,9 +1,6 @@
 """Tests for LLM provider abstraction."""
 
-import importlib.util
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,14 +9,6 @@ from eval_kit.core.task import Task
 from eval_kit.core.transcript import Transcript
 from eval_kit.llm.factory import create_provider
 from eval_kit.llm.provider import InMemoryProvider, LLMProvider
-
-# `litellm` is an optional dependency (install with `pip install "eval-kit[llm]"`).
-# Tests that import LiteLLMProvider must be skipped when it's absent so the
-# core-only CI job stays green.
-requires_litellm = pytest.mark.skipif(
-    importlib.util.find_spec("litellm") is None,
-    reason="requires 'litellm' (install with: pip install 'eval-kit[llm]')",
-)
 
 
 class TestLLMProviderABC:
@@ -65,14 +54,12 @@ class TestFactory:
         provider = create_provider("in-memory", responses=["test"])
         assert isinstance(provider, InMemoryProvider)
 
-    @requires_litellm
-    def test_unknown_provider_creates_litellm_if_available(self) -> None:
-        """When litellm is installed, any model string creates a LiteLLMProvider."""
-        from eval_kit.llm.litellm_provider import LiteLLMProvider
-
-        provider = create_provider("nonexistent/model")
-        assert isinstance(provider, LiteLLMProvider)
-        assert provider.model == "nonexistent/model"
+    def test_non_in_memory_alias_raises_with_guidance(self) -> None:
+        """eval-kit no longer ships a built-in third-party provider
+        wrapper. Calling the factory with any non-'in-memory' alias
+        raises ValueError and points at the subclassing pattern."""
+        with pytest.raises(ValueError, match="subclass LLMProvider"):
+            create_provider("anthropic/claude-3-opus")
 
 
 class TestLLMGraderWithProvider:
@@ -119,80 +106,6 @@ class TestLLMGraderWithProvider:
 
         with pytest.raises(NotImplementedError):
             await grader.grade(transcript, task)
-
-
-@requires_litellm
-class TestLiteLLMProvider:
-    """Behavioral tests for LiteLLMProvider using mocked litellm."""
-
-    @pytest.mark.asyncio
-    async def test_wraps_api_errors_as_runtime_error(self) -> None:
-        from eval_kit.llm.litellm_provider import LiteLLMProvider
-
-        provider = LiteLLMProvider(model="test/model")
-        with patch(
-            "eval_kit.llm.litellm_provider.litellm.acompletion",
-            new_callable=AsyncMock,
-            side_effect=ConnectionError("network down"),
-        ):
-            with pytest.raises(RuntimeError, match="test/model"):
-                await provider.complete("hello")
-
-    @pytest.mark.asyncio
-    async def test_raises_on_null_content(self) -> None:
-        from eval_kit.llm.litellm_provider import LiteLLMProvider
-
-        mock_response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=None))]
-        )
-        provider = LiteLLMProvider(model="test/model")
-        with patch(
-            "eval_kit.llm.litellm_provider.litellm.acompletion",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ):
-            with pytest.raises(RuntimeError, match="null content"):
-                await provider.complete("hello")
-
-    @pytest.mark.asyncio
-    async def test_merges_default_and_call_kwargs(self) -> None:
-        from eval_kit.llm.litellm_provider import LiteLLMProvider
-
-        mock_response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
-        )
-        mock_acompletion = AsyncMock(return_value=mock_response)
-        provider = LiteLLMProvider(model="test/model", temperature=0.5)
-
-        with patch(
-            "eval_kit.llm.litellm_provider.litellm.acompletion",
-            mock_acompletion,
-        ):
-            result = await provider.complete("hello", max_tokens=100)
-
-        assert result == "ok"
-        call_kwargs = mock_acompletion.call_args
-        assert call_kwargs.kwargs["temperature"] == 0.5
-        assert call_kwargs.kwargs["max_tokens"] == 100
-
-    @pytest.mark.asyncio
-    async def test_call_kwargs_override_defaults(self) -> None:
-        from eval_kit.llm.litellm_provider import LiteLLMProvider
-
-        mock_response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
-        )
-        mock_acompletion = AsyncMock(return_value=mock_response)
-        provider = LiteLLMProvider(model="test/model", temperature=0.5)
-
-        with patch(
-            "eval_kit.llm.litellm_provider.litellm.acompletion",
-            mock_acompletion,
-        ):
-            await provider.complete("hello", temperature=0.9)
-
-        call_kwargs = mock_acompletion.call_args
-        assert call_kwargs.kwargs["temperature"] == 0.9
 
 
 class TestLLMGraderParseFailure:

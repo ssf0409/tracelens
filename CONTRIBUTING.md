@@ -26,11 +26,11 @@ pip install -e ".[dev]"
 
 ### Optional dependency groups
 
-- `.[llm]` — LLM providers (openai, anthropic, litellm). Required to run tests in `tests/unit/llm/`.
-- `.[http]` — httpx. Required for `HTTPAPIAdapter`.
+- `.[llm]` — Convenience bundle of `openai` + `anthropic` SDKs for users who subclass `LLMProvider` directly. Not required by the core test suite.
+- `.[http]` — `httpx`. Required for `HTTPAPIAdapter`.
 - `.[dev]` — dev tools (pytest, ruff, mypy, httpx).
 
-Tests that depend on `litellm` are gated behind a skip marker — running `pytest` without the `[llm]` extra installed will SKIP them, not FAIL.
+The test suite does not require the `[llm]` extra — eval-kit no longer ships a built-in third-party provider wrapper, so there are no optional-dep-gated tests.
 
 ### Running the verification gate
 

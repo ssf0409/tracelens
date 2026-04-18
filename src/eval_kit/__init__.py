@@ -22,7 +22,7 @@ The framework is organised around five concerns:
 
 Optional dependencies:
 
-- ``[llm]`` — ``openai``, ``anthropic``, ``litellm`` (for LLM-as-judge grading).
+- ``[llm]`` — ``openai``, ``anthropic`` (convenience bundle for subclassing LLMProvider with common vendor SDKs).
 - ``[http]`` — ``httpx`` (for HTTPAPIAdapter).
 - ``[dev]`` — test + lint + type-check tooling.
 
@@ -97,9 +97,11 @@ from eval_kit.graders.event_chain import (
     OrderingMode,
 )
 
-# LLM provider abstraction: core symbols only. LiteLLMProvider requires the
-# optional `[llm]` extra and is reachable via
-# `from eval_kit.llm.litellm_provider import LiteLLMProvider`.
+# LLM provider abstraction. eval-kit defines the LLMProvider ABC plus
+# InMemoryProvider for testing; real provider calls (OpenAI, Anthropic,
+# LiteLLM, Bedrock, whatever) are the user's responsibility via a
+# straightforward subclass. See the factory module docstring for the
+# canonical pattern.
 from eval_kit.llm.factory import create_provider
 from eval_kit.llm.provider import InMemoryProvider, LLMProvider
 from eval_kit.metrics.budgets import (

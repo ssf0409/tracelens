@@ -18,8 +18,9 @@ permissions:
 jobs:
   # ------------------------------------------------------------------
   # core: install WITHOUT the [llm] extra and confirm the test suite
-  # still passes. Any test that needs litellm/openai/anthropic must be
-  # guarded with `pytest.mark.skipif` so it SKIPs cleanly here.
+  # still passes. eval-kit has no optional-dep-gated tests after the
+  # LiteLLM wrapper was removed; this job exists to verify the core
+  # import graph stays clean under a minimal install.
   # ------------------------------------------------------------------
   core:
     name: core (py${{ matrix.python }})
@@ -45,9 +46,10 @@ jobs:
         run: pytest -q --no-header
 
   # ------------------------------------------------------------------
-  # with-llm: install the [llm] extra and run the full suite. This
-  # exercises LiteLLMProvider, OpenAI/Anthropic adapters, and any
-  # integration paths that were skipped above.
+  # with-llm: install the [llm] convenience bundle so subclasses of
+  # LLMProvider that happen to import openai/anthropic at module load
+  # keep working. Same test suite as core — nothing conditionally
+  # depends on these SDKs today.
   # ------------------------------------------------------------------
   with-llm:
     name: with-llm (py3.13)
