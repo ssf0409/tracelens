@@ -36,12 +36,10 @@ class BehaviorContract(BaseModel):
     # Tool contract
     tools_allowed: list[str] = []
     tools_required: list[str] = []
-    tool_param_constraints: dict[str, Any] = {}
 
     # Budget contract
     max_tokens: int | None = None
     max_latency_ms: float | None = None
-    max_cost_usd: float | None = None
 
     # Safety / content contract
     must_include: list[str] = []

@@ -28,10 +28,8 @@ class TestBehaviorContractSchema:
             output_schema={"type": "object", "properties": {"result": {"type": "string"}}},
             tools_allowed=["search", "calculator"],
             tools_required=["search"],
-            tool_param_constraints={"search": {"query": {"type": "string"}}},
             max_tokens=5000,
             max_latency_ms=3000.0,
-            max_cost_usd=0.10,
             must_include=["disclaimer"],
             must_not_include=["internal_key"],
             custom_constraints=[
