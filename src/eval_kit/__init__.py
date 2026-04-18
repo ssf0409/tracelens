@@ -80,12 +80,6 @@ from eval_kit.core.transcript import (
     TranscriptStep,
 )
 from eval_kit.core.trial import InfraError, Trial, TrialBatch, TrialStatus
-from eval_kit.core.workflow import (
-    StepResult,
-    WorkflowContext,
-    WorkflowStep,
-    WorkflowTask,
-)
 from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
 from eval_kit.execution.http_adapter import (
     AuthConfig,
@@ -95,7 +89,6 @@ from eval_kit.execution.http_adapter import (
     RetryConfig,
 )
 from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
-from eval_kit.execution.workflow_runner import WorkflowAdapter, WorkflowRunner
 from eval_kit.graders.event_chain import (
     EventChainConfig,
     EventChainVerifier,
@@ -199,11 +192,6 @@ __all__ = [
     "AgentSpec",
     "EnvironmentSpec",
     "InfraConfig",
-    # --- Workflow ---
-    "WorkflowTask",
-    "WorkflowStep",
-    "WorkflowContext",
-    "StepResult",
     # --- Execution ---
     "AgentAdapter",
     "SimpleAdapter",
@@ -214,8 +202,6 @@ __all__ = [
     "RetryConfig",
     "EvaluationRunner",
     "RunnerConfig",
-    "WorkflowRunner",
-    "WorkflowAdapter",
     # --- Baselines & regression detection ---
     "BaselineManager",
     "BaselineType",
