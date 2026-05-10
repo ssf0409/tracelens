@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from scipy import stats
 
 from eval_kit.baselines.manager import TaskBaseline
+from eval_kit.core._time import utc_now
 from eval_kit.core.decision_spec import DecisionSpec
 
 # Default noise band in absolute metric units — i.e. 0.03 means "a score
@@ -79,7 +80,7 @@ class RegressionReport(BaseModel):
     summary: str = ""
 
     # Metadata
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=utc_now)
 
     # --- Noise awareness -------------------------------------------------
     # True when the baseline's DecisionSpec.infra differs from the current

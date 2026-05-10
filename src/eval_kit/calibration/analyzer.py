@@ -5,6 +5,7 @@ and bias detection to determine if an LLM grader is drifting from human judgment
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -132,7 +133,7 @@ class CalibrationAnalyzer:
 
     def analyze(
         self,
-        grader_outcomes: dict[str, "OutcomeLike"],
+        grader_outcomes: Mapping[str, "OutcomeLike"],
         annotations: AnnotationSet,
     ) -> CalibrationResult:
         """Compare grader outcomes against human annotations.
@@ -188,8 +189,8 @@ class CalibrationAnalyzer:
         # Spearman rank correlation
         spearman_rho: float | None = None
         if len(pairs) >= 3:
-            rho, _ = stats.spearmanr(grader_scores, human_scores)
-            spearman_rho = float(rho)
+            spearman_result = stats.spearmanr(grader_scores, human_scores)
+            spearman_rho = float(spearman_result.statistic)
 
         # Pass/fail agreement
         pass_agreements = [p.pass_agree for p in pairs]
@@ -208,7 +209,6 @@ class CalibrationAnalyzer:
 
         return CalibrationResult(
             pairs=pairs,
-            sample_count=len(pairs),
             pearson_r=pearson_r,
             spearman_rho=spearman_rho,
             pass_fail_agreement=pass_fail_agreement,

@@ -5,7 +5,7 @@ at runtime from dotted path strings like "myproject.eval.graders.QualityGrader".
 """
 
 import importlib
-from typing import Any
+from typing import Any, cast
 
 
 def load_class(dotted_path: str) -> type:
@@ -25,7 +25,7 @@ def load_class(dotted_path: str) -> type:
     if not module_path:
         raise ImportError(f"Invalid dotted path (no module): {dotted_path}")
     module = importlib.import_module(module_path)
-    return getattr(module, class_name)
+    return cast(type, getattr(module, class_name))
 
 
 def instantiate(dotted_path: str, **kwargs: Any) -> Any:

@@ -74,11 +74,11 @@ class Trial(BaseModel):
             total_runs=5,
         )
         trial.status = TrialStatus.RUNNING
-        trial.started_at = datetime.utcnow()
+        trial.started_at = utc_now()
         # ... execute agent ...
         trial.transcript = transcript
         trial.status = TrialStatus.COMPLETED
-        trial.completed_at = datetime.utcnow()
+        trial.completed_at = utc_now()
     """
 
     trial_id: str = Field(default_factory=lambda: str(uuid.uuid4()))

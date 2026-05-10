@@ -455,7 +455,7 @@ class DecisionSpec(BaseModel):
         description="Any additional parameters that affect agent behavior",
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def fingerprint(self) -> str:
         """Compute SHA-256 fingerprint of the decision spec.
@@ -469,7 +469,7 @@ class DecisionSpec(BaseModel):
         serialized = json.dumps(hash_data, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode()).hexdigest()
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def fingerprint_short(self) -> str:
         """Short version of fingerprint (first 12 characters)."""

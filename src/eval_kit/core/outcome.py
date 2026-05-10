@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
+from eval_kit.core._time import utc_now
+
 
 class GradeLevel(str, Enum):
     """Categorical grade levels for human-readable results."""
@@ -78,7 +80,7 @@ class Outcome(BaseModel):
     confidence: float | None = None
 
     # Timing
-    graded_at: datetime = Field(default_factory=datetime.utcnow)
+    graded_at: datetime = Field(default_factory=utc_now)
     grading_duration_ms: float | None = None
 
     # For human grades

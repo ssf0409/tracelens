@@ -12,8 +12,8 @@ import asyncio
 import logging
 import traceback
 from dataclasses import dataclass
-from datetime import datetime
 
+from eval_kit.core._time import utc_now
 from eval_kit.core.grader import Grader
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import EvalSet, Task
@@ -79,7 +79,7 @@ class EvaluationRunner:
 
     async def run(self, eval_set: EvalSet) -> TrialBatch:
         """Run all tasks × runs and grade results."""
-        batch = TrialBatch(started_at=datetime.utcnow())
+        batch = TrialBatch(started_at=utc_now())
         semaphore = asyncio.Semaphore(self.config.max_concurrency)
 
         # Build work items: (task, run_index)
@@ -95,7 +95,7 @@ class EvaluationRunner:
         ]
         await asyncio.gather(*tasks)
 
-        batch.completed_at = datetime.utcnow()
+        batch.completed_at = utc_now()
         return batch
 
     async def _run_one(
@@ -116,7 +116,7 @@ class EvaluationRunner:
             run_index=run_index,
             total_runs=self.config.num_runs,
             status=TrialStatus.RUNNING,
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
         )
 
         transcript: Transcript | None = None
@@ -200,7 +200,7 @@ class EvaluationRunner:
                     teardown_exc,
                 )
 
-        trial.completed_at = datetime.utcnow()
+        trial.completed_at = utc_now()
 
         # Grade if we have a transcript
         if trial.transcript is not None:

@@ -1,11 +1,11 @@
 """Shared test fixtures and configuration."""
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from eval_kit.baselines.manager import TaskBaseline
+from eval_kit.core._time import utc_now
 from eval_kit.core.outcome import Outcome
 from eval_kit.core.task import Task, TaskExpectation
 from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
@@ -45,7 +45,7 @@ def sample_transcript(sample_task: Task) -> Transcript:
         task_id=sample_task.task_id,
         agent_name="test_agent",
         agent_version="1.0.0",
-        started_at=datetime.utcnow(),
+        started_at=utc_now(),
     )
 
     # Add some steps
@@ -82,7 +82,7 @@ def sample_transcript(sample_task: Task) -> Transcript:
         ],
         "quality_score": 0.85,
     }
-    transcript.completed_at = datetime.utcnow()
+    transcript.completed_at = utc_now()
 
     return transcript
 

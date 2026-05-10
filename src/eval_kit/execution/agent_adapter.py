@@ -6,9 +6,9 @@ on tasks and collect transcripts.
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from typing import Any
 
+from eval_kit.core._time import utc_now
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import StepType, Transcript, TranscriptStep
 
@@ -31,7 +31,7 @@ class AgentAdapter(ABC):
                 result = await my_agent.invoke(task.input_data)
                 transcript = self.start_transcript(task)
                 transcript.final_output = result
-                transcript.completed_at = datetime.utcnow()
+                transcript.completed_at = utc_now()
                 return transcript
 
             async def teardown(self, task: Task, transcript: Transcript | None) -> None:
@@ -53,7 +53,7 @@ class AgentAdapter(ABC):
         """Helper to create a Transcript with timing started."""
         return Transcript(
             task_id=task.task_id,
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
         )
 
     def record_error(self, transcript: Transcript, error: Exception) -> None:
@@ -63,7 +63,7 @@ class AgentAdapter(ABC):
             step_type=StepType.ERROR,
             error=str(error),
         ))
-        transcript.completed_at = datetime.utcnow()
+        transcript.completed_at = utc_now()
 
 
 class SimpleAdapter(AgentAdapter):
@@ -96,5 +96,5 @@ class SimpleAdapter(AgentAdapter):
             self.record_error(transcript, exc)
             raise
         finally:
-            transcript.completed_at = datetime.utcnow()
+            transcript.completed_at = utc_now()
         return transcript

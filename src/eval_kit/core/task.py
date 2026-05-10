@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from eval_kit.core._time import utc_now
+
 
 class TaskExpectation(BaseModel):
     """Expected outcomes for validation.
@@ -155,8 +157,8 @@ class EvalSetMetadata(BaseModel):
 
     author: str | None = None
     version: str = "1.0.0"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
     description: str | None = None
     tags: list[str] = Field(default_factory=list)
 
@@ -232,14 +234,14 @@ class EvalSet(BaseModel):
     def add_task(self, task: Task) -> None:
         """Add a task to the set."""
         self.tasks.append(task)
-        self.metadata.updated_at = datetime.utcnow()
+        self.metadata.updated_at = utc_now()
 
     def remove_task(self, task_id: str) -> bool:
         """Remove a task by ID. Returns True if found and removed."""
         original_len = len(self.tasks)
         self.tasks = [t for t in self.tasks if t.task_id != task_id]
         if len(self.tasks) < original_len:
-            self.metadata.updated_at = datetime.utcnow()
+            self.metadata.updated_at = utc_now()
             return True
         return False
 

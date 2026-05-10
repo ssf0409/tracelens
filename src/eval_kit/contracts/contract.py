@@ -61,6 +61,7 @@ class BehaviorContract(BaseModel):
         """
         result: list[tuple[Grader, EvalPolicy]] = []
         prefix = self.contract_id
+        grader: Grader
 
         if self.output_schema is not None:
             grader = JsonSchemaGrader(

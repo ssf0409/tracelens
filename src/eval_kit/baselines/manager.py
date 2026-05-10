@@ -17,6 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from eval_kit.core._time import utc_now
 from eval_kit.statistics.inference import (
     compare_to_baseline_summary,
     estimate_metric,
@@ -91,7 +92,7 @@ class MetricBaseline(BaseModel):
     baseline_value: float
     std_deviation: float = 0.0
     sample_size: int = 1
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utc_now)
 
     # Thresholds for regression detection
     # absolute: fail if (current - baseline) < threshold (e.g., -0.2)
@@ -147,8 +148,8 @@ class TaskBaseline(BaseModel):
     metrics: dict[str, MetricBaseline] = Field(default_factory=dict)
 
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
     last_promoted_at: datetime | None = None
     created_by: str = "manual"  # 'manual', 'ci', 'scheduled'
     git_commit: str | None = None
@@ -181,7 +182,7 @@ class TaskBaseline(BaseModel):
             regression_threshold_relative=relative_threshold,
             higher_is_better=higher_is_better,
         )
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utc_now()
 
     def get_metric(self, metric_name: str) -> MetricBaseline | None:
         """Get a specific metric baseline."""
@@ -204,7 +205,7 @@ class TaskBaseline(BaseModel):
         """Check if baseline is stale based on max_age_days policy."""
         if self.promotion_policy.max_age_days is None:
             return False
-        age = (datetime.utcnow() - self.updated_at).days
+        age = (utc_now() - self.updated_at).days
         return age > self.promotion_policy.max_age_days
 
     @property
@@ -214,7 +215,7 @@ class TaskBaseline(BaseModel):
             return False
         if self.promotion_policy.promotion_cooldown_days == 0:
             return False
-        days_since = (datetime.utcnow() - self.last_promoted_at).days
+        days_since = (utc_now() - self.last_promoted_at).days
         return days_since < self.promotion_policy.promotion_cooldown_days
 
     def can_promote(
@@ -348,7 +349,7 @@ class TaskBaseline(BaseModel):
             )
 
         # Update metadata
-        now = datetime.utcnow()
+        now = utc_now()
         self.updated_at = now
         self.last_promoted_at = now
         self.promotion_count += 1
@@ -425,9 +426,9 @@ class BaselineManager:
             fingerprint_short=data.get("fingerprint_short"),
             metrics=metrics,
             created_at=datetime.fromisoformat(data["created_at"])
-            if "created_at" in data else datetime.utcnow(),
+            if "created_at" in data else utc_now(),
             updated_at=datetime.fromisoformat(data["updated_at"])
-            if "updated_at" in data else datetime.utcnow(),
+            if "updated_at" in data else utc_now(),
             last_promoted_at=datetime.fromisoformat(data["last_promoted_at"])
             if "last_promoted_at" in data and data["last_promoted_at"] else None,
             created_by=data.get("created_by", "manual"),
@@ -532,7 +533,7 @@ class BaselineManager:
                 higher_is_better=higher_is_better,
             )
 
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = utc_now()
         existing.git_commit = self._get_git_commit()
 
         self._baselines[task_id] = existing
@@ -561,7 +562,7 @@ class BaselineManager:
         self,
         task_id: str,
         current_metrics: dict[str, float],
-    ) -> dict[str, dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Compare current metrics to baseline.
 
         Args:

@@ -6,10 +6,11 @@ Tests LatencyGrader, TokenBudgetGrader, ToolCallGrader, and TraceConsistencyGrad
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
+from eval_kit.core._time import utc_now
 from eval_kit.core.grader import EvalPolicy, GraderConfig
 from eval_kit.core.task import Task
 from eval_kit.core.transcript import (
@@ -45,7 +46,7 @@ def _make_transcript(
     tool_calls: list[ToolCall] | None = None,
 ) -> Transcript:
     """Build a Transcript with optional timing and tool calls."""
-    now = datetime.utcnow()
+    now = utc_now()
     started = now - timedelta(milliseconds=duration_ms or 0)
     completed = now if duration_ms is not None else None
 

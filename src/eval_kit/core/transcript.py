@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from eval_kit.core._time import utc_now
+
 if TYPE_CHECKING:
     from eval_kit.core.decision_spec import DecisionSpec
 
@@ -83,7 +85,7 @@ class TranscriptStep(BaseModel):
 
     step_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     step_type: StepType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
 
     # Content depends on step type
     content: Any = None
@@ -115,11 +117,11 @@ class Transcript(BaseModel):
             transcript_id=str(uuid.uuid4()),
             task_id=task.task_id,
             agent_name="goal_decomposition",
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
         )
         transcript.steps.append(step)
         transcript.final_output = result
-        transcript.completed_at = datetime.utcnow()
+        transcript.completed_at = utc_now()
     """
 
     transcript_id: str = Field(default_factory=lambda: str(uuid.uuid4()))

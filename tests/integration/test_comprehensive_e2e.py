@@ -21,6 +21,7 @@ import pytest
 
 from eval_kit.baselines.comparison import RegressionDetector, RegressionSeverity
 from eval_kit.baselines.manager import BaselineManager, BaselineType, PromotionPolicy
+from eval_kit.core._time import utc_now
 from eval_kit.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
@@ -227,8 +228,7 @@ class TestDecisionSpecE2E:
                 transcript = self.start_transcript(task)
                 transcript.decision_spec = spec
                 transcript.final_output = {"answer": task.input_data["a"] + task.input_data["b"]}
-                from datetime import datetime
-                transcript.completed_at = datetime.utcnow()
+                transcript.completed_at = utc_now()
                 return transcript
 
         tasks = [Task(task_id="t1", name="1+1", input_data={"a": 1, "b": 1, "expected": 2})]

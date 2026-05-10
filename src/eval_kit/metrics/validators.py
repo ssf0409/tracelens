@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 import jsonschema
+from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from eval_kit.core.grader import CodeGrader, EvalPolicy, GraderConfig
@@ -112,13 +113,20 @@ class StructuredOutputGrader(CodeGrader):
         data = transcript.final_output
 
         try:
-            model_cls = load_class(self.model_path)
+            loaded = load_class(self.model_path)
         except (ImportError, AttributeError) as exc:
             raise RuntimeError(
                 f"StructuredOutputGrader '{self.grader_id}' cannot load model "
                 f"'{self.model_path}': {exc}. Verify the dotted path is correct "
                 f"and the module is importable."
             ) from exc
+
+        if not (isinstance(loaded, type) and issubclass(loaded, BaseModel)):
+            raise RuntimeError(
+                f"StructuredOutputGrader '{self.grader_id}' loaded "
+                f"'{self.model_path}' but it is not a pydantic.BaseModel subclass."
+            )
+        model_cls: type[BaseModel] = loaded
 
         if not isinstance(data, dict):
             return {"parse_valid": 0.0, "validation_errors": 1.0}

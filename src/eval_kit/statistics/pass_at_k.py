@@ -43,7 +43,7 @@ def pass_at_k(n: int, c: int, k: int) -> float:
 
     # Unbiased estimator: 1 - C(n-c, k) / C(n, k)
     # Equivalent to: 1 - prod((n-c-i)/(n-i) for i in range(k))
-    return 1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1))
+    return float(1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1)))
 
 
 def pass_at_k_estimator(

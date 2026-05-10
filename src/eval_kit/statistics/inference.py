@@ -36,7 +36,7 @@ class MetricEstimate:
         """Standard error of the mean."""
         if self.n <= 1:
             return float("inf")
-        return self.std / np.sqrt(self.n)
+        return float(self.std / np.sqrt(self.n))
 
     @property
     def ci_width(self) -> float | None:
@@ -360,14 +360,14 @@ def permutation_test(
     n_baseline = len(baseline)
 
     # Permutation distribution
-    perm_diffs = []
+    perm_diffs_list: list[float] = []
     for _ in range(n_permutations):
         rng.shuffle(combined)
         perm_baseline = combined[:n_baseline]
         perm_current = combined[n_baseline:]
-        perm_diffs.append(np.mean(perm_current) - np.mean(perm_baseline))
+        perm_diffs_list.append(float(np.mean(perm_current) - np.mean(perm_baseline)))
 
-    perm_diffs = np.array(perm_diffs)
+    perm_diffs = np.array(perm_diffs_list)
 
     # Compute p-value
     if alternative == "two-sided":
