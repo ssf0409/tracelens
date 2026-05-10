@@ -202,6 +202,8 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "scipy-stubs" },
+    { name = "types-jsonschema" },
 ]
 http = [
     { name = "httpx" },
@@ -226,6 +228,8 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
     { name = "scipy", specifier = ">=1.10" },
+    { name = "scipy-stubs", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "types-jsonschema", marker = "extra == 'dev'", specifier = ">=4.0" },
 ]
 
 [[package]]
@@ -578,6 +582,18 @@ wheels = [
 ]
 
 [[package]]
+name = "numpy-typing-compat"
+version = "20251206.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/42/5f/29fd5f29b0a5d96e2def96ecba3112fc330ecd16e8c97c2b332563c5e201/numpy_typing_compat-20251206.2.4.tar.gz", hash = "sha256:59882d23aaff054a2536da80564012cdce33487657be4d79c5925bb8705fcabc", size = 5011 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/7c/5c2892e6bc0628a2ccf4e938e1e2db22794657ccb374672d66e20d73839e/numpy_typing_compat-20251206.2.4-py3-none-any.whl", hash = "sha256:a82e723bd20efaa4cf2886709d4264c144f1f2b609bda83d1545113b7e47a5b5", size = 6300 },
+]
+
+[[package]]
 name = "openai"
 version = "2.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -594,6 +610,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/94/f4/4690ecb5d70023ce6bfcfeabfe717020f654bde59a775058ec6ac4692463/openai-2.15.0.tar.gz", hash = "sha256:42eb8cbb407d84770633f31bf727d4ffb4138711c670565a41663d9439174fba", size = 627383 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/df/c306f7375d42bafb379934c2df4c2fa3964656c8c782bac75ee10c102818/openai-2.15.0-py3-none-any.whl", hash = "sha256:6ae23b932cd7230f7244e52954daa6602716d6b9bf235401a107af731baea6c3", size = 1067879 },
+]
+
+[[package]]
+name = "optype"
+version = "0.17.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/9f/3b13bab05debf685678b8af004e46b8c67c6f98ffa08eaf5d33bcf162c16/optype-0.17.0.tar.gz", hash = "sha256:31351a1e64d9eba7bf67e14deefb286e85c66458db63c67dd5e26dd72e4664e5", size = 53484 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/44/dca78187415947d1bb90b2ee2a58e47d9573528331e8dc6196996b53612a/optype-0.17.0-py3-none-any.whl", hash = "sha256:8c2d88ff13149454bcf6eb47502f80d288bc542e7238fcc412ac4d222c439397", size = 65854 },
+]
+
+[package.optional-dependencies]
+numpy = [
+    { name = "numpy" },
+    { name = "numpy-typing-compat" },
 ]
 
 [[package]]
@@ -999,6 +1033,18 @@ wheels = [
 ]
 
 [[package]]
+name = "scipy-stubs"
+version = "1.17.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "optype", extra = ["numpy"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d1/75/d944a11fca64aa84fbb4bfcf613b758319c6103cb30a304a0e9727009d62/scipy_stubs-1.17.1.4.tar.gz", hash = "sha256:cae00c5207aa62ceb4bcadea202d9fbbf002e958f9e4de981720436b8d5c1802", size = 396980 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/f8/334aa5a7a482ea89cb14d92f6a4d9ffa1e193e733144d4d14c7ffcb33583/scipy_stubs-1.17.1.4-py3-none-any.whl", hash = "sha256:e6e5c390fb864745bc3d5f591de81f5cb4f84403857d4f660acb5b6339956f5b", size = 604752 },
+]
+
+[[package]]
 name = "sniffio"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1071,6 +1117,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2", size = 78540 },
+]
+
+[[package]]
+name = "types-jsonschema"
+version = "4.26.0.20260508"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "referencing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/d8/7ba8007c48e0de93d82268e0447312c9c28d90ac7a8f73e034356bb40921/types_jsonschema-4.26.0.20260508.tar.gz", hash = "sha256:ae0be85ac6ec0cb94a98f75f876b0620cf2afa3e37fdf8460203f4d05f745acb", size = 16602 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/55/4f25833c410426b1f359dd579f3b3d1ee0f43f5674b23a815f396d3ea63c/types_jsonschema-4.26.0.20260508-py3-none-any.whl", hash = "sha256:4ec1dea0a757c8c2e2aa7bc085612fb54e1ae9562428d5da6f26dd7a0f24dbc2", size = 16062 },
 ]
 
 [[package]]

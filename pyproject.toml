@@ -70,6 +70,8 @@ dev = [
     "ruff>=0.1",
     "mypy>=1.0",
     "httpx>=0.25",
+    "scipy-stubs>=1.10",
+    "types-jsonschema>=4.0",
 ]
 
 [project.scripts]
@@ -95,6 +97,12 @@ ignore = ["E501", "UP042"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
