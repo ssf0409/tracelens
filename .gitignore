@@ -58,8 +58,9 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Claude
+# Claude / harness state
 .claude/
+.harness-mem/
 .mcp.json
 
 # Worktrees
