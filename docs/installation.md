@@ -366,6 +366,7 @@ your-project/
 
 ## Next Steps
 
-- [StrideAI Integration Guide](./strideai-integration.md) - For goal decomposition agent
-- [Crypto-Trading Integration Guide](./crypto-trading-integration.md) - For trading agents
-- [CI/CD Integration Guide](./ci-cd-integration.md) - For automated regression testing
+- [Getting Started](./getting-started.md) — Run your first eval in five minutes
+- [Quickstart](./quickstart.md) — Build a custom grader and CLI workflow
+- [User Guide](./user-guide.md) — Deep dive into the framework
+- [CI/CD Integration Guide](./ci-cd-integration.md) — Automated regression testing

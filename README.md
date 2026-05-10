@@ -76,7 +76,7 @@ class SharpeGrader(CodeGrader):
         return passed, score
 ```
 
-**LLMGrader** - For subjective quality (StrideAI):
+**LLMGrader** - For subjective quality (planning, summarisation, helpfulness):
 ```python
 from eval_kit import LLMGrader
 
@@ -412,15 +412,18 @@ report = gen.build_report(batch)
 print(gen.render_markdown(report))
 ```
 
-> See [docs/quickstart.md](docs/quickstart.md) for a full 10-minute walkthrough.
+> Five-minute version: [`examples/hello_world.py`](examples/hello_world.py).
+> Walkthrough: [docs/getting-started.md](docs/getting-started.md).
 
 ## Documentation
 
-- **[Quickstart](docs/quickstart.md)** - Get running in 10 minutes
-- **[User Guide](docs/user-guide.md)** - Comprehensive framework guide
-- **[Evaluation Levels](docs/evaluation-levels.md)** - Function, task, and system-level evaluation architecture
-- **[Accuracy Best Practices](docs/accuracy.md)** - Evaluation accuracy and calibration
-- **[Examples](examples/)** - Working example scripts and data files
+- **[Getting Started](docs/getting-started.md)** — Run your first eval in five minutes; the example ladder.
+- **[Quickstart](docs/quickstart.md)** — Build a custom grader, JSON task loader, and CLI workflow.
+- **[User Guide](docs/user-guide.md)** — Comprehensive framework guide.
+- **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
+- **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
+- **[CI/CD Integration](docs/ci-cd-integration.md)** — GitHub Actions with regression gating.
+- **[Examples](examples/)** — Four working scripts: `hello_world.py` → `contract_eval.py` → `http_agent_eval.py` → `noise_aware_regression.py`.
 
 ### References
 

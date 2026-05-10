@@ -27,9 +27,9 @@ Add this step after `actions/checkout` and before installing dependencies.
 
 ## GitHub Actions Workflow
 
-### StrideAI Workflow
+### Goal-Decomposition Agent Workflow
 
-Create `.github/workflows/eval.yml` in your StrideAI project:
+Create `.github/workflows/eval.yml` in your project:
 
 ```yaml
 name: Agent Evaluation
@@ -250,7 +250,7 @@ jobs:
 
 ### Crypto-Trading Workflow
 
-Create `.github/workflows/eval.yml` in your crypto-trading-system:
+Create `.github/workflows/eval.yml` in a trading project:
 
 ```yaml
 name: Trading Evaluation
@@ -355,7 +355,7 @@ jobs:
 
 Create a CI runner script that can be invoked from the workflow.
 
-### StrideAI CI Runner
+### Goal-Decomposition Agent CI Runner
 
 Create `eval/__main__.py`:
 
@@ -368,12 +368,12 @@ import json
 import sys
 from pathlib import Path
 
-from eval.harness import StrideAIEvaluator
+from eval.harness import GoalAgentEvaluator
 from eval_kit.baselines.comparison import RegressionSeverity
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run StrideAI evaluation")
+    parser = argparse.ArgumentParser(description="Run goal-decomposition evaluation")
 
     parser.add_argument(
         "--mode",
@@ -434,7 +434,7 @@ async def main():
     tags = args.tags.split(",") if args.tags else None
 
     # Initialize evaluator
-    evaluator = StrideAIEvaluator(num_runs=args.num_runs)
+    evaluator = GoalAgentEvaluator(num_runs=args.num_runs)
 
     # Run evaluation
     print(f"Running {args.mode} evaluation with {args.num_runs} runs...")

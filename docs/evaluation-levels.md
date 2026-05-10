@@ -111,14 +111,14 @@ class GoalParserGrader(CodeGrader):
 
 ### Concrete Examples
 
-**StrideAI:**
+**Goal-decomposition agent:**
 | Component | Input | Expected Output |
 |---|---|---|
 | Goal parser | Raw user text | Structured goal objects |
 | Priority scorer | Goals + user context | Priority-ordered list with scores |
 | Time estimator | Task + difficulty | Hours estimate within 20% of reference |
 
-**crypto-trading-system:**
+**Algorithmic-trading agent:**
 | Component | Input | Expected Output |
 |---|---|---|
 | Indicator calculator | OHLCV candles | RSI/MACD/Bollinger values matching reference |
@@ -214,12 +214,12 @@ config = RunnerConfig(
 
 ### Concrete Examples
 
-**StrideAI:**
+**Goal-decomposition agent:**
 - Decompose "Learn to cook Italian food" for a busy professional
 - Decompose "Train for a 5K" for someone with a knee injury
 - Decompose "Build a SaaS product" for a solo developer
 
-**crypto-trading-system:**
+**Algorithmic-trading agent:**
 - Execute a single BTC long trade given market conditions
 - Size a position given portfolio constraints and risk limits
 - Generate a market analysis report for ETH/USDT
@@ -399,12 +399,12 @@ stability = analyzer.compute_stability_metrics(results_per_task)
 
 ### Concrete Examples
 
-**StrideAI pipeline:**
+**Goal-decomposition pipeline:**
 1. Goal parsing → decomposition → execution plan → resource selection → validation
 2. Test: "I want to transition from accounting to data science in 6 months"
 3. Grading: Did it produce a valid multi-phase plan? Is each phase achievable? Are resources appropriate for the user's background?
 
-**crypto-trading-system pipeline:**
+**Algorithmic-trading pipeline:**
 1. Signal generation → risk assessment → order placement → execution confirmation → monitoring setup
 2. Test: "BTC/USDT shows bullish divergence on 1h timeframe with $10k portfolio"
 3. Grading: Did the pipeline complete? Were risk limits respected? Was the position sized correctly? Did confirmation succeed?
@@ -445,7 +445,7 @@ All three levels can coexist in a single eval set. Use `EvalSet.filter_tasks()` 
 from eval_kit.core.task import EvalSet
 
 # Full suite with mixed levels
-full_suite = EvalSet(name="StrideAI Complete", tasks=all_tasks)
+full_suite = EvalSet(name="My Agent — Complete", tasks=all_tasks)
 
 # Run only function-level evals (fast, for pre-commit)
 function_tasks = full_suite.filter_tasks(categories=["function"])
@@ -465,10 +465,10 @@ Tags encode both level and domain, enabling cross-cutting queries:
 # All parser-related evals, any level
 parser_evals = full_suite.filter_tasks(tags=["parser"])
 
-# All StrideAI function-level evals
-stride_functions = full_suite.filter_tasks(
+# All planner function-level evals
+planner_functions = full_suite.filter_tasks(
     categories=["function"],
-    tags=["strideai"],
+    tags=["planner"],
 )
 ```
 
