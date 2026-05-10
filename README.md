@@ -6,10 +6,6 @@ A common evaluation framework for AI agents with support for LLM-based and code-
 
 This framework provides a unified evaluation methodology for AI agent projects. It is designed to support both **subjective evaluations** (LLM-as-judge for quality assessment) and **objective evaluations** (deterministic metrics like Sharpe ratio).
 
-### Supported Projects
-
-- **StrideAI** - Goal decomposition agent evaluation (LLM-based quality graders)
-- **crypto-trading-system** - Algorithmic trading agent evaluation (code-based financial metrics)
 
 ## Architecture
 
@@ -291,51 +287,6 @@ summary = compare_to_baseline_summary(
 # Returns: "quality_score: 0.800 vs baseline 0.730 (Δ=+0.070, 95% CI [0.045, 0.095], d=1.23, p<0.05)"
 ```
 
-## Integration Patterns
-
-### StrideAI Integration
-
-```python
-# eval/graders/quality_grader.py
-from eval_kit import LLMGrader
-
-class DecompositionQualityGrader(LLMGrader):
-    """Evaluates goal decomposition quality using LLM-as-judge."""
-
-    DIMENSIONS = [
-        ("specificity", "Are tasks concrete and actionable?"),
-        ("personalization", "Is the plan tailored to user context?"),
-        ("actionability", "Can the user start immediately?"),
-    ]
-
-    def build_grading_prompt(self, transcript, task):
-        # Build rubric-based prompt
-        ...
-```
-
-### Crypto-Trading Integration
-
-```python
-# evaluation/graders/financial.py
-from eval_kit import CodeGrader
-
-class FinancialGrader(CodeGrader):
-    """Wraps existing financial metrics as a grader."""
-
-    def compute_metrics(self, transcript, task):
-        from crypto_trading_system.evaluation.metrics import (
-            calculate_sharpe_ratio,
-            calculate_sortino_ratio,
-            calculate_max_drawdown,
-        )
-
-        returns = transcript.final_output["returns"]
-        return {
-            "sharpe_ratio": calculate_sharpe_ratio(returns),
-            "sortino_ratio": calculate_sortino_ratio(returns),
-            "max_drawdown": calculate_max_drawdown(returns),
-        }
-```
 
 ## CI/CD Integration
 
