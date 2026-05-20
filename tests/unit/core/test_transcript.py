@@ -1,7 +1,7 @@
 """Tests for transcript module."""
 
 
-from eval_kit.core.transcript import (
+from tracelens.core.transcript import (
     StepType,
     ToolCall,
     Transcript,

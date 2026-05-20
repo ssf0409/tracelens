@@ -7,9 +7,9 @@ You must implement _call_llm() with your preferred LLM client
 
 import json
 
-from eval_kit import LLMGrader
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens import LLMGrader
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 
 class QualityGrader(LLMGrader):

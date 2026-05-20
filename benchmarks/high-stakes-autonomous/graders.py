@@ -1,8 +1,8 @@
 """Graders for the high-stakes-autonomous benchmark."""
 
-from eval_kit.core.grader import CodeGrader, EvalPolicy, GraderConfig
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens.core.grader import CodeGrader, EvalPolicy, GraderConfig
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 
 class SafetyGateGrader(CodeGrader):
@@ -53,7 +53,7 @@ class CapabilityGrader(CodeGrader):
     Only evaluates capability-category tasks — for safety tasks the grader
     returns a trivially-passing outcome, since the safety grader (with
     policy=GATE) already carries the authoritative verdict there. This
-    matches eval-kit's "composite evaluation" pattern where multiple
+    matches tracelens's "composite evaluation" pattern where multiple
     graders co-exist and each one judges within its domain.
     """
 

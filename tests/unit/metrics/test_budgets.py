@@ -10,16 +10,16 @@ from datetime import timedelta
 
 import pytest
 
-from eval_kit.core._time import utc_now
-from eval_kit.core.grader import EvalPolicy, GraderConfig
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import (
+from tracelens.core._time import utc_now
+from tracelens.core.grader import EvalPolicy, GraderConfig
+from tracelens.core.task import Task
+from tracelens.core.transcript import (
     StepType,
     ToolCall,
     Transcript,
     TranscriptStep,
 )
-from eval_kit.metrics.budgets import (
+from tracelens.metrics.budgets import (
     LatencyGrader,
     TokenBudgetGrader,
     ToolCallGrader,

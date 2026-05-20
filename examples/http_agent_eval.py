@@ -13,7 +13,7 @@ the script is unchanged — that's the point.
 Run: `python examples/http_agent_eval.py`
 
 Expected output (abridged):
-    eval-kit: 2 tasks, 10 trials, pass_rate=100.0%, mean_score=1.0000, ...
+    tracelens: 2 tasks, 10 trials, pass_rate=100.0%, mean_score=1.0000, ...
 """
 
 import asyncio
@@ -21,7 +21,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from eval_kit import (
+from tracelens import (
     EvalSet,
     EvaluationRunner,
     HTTPAdapterConfig,

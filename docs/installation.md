@@ -1,42 +1,48 @@
 # Installation & Usage Guide
 
-This guide explains how to install and use the `eval-kit` framework in your projects.
+This guide explains how to install and use the `tracelens` framework in your projects.
 
 ## Installation Options
 
-### Option 1: Install from Private GitHub (Recommended)
+### Option 1: Install from GitHub
 
-Since this is a private repository, you can install directly from GitHub:
+Until the first PyPI release is published, install directly from GitHub:
 
 ```bash
 # Using uv (recommended)
-uv pip install git+https://github.com/ssf0409/eval-kit.git
+uv pip install git+https://github.com/ssf0409/tracelens.git
 
 # Using pip
-pip install git+https://github.com/ssf0409/eval-kit.git
+pip install git+https://github.com/ssf0409/tracelens.git
 
 # With LLM support (for LLM-based graders)
-uv pip install "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git"
+uv pip install "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git"
 ```
 
-### Option 2: Add as Dependency in pyproject.toml
+After PyPI publishing, the install command will become:
+
+```bash
+uv pip install tracelens
+```
+
+### Option 2: Add as a Dependency in pyproject.toml
 
 Add to your project's `pyproject.toml`:
 
 ```toml
 [project]
 dependencies = [
-    "eval-kit @ git+https://github.com/ssf0409/eval-kit.git",
+    "tracelens @ git+https://github.com/ssf0409/tracelens.git",
 ]
 
 # Or with a specific version/tag
 dependencies = [
-    "eval-kit @ git+https://github.com/ssf0409/eval-kit.git@v0.1.0",
+    "tracelens @ git+https://github.com/ssf0409/tracelens.git@v0.1.0",
 ]
 
 # With LLM extras
 dependencies = [
-    "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git",
+    "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git",
 ]
 ```
 
@@ -45,146 +51,69 @@ Then install:
 uv sync  # or: pip install -e .
 ```
 
-### Option 3: Git Submodule (For Development)
+### Option 3: Local Development Checkout
 
-If you want to develop both projects together:
+If you want to contribute to TraceLens itself:
 
 ```bash
-# Add as submodule
-git submodule add https://github.com/ssf0409/eval-kit.git libs/eval-kit
+git clone https://github.com/ssf0409/tracelens.git
+cd tracelens
 
-# Install in development mode
-uv pip install -e libs/eval-kit
+# Install with development tools
+uv venv
+uv pip install -e ".[dev,http,llm]"
 ```
 
-## Private Repository Authentication
+## Optional Extras
 
-Since `eval-kit` is a private repository, you need to configure authentication for both local development and CI/CD.
+- `tracelens[http]` installs `httpx` for `HTTPAPIAdapter`.
+- `tracelens[llm]` installs the OpenAI and Anthropic SDKs for custom
+  `LLMProvider` subclasses.
+- `tracelens[dev]` installs pytest, ruff, mypy, and type stubs for
+  contributors.
 
-### Local Development (SSH)
+Extras compose normally:
 
-**Recommended**: Use SSH URLs for local development. This works automatically if you have SSH keys configured with GitHub.
-
-```toml
-# In your project's pyproject.toml
-[project]
-dependencies = [
-    "eval-kit @ git+ssh://git@github.com/ssf0409/eval-kit.git",
-]
-```
-
-Verify SSH is working:
 ```bash
-ssh -T git@github.com
-# Should see: "Hi ssf0409! You've successfully authenticated..."
+uv pip install "tracelens[http,llm] @ git+https://github.com/ssf0409/tracelens.git"
 ```
 
-### CI/CD Authentication
+## CI Installation
 
-For GitHub Actions, you have three options:
-
-#### Option A: GITHUB_TOKEN (Same Owner - Easiest)
-
-If all repos are under the same GitHub account (`ssf0409`), use the built-in token:
+For GitHub Actions, install your project dependencies normally. If your
+project depends on tracelens from GitHub, `uv sync` or `pip install -e .`
+is enough; no extra repository authentication is required for a public
+repository.
 
 ```yaml
-# .github/workflows/eval.yml
 jobs:
   eval:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure git for private repos
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
+      - uses: astral-sh/setup-uv@v4
+      - name: Set up Python
+        run: uv python install 3.12
       - name: Install dependencies
         run: uv sync
+      - name: Run evaluation
+        run: uv run python -m eval.harness --baseline-check
 ```
 
-#### Option B: Personal Access Token (Cross-Organization)
+## Verify the Install
 
-For repos in different organizations or accounts:
-
-1. Create a PAT at https://github.com/settings/tokens with `repo` scope
-2. Add it as a repository secret: `Settings > Secrets > Actions > PRIVATE_REPO_TOKEN`
-
-```yaml
-- name: Configure git for private repos
-  run: |
-    git config --global url."https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-    git config --global url."https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "https://github.com/"
+```bash
+python -c "import tracelens; print(tracelens.__version__)"
+tracelens --help
+python examples/hello_world.py
 ```
-
-#### Option C: Deploy Key (Most Secure)
-
-For production environments, deploy keys provide read-only access scoped to a single repo:
-
-1. Generate a key pair:
-   ```bash
-   ssh-keygen -t ed25519 -C "eval-kit-deploy" -f eval-kit-deploy -N ""
-   ```
-
-2. Add the **public key** (`eval-kit-deploy.pub`) to eval-kit:
-   `Settings > Deploy keys > Add deploy key` (enable "Allow read access")
-
-3. Add the **private key** (`eval-kit-deploy`) as a secret in your project:
-   `Settings > Secrets > Actions > AGENT_EVAL_DEPLOY_KEY`
-
-4. Use in workflow:
-   ```yaml
-   - name: Setup SSH for private deps
-     uses: webfactory/ssh-agent@v0.9.0
-     with:
-       ssh-private-key: ${{ secrets.AGENT_EVAL_DEPLOY_KEY }}
-
-   - name: Install dependencies
-     run: uv sync
-   ```
-
-### Authentication Summary
-
-| Environment | Method | pyproject.toml URL |
-|-------------|--------|-------------------|
-| Local (macOS/Linux) | SSH keys | `git+ssh://git@github.com/...` |
-| GitHub Actions (same owner) | GITHUB_TOKEN | Either SSH or HTTPS (converted) |
-| GitHub Actions (different org) | PAT | Either SSH or HTTPS (converted) |
-| Production CI | Deploy Key | `git+ssh://git@github.com/...` |
-
-### Recommended Setup
-
-For projects under the same GitHub account:
-
-**pyproject.toml**:
-```toml
-[project]
-dependencies = [
-    "eval-kit @ git+ssh://git@github.com/ssf0409/eval-kit.git",
-]
-```
-
-**GitHub Actions**:
-```yaml
-- name: Configure git for private repos
-  run: |
-    git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-```
-
-This gives you:
-- Local development uses SSH (your existing git setup)
-- CI uses GITHUB_TOKEN (no extra secrets needed)
 
 ## Quick Start
 
 ### 1. Define a Task
 
 ```python
-from eval_kit.core.task import Task, TaskExpectation
+from tracelens.core.task import Task, TaskExpectation
 
 task = Task(
     task_id="goal-decomposition-001",
@@ -208,9 +137,9 @@ task = Task(
 ### 2. Create a Grader
 
 ```python
-from eval_kit.core.grader import CodeGrader
-from eval_kit.core.transcript import Transcript
-from eval_kit.core.task import Task
+from tracelens.core.grader import CodeGrader
+from tracelens.core.transcript import Transcript
+from tracelens.core.task import Task
 
 class QualityGrader(CodeGrader):
     """Grade based on output quality metrics."""
@@ -250,8 +179,8 @@ class QualityGrader(CodeGrader):
 ### 3. Run Evaluation and Compute Statistics
 
 ```python
-from eval_kit.statistics.pass_at_k import PassAtKAnalyzer
-from eval_kit.statistics.consistency import ConsistencyAnalyzer
+from tracelens.statistics.pass_at_k import PassAtKAnalyzer
+from tracelens.statistics.consistency import ConsistencyAnalyzer
 
 # Collect results from multiple runs
 pass_results = {
@@ -273,8 +202,8 @@ print(reliability)  # {"pass^2": 0.6, "pass^3": 0.4, "pass^5": 0.2}
 ### 4. Baseline Comparison
 
 ```python
-from eval_kit.baselines.manager import BaselineManager
-from eval_kit.baselines.comparison import RegressionDetector
+from tracelens.baselines.manager import BaselineManager
+from tracelens.baselines.comparison import RegressionDetector
 
 # Load/create baseline manager
 manager = BaselineManager("baselines.json")
@@ -314,13 +243,13 @@ uv pip install -e ".[dev]"
 uv run pytest tests/ -v
 
 # Run tests with coverage
-uv run pytest tests/ -v --cov=eval_kit --cov-report=html
+uv run pytest tests/ -v --cov=tracelens --cov-report=html
 
 # Lint
 uv run ruff check src/ tests/
 
 # Type check
-uv run mypy src/eval_kit/
+uv run mypy src/tracelens/
 ```
 
 Using Docker:
@@ -338,7 +267,7 @@ docker compose run --rm dev
 
 ## Project Structure for Integration
 
-When integrating `eval-kit` into your project, we recommend this structure:
+When integrating `tracelens` into your project, we recommend this structure:
 
 ```
 your-project/
@@ -361,7 +290,7 @@ your-project/
 ├── .github/
 │   └── workflows/
 │       └── eval.yml              # CI evaluation workflow
-└── pyproject.toml                # Include eval-kit dependency
+└── pyproject.toml                # Include tracelens dependency
 ```
 
 ## Next Steps

@@ -3,7 +3,7 @@
 This is the differentiator. Anthropic's "Quantifying infrastructure
 noise in agentic coding evals" (Feb 2026) showed that resource-config
 changes alone can swing Terminal-Bench scores by up to 6pp — often
-more than the leaderboard gap between frontier models. eval-kit makes
+more than the leaderboard gap between frontier models. tracelens makes
 that effect first-class: runs are fingerprinted including their
 `InfraConfig`, and the regression detector flags sub-3pp deltas as
 "within-noise-band" when the two runs' configs don't match.
@@ -26,7 +26,7 @@ Run: `python examples/noise_aware_regression.py`
 
 import asyncio
 
-from eval_kit import (
+from tracelens import (
     DecisionSpec,
     EvalSet,
     EvaluationRunner,

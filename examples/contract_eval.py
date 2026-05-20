@@ -20,12 +20,12 @@ Expected output (abridged):
       planner-v1.token_budget      (policy=warn)
       planner-v1.contains          (policy=track)
 
-    eval-kit: 2 tasks, 4 trials, pass_rate=100.0%, mean_score=1.0000, ...
+    tracelens: 2 tasks, 4 trials, pass_rate=100.0%, mean_score=1.0000, ...
 """
 
 import asyncio
 
-from eval_kit import (
+from tracelens import (
     BehaviorContract,
     CompositeGrader,
     EvalSet,

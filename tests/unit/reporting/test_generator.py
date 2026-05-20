@@ -2,9 +2,9 @@
 
 import pytest
 
-from eval_kit.core.outcome import Outcome
-from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
-from eval_kit.reporting.generator import (
+from tracelens.core.outcome import Outcome
+from tracelens.core.trial import Trial, TrialBatch, TrialStatus
+from tracelens.reporting.generator import (
     ReportData,
     ReportGenerator,
     TaskSummary,
@@ -148,7 +148,7 @@ class TestReportGenerator:
         report = gen.build_report(batch)
         ci = gen.render_ci_summary(report)
 
-        assert "eval-kit" in ci
+        assert "TraceLens" in ci
         assert "pass_rate=" in ci
 
     def test_empty_batch(self):
@@ -173,8 +173,8 @@ class TestReportGenerator:
         html = gen.render_html(report)
 
         assert "<!DOCTYPE html>" in html
-        assert "<title>eval-kit Report</title>" in html
-        assert "eval-kit v0.1.0" in html
+        assert "<title>TraceLens Report</title>" in html
+        assert "TraceLens v0.1.0" in html
 
     def test_render_html_contains_summary_cards(self):
         """HTML report has summary cards with correct values."""
@@ -293,8 +293,8 @@ class TestInfraErrorReporting:
     regressions (Anthropic, Feb 2026)."""
 
     def _batch_with_infra_errors(self):
-        from eval_kit.core.outcome import Outcome
-        from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+        from tracelens.core.outcome import Outcome
+        from tracelens.core.trial import Trial, TrialBatch, TrialStatus
         trials = [
             Trial(task_id="t1", status=TrialStatus.COMPLETED, outcomes=[
                 Outcome(trial_id="x", grader_id="g", passed=True, score=1.0),
@@ -308,7 +308,7 @@ class TestInfraErrorReporting:
         return TrialBatch(trials=trials)
 
     def test_build_report_populates_infra_metrics(self):
-        from eval_kit.reporting.generator import ReportGenerator
+        from tracelens.reporting.generator import ReportGenerator
 
         report = ReportGenerator().build_report(self._batch_with_infra_errors())
 
@@ -316,7 +316,7 @@ class TestInfraErrorReporting:
         assert report.infra_error_rate == 0.5
 
     def test_markdown_surfaces_infra_warning_when_rate_positive(self):
-        from eval_kit.reporting.generator import ReportGenerator
+        from tracelens.reporting.generator import ReportGenerator
 
         gen = ReportGenerator()
         report = gen.build_report(self._batch_with_infra_errors())
@@ -329,9 +329,9 @@ class TestInfraErrorReporting:
 
     def test_markdown_omits_infra_section_when_zero(self):
         """No noise = no section. Don't clutter the default report."""
-        from eval_kit.core.outcome import Outcome
-        from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
-        from eval_kit.reporting.generator import ReportGenerator
+        from tracelens.core.outcome import Outcome
+        from tracelens.core.trial import Trial, TrialBatch, TrialStatus
+        from tracelens.reporting.generator import ReportGenerator
 
         clean_batch = TrialBatch(trials=[
             Trial(task_id="t1", status=TrialStatus.COMPLETED, outcomes=[
@@ -343,7 +343,7 @@ class TestInfraErrorReporting:
         assert "Infra-Error Rate" not in md
 
     def test_ci_summary_includes_infra_errors_when_nonzero(self):
-        from eval_kit.reporting.generator import ReportGenerator
+        from tracelens.reporting.generator import ReportGenerator
 
         gen = ReportGenerator()
         report = gen.build_report(self._batch_with_infra_errors())
@@ -352,7 +352,7 @@ class TestInfraErrorReporting:
         assert "infra_errors=50.0%" in ci
 
     def test_to_dict_roundtrip_preserves_infra_fields(self):
-        from eval_kit.reporting.generator import ReportData, ReportGenerator
+        from tracelens.reporting.generator import ReportData, ReportGenerator
 
         gen = ReportGenerator()
         original = gen.build_report(self._batch_with_infra_errors())

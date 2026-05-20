@@ -18,7 +18,7 @@ permissions:
 jobs:
   # ------------------------------------------------------------------
   # core: install WITHOUT the [llm] extra and confirm the test suite
-  # still passes. eval-kit has no optional-dep-gated tests after the
+  # still passes. tracelens has no optional-dep-gated tests after the
   # LiteLLM wrapper was removed; this job exists to verify the core
   # import graph stays clean under a minimal install.
   # ------------------------------------------------------------------
@@ -41,7 +41,7 @@ jobs:
           pip install -e ".[dev,http]"
       - name: Verify core-only import
         run: |
-          python -c "import eval_kit; print(f'{len(eval_kit.__all__)} public exports')"
+          python -c "import tracelens; print(f'{len(tracelens.__all__)} public exports')"
       - name: Run tests
         run: pytest -q --no-header
 
@@ -89,11 +89,10 @@ jobs:
       - name: Run bundled example
         run: python examples/run_eval.py
       - name: Verify CLI entry point
-        run: eval-kit --help
+        run: tracelens --help
 
   # ------------------------------------------------------------------
-  # lint: ruff check on source + tests. Mypy is not gated yet (strict
-  # mode is enabled in pyproject.toml but not all modules are clean).
+  # lint: ruff check on source + tests.
   # ------------------------------------------------------------------
   lint:
     name: lint
@@ -108,3 +107,22 @@ jobs:
         run: pip install "ruff>=0.1"
       - name: ruff check
         run: ruff check src/ tests/
+
+  # ------------------------------------------------------------------
+  # typecheck: strict mypy check for the public typed package promise.
+  # ------------------------------------------------------------------
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: mypy
+        run: mypy src/tracelens/

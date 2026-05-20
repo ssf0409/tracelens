@@ -2,12 +2,12 @@
 
 import pytest
 
-from eval_kit.core.transcript import (
+from tracelens.core.transcript import (
     StreamingEvent,
     StreamingEventType,
     Transcript,
 )
-from eval_kit.statistics.latency import LatencyAnalyzer
+from tracelens.statistics.latency import LatencyAnalyzer
 
 
 def _make_streaming_transcript(

@@ -6,8 +6,8 @@ import json
 import tempfile
 from pathlib import Path
 
-from eval_kit.contracts.contract import BehaviorContract
-from eval_kit.core.grader import EvalPolicy, Grader
+from tracelens.contracts.contract import BehaviorContract
+from tracelens.core.grader import EvalPolicy, Grader
 
 
 class TestBehaviorContractSchema:
@@ -159,7 +159,7 @@ class TestBehaviorContractToGraders:
         contract = BehaviorContract(
             contract_id="test",
             version="1.0",
-            output_model="eval_kit.core.transcript.ToolCall",
+            output_model="tracelens.core.transcript.ToolCall",
         )
         graders = contract.to_graders()
 
@@ -173,7 +173,7 @@ class TestBehaviorContractToGraders:
             contract_id="test",
             version="1.0",
             output_schema={"type": "object"},
-            output_model="eval_kit.core.transcript.ToolCall",
+            output_model="tracelens.core.transcript.ToolCall",
         )
         graders = contract.to_graders()
 

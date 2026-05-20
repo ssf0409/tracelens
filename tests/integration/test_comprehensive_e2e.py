@@ -1,4 +1,4 @@
-"""Comprehensive end-to-end tests exercising every layer of eval-kit.
+"""Comprehensive end-to-end tests exercising every layer of tracelens.
 
 Tests cover:
 1. Basic pipeline: adapter -> runner -> grader -> report
@@ -19,28 +19,28 @@ from pathlib import Path
 
 import pytest
 
-from eval_kit.baselines.comparison import RegressionDetector, RegressionSeverity
-from eval_kit.baselines.manager import BaselineManager, BaselineType, PromotionPolicy
-from eval_kit.core._time import utc_now
-from eval_kit.core.decision_spec import (
+from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
+from tracelens.baselines.manager import BaselineManager, BaselineType, PromotionPolicy
+from tracelens.core._time import utc_now
+from tracelens.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
     EnvironmentSpec,
     ModelConfig,
     PromptSpec,
 )
-from eval_kit.core.grader import (
+from tracelens.core.grader import (
     CodeGrader,
     CompositeGrader,
     GraderConfig,
     GraderRole,
 )
-from eval_kit.core.task import EvalSet, JSONTaskLoader, Task
-from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import TrialStatus
-from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
-from eval_kit.reporting.generator import ReportData, ReportGenerator
+from tracelens.core.task import EvalSet, JSONTaskLoader, Task
+from tracelens.core.transcript import Transcript
+from tracelens.core.trial import TrialStatus
+from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.reporting.generator import ReportData, ReportGenerator
 
 # ---------------------------------------------------------------------------
 # Test graders

@@ -162,7 +162,7 @@ A high pass@k with low pass^k means the agent is capable but inconsistent — th
 Use `DecisionSpec` to ensure you're comparing apples to apples:
 
 ```python
-from eval_kit.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
+from tracelens.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
 
 spec = DecisionSpec(
     model=ModelConfig(model_id="gpt-4-turbo", temperature=0.7),

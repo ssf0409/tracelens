@@ -2,7 +2,7 @@
 
 import pytest
 
-from eval_kit.execution.registry import instantiate, load_class
+from tracelens.execution.registry import instantiate, load_class
 
 
 class TestLoadClass:
@@ -13,9 +13,9 @@ class TestLoadClass:
         assert cls is OrderedDict
 
     def test_load_project_class(self):
-        """Can load a class from eval_kit itself."""
-        cls = load_class("eval_kit.core.task.Task")
-        from eval_kit.core.task import Task
+        """Can load a class from tracelens itself."""
+        cls = load_class("tracelens.core.task.Task")
+        from tracelens.core.task import Task
         assert cls is Task
 
     def test_invalid_path_no_module(self):
@@ -31,18 +31,18 @@ class TestLoadClass:
     def test_missing_class(self):
         """Raises AttributeError for a missing class in a valid module."""
         with pytest.raises(AttributeError):
-            load_class("eval_kit.core.task.NonexistentClass")
+            load_class("tracelens.core.task.NonexistentClass")
 
 
 class TestInstantiate:
     def test_instantiate_with_kwargs(self):
         """Can instantiate a class with keyword arguments."""
         obj = instantiate(
-            "eval_kit.core.task.Task",
+            "tracelens.core.task.Task",
             name="Test",
             input_data={"a": 1},
         )
-        from eval_kit.core.task import Task
+        from tracelens.core.task import Task
         assert isinstance(obj, Task)
         assert obj.name == "Test"
 

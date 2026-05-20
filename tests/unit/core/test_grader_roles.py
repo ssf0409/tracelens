@@ -2,14 +2,14 @@
 
 import pytest
 
-from eval_kit.core.grader import (
+from tracelens.core.grader import (
     CodeGrader,
     CompositeGrader,
     GraderConfig,
     GraderRole,
 )
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 
 class SimpleScoreGrader(CodeGrader):

@@ -1,9 +1,9 @@
-"""The smallest possible eval-kit run — three minutes from `pip install` to output.
+"""The smallest possible tracelens run — three minutes from `pip install` to output.
 
 What this shows, end to end:
 
 1. **A task** — what the agent must do, plus the expected answer.
-2. **An agent** — any async callable. Wrapped via ``SimpleAdapter`` so eval-kit
+2. **An agent** — any async callable. Wrapped via ``SimpleAdapter`` so tracelens
    can drive it.
 3. **A grader** — deterministic code that scores the agent's output.
 4. **A run** — one task, one trial, pass/fail in milliseconds.
@@ -19,7 +19,7 @@ Run it::
 
 import asyncio
 
-from eval_kit import (
+from tracelens import (
     CodeGrader,
     EvalSet,
     EvaluationRunner,
@@ -69,7 +69,7 @@ class ExactMatchGrader(CodeGrader):
 def build_eval_set() -> EvalSet:
     return EvalSet(
         name="hello-world",
-        description="Trivial arithmetic eval — the smallest possible eval-kit demo.",
+        description="Trivial arithmetic eval — the smallest possible tracelens demo.",
         tasks=[
             Task(task_id="add-2-2", name="add 2+2", input_data={"a": 2, "b": 2, "expected": "4"}),
             Task(task_id="add-10-5", name="add 10+5", input_data={"a": 10, "b": 5, "expected": "15"}),
@@ -93,7 +93,7 @@ async def main() -> None:
     )
     batch = await runner.run(eval_set)
 
-    print("\neval-kit hello-world")
+    print("\ntracelens hello-world")
     print("--------------------")
     print(f"trials run : {len(batch.trials)}")
     print(f"pass rate  : {batch.pass_rate:.0%}")

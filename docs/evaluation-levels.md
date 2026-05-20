@@ -1,10 +1,10 @@
 # Multi-Level Evaluation Architecture
 
-How to evaluate AI agents at different levels of granularity using eval-kit.
+How to evaluate AI agents at different levels of granularity using tracelens.
 
 ## Overview
 
-Agent evaluation isn't one-size-fits-all. A trading signal calculator needs different evaluation than a full trading pipeline. A goal parser needs different evaluation than an end-to-end goal decomposition agent. eval-kit operates at the **Task** level — one Task, one adapter call, one Transcript — but what you put *inside* that Task determines the evaluation granularity.
+Agent evaluation isn't one-size-fits-all. A trading signal calculator needs different evaluation than a full trading pipeline. A goal parser needs different evaluation than an end-to-end goal decomposition agent. tracelens operates at the **Task** level — one Task, one adapter call, one Transcript — but what you put *inside* that Task determines the evaluation granularity.
 
 This document defines three evaluation levels, shows how to implement each using the existing framework, and identifies gaps for future first-class support.
 
@@ -33,7 +33,7 @@ This document defines three evaluation levels, shows how to implement each using
 Use `Task.category = "function"` and `Task.metadata` to identify the component:
 
 ```python
-from eval_kit import Task
+from tracelens import Task
 
 # Evaluate the goal parser in isolation
 parser_task = Task(
@@ -63,9 +63,9 @@ parser_task = Task(
 Write a thin adapter that calls the component directly, **not** the full agent:
 
 ```python
-from eval_kit.execution.agent_adapter import AgentAdapter
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens.execution.agent_adapter import AgentAdapter
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 class GoalParserAdapter(AgentAdapter):
     """Calls the goal parser component directly."""
@@ -85,7 +85,7 @@ class GoalParserAdapter(AgentAdapter):
 `CodeGrader` with deterministic assertions. Function-level evals should have clear right/wrong answers:
 
 ```python
-from eval_kit.core.grader import CodeGrader
+from tracelens.core.grader import CodeGrader
 
 class GoalParserGrader(CodeGrader):
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
@@ -155,7 +155,7 @@ task = Task(
 Use the full agent adapter — `SimpleAdapter` for simple callables, or a custom `AgentAdapter`:
 
 ```python
-from eval_kit.execution.agent_adapter import SimpleAdapter
+from tracelens.execution.agent_adapter import SimpleAdapter
 
 async def invoke_stride_agent(input_data: dict) -> dict:
     from strideai.agent import GoalDecompositionAgent
@@ -170,7 +170,7 @@ adapter = SimpleAdapter(invoke_stride_agent)
 Task-level grading often combines objective checks (MUST_PASS) with subjective quality (SCORE_CONTRIBUTOR):
 
 ```python
-from eval_kit.core.grader import CompositeGrader, GraderConfig, GraderRole
+from tracelens.core.grader import CompositeGrader, GraderConfig, GraderRole
 
 # Format validation — must pass or trial fails
 format_config = GraderConfig(role=GraderRole.MUST_PASS)
@@ -203,7 +203,7 @@ The `CompositeGrader` enforces the role semantics: if `format_grader` (MUST_PASS
 - Recommend `num_runs >= 3` for LLM-based agents, `num_runs = 1` for deterministic agents.
 
 ```python
-from eval_kit.execution.runner import RunnerConfig
+from tracelens.execution.runner import RunnerConfig
 
 config = RunnerConfig(
     num_runs=5,          # 5 runs per task for pass@k and pass^k
@@ -259,8 +259,8 @@ task = Task(
 Write a custom `AgentAdapter` that orchestrates the full pipeline and records intermediate outputs in `Transcript.intermediate_outputs`:
 
 ```python
-from eval_kit.execution.agent_adapter import AgentAdapter
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType
+from tracelens.execution.agent_adapter import AgentAdapter
+from tracelens.core.transcript import Transcript, TranscriptStep, StepType
 
 class TradingPipelineAdapter(AgentAdapter):
     """Runs the full signal → risk → order → confirm pipeline."""
@@ -388,7 +388,7 @@ composite = CompositeGrader(
 - Recommend `num_runs >= 5` (preferably 10) for meaningful pass^k estimates.
 
 ```python
-from eval_kit.statistics.consistency import ConsistencyAnalyzer
+from tracelens.statistics.consistency import ConsistencyAnalyzer
 
 analyzer = ConsistencyAnalyzer(k_values=[3, 5])
 stability = analyzer.compute_stability_metrics(results_per_task)
@@ -442,7 +442,7 @@ As the project matures and components stabilize, shift weight from function to s
 All three levels can coexist in a single eval set. Use `EvalSet.filter_tasks()` or `EvalSet.filtered_eval_set()` to run subsets:
 
 ```python
-from eval_kit.core.task import EvalSet
+from tracelens.core.task import EvalSet
 
 # Full suite with mixed levels
 full_suite = EvalSet(name="My Agent — Complete", tasks=all_tasks)
@@ -505,7 +505,7 @@ planner_functions = full_suite.filter_tasks(
 
 ```python
 import asyncio
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig
 
 # Different configs per level
 level_configs = {
@@ -560,7 +560,7 @@ Each level needs different regression detection sensitivity.
 Tight thresholds. Components should be stable.
 
 ```python
-from eval_kit.baselines.manager import BaselineManager, PromotionPolicy
+from tracelens.baselines.manager import BaselineManager, PromotionPolicy
 
 manager = BaselineManager("baselines/baselines.json")
 
@@ -667,9 +667,9 @@ The following would add first-class support for multi-level evaluation. These ar
 
 ### CLI-Level Filtering
 
-**Gap**: The `eval-kit run` CLI does not accept `--categories` or `--tags` flags. Level-based filtering must be done in code.
+**Gap**: The `tracelens run` CLI does not accept `--categories` or `--tags` flags. Level-based filtering must be done in code.
 
-**What it would enable**: `eval-kit run --eval-set suite.json --categories function` for pre-commit hooks, `--categories system` for nightly runs.
+**What it would enable**: `tracelens run --eval-set suite.json --categories function` for pre-commit hooks, `--categories system` for nightly runs.
 
 ### Cross-Level Baselines
 
@@ -685,22 +685,22 @@ Features referenced in this document and where to find them:
 
 | Feature | File | Line | How It's Used |
 |---|---|---|---|
-| `Task.category` | `src/eval_kit/core/task.py` | 70 | Encode evaluation level |
-| `Task.metadata` | `src/eval_kit/core/task.py` | 65 | Store component/pipeline info |
-| `Task.tags` | `src/eval_kit/core/task.py` | 66 | Multi-dimensional filtering |
-| `Task.matches_filter()` | `src/eval_kit/core/task.py` | 76–89 | Filter predicate |
-| `EvalSet.filter_tasks()` | `src/eval_kit/core/task.py` | 195–209 | Get filtered task list |
-| `EvalSet.filtered_eval_set()` | `src/eval_kit/core/task.py` | 211–230 | Get filtered EvalSet |
-| `Transcript.intermediate_outputs` | `src/eval_kit/core/transcript.py` | 104 | Record pipeline stages |
-| `CompositeGrader` | `src/eval_kit/core/grader.py` | 321–447 | Multi-grader aggregation |
-| `GraderRole` (MUST_PASS / SCORE_CONTRIBUTOR) | `src/eval_kit/core/grader.py` | 30–43 | Gate vs. quality grading |
-| `AgentAdapter` ABC | `src/eval_kit/execution/agent_adapter.py` | 15–50 | Custom adapters per level |
-| `SimpleAdapter` | `src/eval_kit/execution/agent_adapter.py` | 53–84 | Wrap callables |
-| `RunnerConfig.num_runs` | `src/eval_kit/execution/runner.py` | 27 | Level-appropriate run counts |
-| `BaselineType` (CANARY / CAPABILITY / EXPERIMENTAL) | `src/eval_kit/baselines/manager.py` | 21–44 | Level-specific baseline strategy |
-| `PromotionPolicy` | `src/eval_kit/baselines/manager.py` | 47–76 | Auto-promotion criteria |
-| `RegressionSeverity` | `src/eval_kit/baselines/comparison.py` | 18–24 | Regression blocking thresholds |
-| `pass_at_k()` | `src/eval_kit/statistics/pass_at_k.py` | 15–46 | Capability estimation |
-| `pass_to_k()` | `src/eval_kit/statistics/consistency.py` | 13–43 | Reliability estimation |
-| `ConsistencyAnalyzer` | `src/eval_kit/statistics/consistency.py` | 82–191 | Stability metrics |
-| `bootstrap_ci()` | `src/eval_kit/statistics/inference.py` | 136–194 | Confidence intervals |
+| `Task.category` | `src/tracelens/core/task.py` | 70 | Encode evaluation level |
+| `Task.metadata` | `src/tracelens/core/task.py` | 65 | Store component/pipeline info |
+| `Task.tags` | `src/tracelens/core/task.py` | 66 | Multi-dimensional filtering |
+| `Task.matches_filter()` | `src/tracelens/core/task.py` | 76–89 | Filter predicate |
+| `EvalSet.filter_tasks()` | `src/tracelens/core/task.py` | 195–209 | Get filtered task list |
+| `EvalSet.filtered_eval_set()` | `src/tracelens/core/task.py` | 211–230 | Get filtered EvalSet |
+| `Transcript.intermediate_outputs` | `src/tracelens/core/transcript.py` | 104 | Record pipeline stages |
+| `CompositeGrader` | `src/tracelens/core/grader.py` | 321–447 | Multi-grader aggregation |
+| `GraderRole` (MUST_PASS / SCORE_CONTRIBUTOR) | `src/tracelens/core/grader.py` | 30–43 | Gate vs. quality grading |
+| `AgentAdapter` ABC | `src/tracelens/execution/agent_adapter.py` | 15–50 | Custom adapters per level |
+| `SimpleAdapter` | `src/tracelens/execution/agent_adapter.py` | 53–84 | Wrap callables |
+| `RunnerConfig.num_runs` | `src/tracelens/execution/runner.py` | 27 | Level-appropriate run counts |
+| `BaselineType` (CANARY / CAPABILITY / EXPERIMENTAL) | `src/tracelens/baselines/manager.py` | 21–44 | Level-specific baseline strategy |
+| `PromotionPolicy` | `src/tracelens/baselines/manager.py` | 47–76 | Auto-promotion criteria |
+| `RegressionSeverity` | `src/tracelens/baselines/comparison.py` | 18–24 | Regression blocking thresholds |
+| `pass_at_k()` | `src/tracelens/statistics/pass_at_k.py` | 15–46 | Capability estimation |
+| `pass_to_k()` | `src/tracelens/statistics/consistency.py` | 13–43 | Reliability estimation |
+| `ConsistencyAnalyzer` | `src/tracelens/statistics/consistency.py` | 82–191 | Stability metrics |
+| `bootstrap_ci()` | `src/tracelens/statistics/inference.py` | 136–194 | Confidence intervals |

@@ -13,7 +13,7 @@ from typing import Any
 # Ensure the examples package is importable when running as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval_kit import (
+from tracelens import (
     CodeGrader,
     EvalSet,
     EvaluationRunner,
@@ -21,8 +21,8 @@ from eval_kit import (
     SimpleAdapter,
     Transcript,
 )
-from eval_kit.core.task import JSONTaskLoader, Task
-from eval_kit.reporting.generator import ReportGenerator
+from tracelens.core.task import JSONTaskLoader, Task
+from tracelens.reporting.generator import ReportGenerator
 
 # --- Grader ---
 

@@ -1,15 +1,15 @@
 # high-stakes-autonomous benchmark pack
 
-Flagship eval-kit benchmark that **demonstrates infra-noise awareness end-to-end**.
+Flagship tracelens benchmark that **demonstrates infra-noise awareness end-to-end**.
 Reproduces Anthropic's "Quantifying infrastructure noise in agentic coding
 evals" (Feb 2026) finding at miniature scale: the same agent on the same
 tasks can swing from 100 % pass rate to 50 % pass rate purely because of
-resource-budget changes — and eval-kit correctly attributes that swing to
+resource-budget changes — and tracelens correctly attributes that swing to
 infrastructure rather than capability.
 
 ## What it exercises
 
-| eval-kit feature                                        | Proven by                                                                                                   |
+| tracelens feature                                        | Proven by                                                                                                   |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `DecisionSpec.infra` in fingerprint                     | Baseline and current runs have different `fingerprint_short` values when only `memory_hard_limit_mb` differs |
 | `TrialStatus.INFRA_ERROR` classification                 | OOM-killed trials show up as `INFRA_ERROR`, never inflating the "model failed" rate                         |

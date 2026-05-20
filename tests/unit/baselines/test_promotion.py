@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from eval_kit.baselines.manager import (
+from tracelens.baselines.manager import (
     BaselineManager,
     BaselineType,
     PromotionPolicy,

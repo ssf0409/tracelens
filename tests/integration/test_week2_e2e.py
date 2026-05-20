@@ -16,27 +16,27 @@ from pathlib import Path
 
 import pytest
 
-from eval_kit.contracts.contract import BehaviorContract
-from eval_kit.core.grader import CompositeGrader, EvalPolicy
-from eval_kit.core.task import EvalSet, Task
-from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
-from eval_kit.core.trial import TrialBatch, TrialStatus
-from eval_kit.execution.agent_adapter import SimpleAdapter
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
-from eval_kit.metrics.budgets import (
+from tracelens.contracts.contract import BehaviorContract
+from tracelens.core.grader import CompositeGrader, EvalPolicy
+from tracelens.core.task import EvalSet, Task
+from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
+from tracelens.core.trial import TrialBatch, TrialStatus
+from tracelens.execution.agent_adapter import SimpleAdapter
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.metrics.budgets import (
     LatencyGrader,
     TokenBudgetGrader,
     ToolCallGrader,
     TraceConsistencyGrader,
 )
-from eval_kit.metrics.validators import (
+from tracelens.metrics.validators import (
     ConstraintGrader,
     ContainsGrader,
     JsonSchemaGrader,
     RegexMatchGrader,
     StructuredOutputGrader,
 )
-from eval_kit.reporting.generator import ReportGenerator
+from tracelens.reporting.generator import ReportGenerator
 
 # ── Mock agent ────────────────────────────────────────────────
 
@@ -592,7 +592,7 @@ class TestGraderCoverageE2E:
         )
         grader = StructuredOutputGrader(
             "struct_check",
-            model_path="eval_kit.core.transcript.ToolCall",
+            model_path="tracelens.core.transcript.ToolCall",
         )
         outcome = await grader.grade(transcript_valid, task)
         assert outcome.passed is True

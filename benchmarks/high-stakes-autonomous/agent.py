@@ -21,10 +21,10 @@ validate that the *framework* classifies the outcomes correctly:
 
 from typing import Any
 
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import InfraError
-from eval_kit.execution.agent_adapter import AgentAdapter
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
+from tracelens.core.trial import InfraError
+from tracelens.execution.agent_adapter import AgentAdapter
 
 
 class BudgetedAgent(AgentAdapter):

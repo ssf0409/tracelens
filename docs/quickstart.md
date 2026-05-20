@@ -1,4 +1,4 @@
-# Quickstart: eval-kit in 10 Minutes
+# Quickstart: TraceLens in 10 Minutes
 
 Get a working evaluation pipeline running from scratch.
 
@@ -7,15 +7,15 @@ Get a working evaluation pipeline running from scratch.
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
-## 1. Install eval-kit
+## 1. Install TraceLens
 
 ```bash
 # From GitHub
-uv pip install git+https://github.com/ssf0409/eval-kit.git
+uv pip install git+https://github.com/ssf0409/tracelens.git
 
 # Or for development
-git clone https://github.com/ssf0409/eval-kit.git
-cd eval-kit
+git clone https://github.com/ssf0409/tracelens.git
+cd tracelens
 uv pip install -e ".[dev]"
 ```
 
@@ -73,7 +73,7 @@ async def math_agent(input_data: dict[str, Any]) -> dict[str, Any]:
 Wrap it as an adapter:
 
 ```python
-from eval_kit import SimpleAdapter
+from tracelens import SimpleAdapter
 
 adapter = SimpleAdapter(math_agent)
 ```
@@ -85,9 +85,9 @@ For complex agents, subclass `AgentAdapter` directly — see the [User Guide](us
 A `CodeGrader` computes metrics and determines pass/fail:
 
 ```python
-from eval_kit import CodeGrader
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens import CodeGrader
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 
 class MathGrader(CodeGrader):
@@ -118,8 +118,8 @@ class MathGrader(CodeGrader):
 
 ```python
 import asyncio
-from eval_kit import EvalSet, EvaluationRunner, RunnerConfig
-from eval_kit.core.task import JSONTaskLoader
+from tracelens import EvalSet, EvaluationRunner, RunnerConfig
+from tracelens.core.task import JSONTaskLoader
 
 # Load tasks
 loader = JSONTaskLoader()
@@ -137,7 +137,7 @@ print(f"Pass rate: {batch.pass_rate:.1%}")
 ## 6. Generate Report
 
 ```python
-from eval_kit.reporting.generator import ReportGenerator
+from tracelens.reporting.generator import ReportGenerator
 
 gen = ReportGenerator(k_values=[1, 3], consistency_k_values=[2, 3])
 report = gen.build_report(batch)
@@ -170,7 +170,7 @@ Run evaluations from the command line:
 
 ```bash
 # Run and print CI summary
-eval-kit run \
+tracelens run \
   --eval-set tasks.json \
   --adapter myproject.adapters.MathAdapter \
   --graders myproject.graders.MathGrader \
@@ -179,7 +179,7 @@ eval-kit run \
   --html-report report.html
 
 # Generate report from saved results
-eval-kit report --results results.json --format html
+tracelens report --results results.json --format html
 ```
 
 ## Next Steps

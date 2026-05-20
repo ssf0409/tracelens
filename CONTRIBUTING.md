@@ -1,6 +1,6 @@
-# Contributing to eval-kit
+# Contributing to TraceLens
 
-Thanks for your interest in improving eval-kit. This project aims to be a *trustworthy* evaluation framework for autonomous AI agents, so contributions that improve reproducibility, reliability, or noise-awareness are especially welcome.
+Thanks for your interest in improving TraceLens. This project aims to be a *trustworthy* evaluation framework for autonomous AI agents, so contributions that improve reproducibility, reliability, or noise-awareness are especially welcome.
 
 ## Ways to contribute
 
@@ -12,8 +12,8 @@ Thanks for your interest in improving eval-kit. This project aims to be a *trust
 ## Development setup
 
 ```bash
-git clone https://github.com/ssf0409/eval-kit.git
-cd eval-kit
+git clone https://github.com/ssf0409/tracelens.git
+cd tracelens
 
 # Recommended: uv
 uv venv
@@ -30,14 +30,14 @@ pip install -e ".[dev]"
 - `.[http]` — `httpx`. Required for `HTTPAPIAdapter`.
 - `.[dev]` — dev tools (pytest, ruff, mypy, httpx).
 
-The test suite does not require the `[llm]` extra — eval-kit no longer ships a built-in third-party provider wrapper, so there are no optional-dep-gated tests.
+The test suite does not require the `[llm]` extra — tracelens no longer ships a built-in third-party provider wrapper, so there are no optional-dep-gated tests.
 
 ### Running the verification gate
 
 ```bash
 pytest -q                          # all tests
 ruff check src/ tests/             # lint
-mypy src/eval_kit/                 # type check (strict mode)
+mypy src/tracelens/                 # type check (strict mode)
 ```
 
 All three must pass before opening a PR.
@@ -47,7 +47,7 @@ All three must pass before opening a PR.
 1. **One change per PR.** If your branch touches the adapter layer *and* the statistics layer, split it.
 2. **Write tests first** (TDD). Failing tests go in the same commit as the fix/feature.
 3. **Don't mock at system boundaries.** Tests that pretend the HTTP adapter works without actually exercising it create false confidence.
-4. **Update public API exports deliberately.** Adding something to `src/eval_kit/__init__.py` is a stability promise. If you're unsure whether a symbol belongs in the public surface, leave it at the submodule path.
+4. **Update public API exports deliberately.** Adding something to `src/tracelens/__init__.py` is a stability promise. If you're unsure whether a symbol belongs in the public surface, leave it at the submodule path.
 5. **Document "why" in the PR body.** Commit messages should explain the user-visible behavior change; PR bodies should explain the motivation (what problem does this solve? what alternatives were considered?).
 6. **If you modify regression / baseline logic, add a backwards-compat note** to `CHANGELOG.md`. Baselines are a stability boundary.
 
@@ -76,10 +76,11 @@ These guide reviews; deviations should be justified in the PR description:
 
 ## Releasing (maintainers only)
 
-1. Bump version in `pyproject.toml` and `src/eval_kit/__init__.py`.
+1. Bump version in `pyproject.toml` and `src/tracelens/__init__.py`.
 2. Move `[Unreleased]` notes to a new dated section in `CHANGELOG.md`.
-3. `git tag vX.Y.Z && git push --tags`.
-4. The CI workflow publishes to PyPI on tag push.
+3. Build and inspect the artifacts: `uv build --sdist --wheel`.
+4. Publish with the configured maintainer credentials.
+5. `git tag vX.Y.Z && git push --tags`.
 
 ## Questions?
 

@@ -15,7 +15,7 @@ What kind of agent? What grading dimension? What guarantee do you need?
 
 ## What's missing today
 
-<!-- Why can't you express this with the current eval-kit surface? -->
+<!-- Why can't you express this with the current tracelens surface? -->
 
 ## Proposed API or behavior
 
@@ -37,4 +37,4 @@ Code snippets > prose.
 - [ ] Does this require a new `DecisionSpec` field? (If yes, fingerprint impact?)
 - [ ] Does this change baseline / regression semantics?
 - [ ] Does this add a new optional dependency?
-- [ ] Could this be a separate package that depends on eval-kit instead of living in core?
+- [ ] Could this be a separate package that depends on tracelens instead of living in core?

@@ -1,14 +1,16 @@
 """Tests for HTTP API adapter module."""
 
+import subprocess
+import sys
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 from pydantic import ValidationError
 
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import StepType
-from eval_kit.execution.http_adapter import (
+from tracelens.core.task import Task
+from tracelens.core.transcript import StepType
+from tracelens.execution.http_adapter import (
     AuthConfig,
     AuthScheme,
     HTTPAdapterConfig,
@@ -80,6 +82,39 @@ class TestAuthConfig:
 
 
 class TestHTTPAPIAdapter:
+    def test_package_import_without_http_extra(self):
+        """Core package imports should not require the optional http extra."""
+        script = """
+import importlib.abc
+import sys
+
+
+class BlockHttpx(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == "httpx" or fullname.startswith("httpx."):
+            raise ModuleNotFoundError("No module named 'httpx'")
+        return None
+
+
+sys.meta_path.insert(0, BlockHttpx())
+from tracelens import HTTPAPIAdapter, HTTPAdapterConfig
+
+try:
+    HTTPAPIAdapter(HTTPAdapterConfig(base_url="https://api.example.com"))
+except ImportError as exc:
+    assert "pip install tracelens[http]" in str(exc)
+else:
+    raise AssertionError("HTTPAPIAdapter should require httpx at instantiation")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+
     async def test_successful_request(self, config: HTTPAdapterConfig, task: Task):
         adapter = HTTPAPIAdapter(config)
         mock_response = _mock_response(200, {"answer": "world"})

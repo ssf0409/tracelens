@@ -1,4 +1,4 @@
-# Agent Eval Framework - Test Environment
+# TraceLens - Test Environment
 FROM python:3.12-slim
 
 # Set environment variables

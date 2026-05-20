@@ -3,8 +3,8 @@
 
 import pytest
 
-from eval_kit.core.outcome import Outcome
-from eval_kit.core.trial import InfraError, Trial, TrialBatch, TrialStatus
+from tracelens.core.outcome import Outcome
+from tracelens.core.trial import InfraError, Trial, TrialBatch, TrialStatus
 
 
 class TestTrialStatus:

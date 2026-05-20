@@ -3,12 +3,12 @@
 import asyncio
 from datetime import UTC, datetime
 
-from eval_kit.core.grader import CodeGrader
-from eval_kit.core.task import EvalSet, Task
-from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import InfraError, TrialStatus
-from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.core.grader import CodeGrader
+from tracelens.core.task import EvalSet, Task
+from tracelens.core.transcript import Transcript
+from tracelens.core.trial import InfraError, TrialStatus
+from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig
 
 
 class _PassGrader(CodeGrader):

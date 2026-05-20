@@ -10,20 +10,30 @@ The CI/CD integration provides:
 - **Baseline updates** on main branch merges
 - **Human calibration** workflow (weekly)
 
-## Prerequisites: Private Repository Access
+## Prerequisites
 
-Since `eval-kit` is a private repository, your CI/CD workflows need authentication to install it. See the [Installation Guide](./installation.md#private-repository-authentication) for detailed options.
+Install tracelens the same way you install the rest of your project's
+dependencies. For GitHub installs, use the public repository URL in
+`pyproject.toml`:
 
-**Quick setup** (for repos under the same GitHub account):
-
-```yaml
-- name: Configure git for private repos
-  run: |
-    git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-    git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+```toml
+[project]
+dependencies = [
+    "tracelens @ git+https://github.com/ssf0409/tracelens.git",
+]
 ```
 
-Add this step after `actions/checkout` and before installing dependencies.
+Then CI only needs the normal checkout, Python, and dependency install
+steps:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: astral-sh/setup-uv@v4
+- name: Set up Python
+  run: uv python install ${{ env.PYTHON_VERSION }}
+- name: Install dependencies
+  run: uv sync
+```
 
 ## GitHub Actions Workflow
 
@@ -70,12 +80,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # Required for private eval-kit dependency
-      - name: Configure git for private repos
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -145,11 +149,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure git for private repos
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
@@ -194,11 +193,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure git for private repos
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -282,12 +276,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Required for private eval-kit dependency
-      - name: Configure git for private repos
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git+ssh://git@github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
@@ -369,7 +357,7 @@ import sys
 from pathlib import Path
 
 from eval.harness import GoalAgentEvaluator
-from eval_kit.baselines.comparison import RegressionSeverity
+from tracelens.baselines.comparison import RegressionSeverity
 
 
 def parse_args():
@@ -523,7 +511,7 @@ from pathlib import Path
 
 from evaluation.framework.harness import CryptoTradingEvaluator
 from evaluation.framework.task import BTC_DAILY_BACKTEST, ETH_HOURLY_VOLATILE
-from eval_kit.baselines.comparison import RegressionSeverity
+from tracelens.baselines.comparison import RegressionSeverity
 
 
 TASK_MAP = {

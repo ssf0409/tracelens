@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from eval_kit.core.grader import LLMGrader
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
-from eval_kit.llm.factory import create_provider
-from eval_kit.llm.provider import InMemoryProvider, LLMProvider
+from tracelens.core.grader import LLMGrader
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
+from tracelens.llm.factory import create_provider
+from tracelens.llm.provider import InMemoryProvider, LLMProvider
 
 
 class TestLLMProviderABC:
@@ -55,7 +55,7 @@ class TestFactory:
         assert isinstance(provider, InMemoryProvider)
 
     def test_non_in_memory_alias_raises_with_guidance(self) -> None:
-        """eval-kit no longer ships a built-in third-party provider
+        """tracelens no longer ships a built-in third-party provider
         wrapper. Calling the factory with any non-'in-memory' alias
         raises ValueError and points at the subclassing pattern."""
         with pytest.raises(ValueError, match="subclass LLMProvider"):

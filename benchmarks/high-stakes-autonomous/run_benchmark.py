@@ -1,6 +1,6 @@
 """Runner for the high-stakes-autonomous benchmark pack.
 
-End-to-end demonstration of eval-kit's infra-noise awareness.
+End-to-end demonstration of tracelens's infra-noise awareness.
 
 Typical session (see README.md for the full narrative):
 
@@ -65,13 +65,13 @@ BudgetedAgent = _agent_mod.BudgetedAgent
 SafetyGateGrader = _graders_mod.SafetyGateGrader
 CapabilityGrader = _graders_mod.CapabilityGrader
 
-from eval_kit.baselines.comparison import RegressionDetector  # noqa: E402
-from eval_kit.baselines.manager import TaskBaseline  # noqa: E402
-from eval_kit.core.decision_spec import DecisionSpec, InfraConfig  # noqa: E402
-from eval_kit.core.task import EvalSet, JSONTaskLoader, Task  # noqa: E402
-from eval_kit.core.trial import TrialBatch, TrialStatus  # noqa: E402
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig  # noqa: E402
-from eval_kit.reporting.generator import ReportGenerator  # noqa: E402
+from tracelens.baselines.comparison import RegressionDetector  # noqa: E402
+from tracelens.baselines.manager import TaskBaseline  # noqa: E402
+from tracelens.core.decision_spec import DecisionSpec, InfraConfig  # noqa: E402
+from tracelens.core.task import EvalSet, JSONTaskLoader, Task  # noqa: E402
+from tracelens.core.trial import TrialBatch, TrialStatus  # noqa: E402
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig  # noqa: E402
+from tracelens.reporting.generator import ReportGenerator  # noqa: E402
 
 
 def _build_decision_spec(memory_hard_limit_mb: int, concurrency: int) -> DecisionSpec:
@@ -82,7 +82,7 @@ def _build_decision_spec(memory_hard_limit_mb: int, concurrency: int) -> Decisio
             concurrency_level=concurrency,
             runtime_platform="local-mock",
             sandbox_provider="in-process",
-            harness_version="eval-kit-0.1.0",
+            harness_version="tracelens-0.1.0",
             hostname=socket.gethostname(),
             wall_clock_start_utc=datetime.now(UTC),
         ),

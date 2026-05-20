@@ -1,16 +1,17 @@
-# eval-kit
+# TraceLens / 迹镜
 
-A common evaluation framework for AI agents with support for LLM-based and code-based grading, statistical analysis, baseline regression detection, and CI/CD integration.
+TraceLens is a friendly evaluation and regression-testing framework for AI agents. It turns agent runs into inspectable traces, graded outcomes, baseline comparisons, and CI-ready reliability signals.
+
+迹镜是一个面向 AI Agent 的评测与回归检测框架。它把每次 agent run 转化成可观察的轨迹、可评分的结果、可比较的 baseline，以及可用于 CI 的可靠性信号。
 
 ## Overview
 
-This framework provides a unified evaluation methodology for AI agent projects. It is designed to support both **subjective evaluations** (LLM-as-judge for quality assessment) and **objective evaluations** (deterministic metrics like Sharpe ratio).
-
+TraceLens provides a unified evaluation methodology for AI agent projects. It supports both **subjective evaluations** (LLM-as-judge for quality assessment) and **objective evaluations** (deterministic metrics like schema validity, tool-use constraints, latency, budget, or domain-specific scores).
 
 ## Architecture
 
 ```
-src/eval_kit/
+src/tracelens/
 ├── core/                    # Abstract interfaces
 │   ├── task.py              # Task, TaskLoader, EvalSet
 │   ├── trial.py             # Trial, TrialBatch execution model
@@ -32,7 +33,7 @@ src/eval_kit/
 ├── reporting/               # Output
 │   └── generator.py         # ReportGenerator (markdown, CI summary, HTML)
 └── cli/                     # Command-line interface
-    └── main.py              # eval-kit run / eval-kit report
+    └── main.py              # tracelens run / tracelens report
 ```
 
 > **Planned modules**: `human_eval/` (sample selection, LLM-human reconciliation) is designed but not yet implemented.
@@ -44,7 +45,7 @@ src/eval_kit/
 A Task defines a single evaluation test case:
 
 ```python
-from eval_kit import Task
+from tracelens import Task
 
 task = Task(
     name="Portfolio website decomposition",
@@ -61,9 +62,9 @@ task = Task(
 
 Graders evaluate agent outputs. There are two main types:
 
-**CodeGrader** - For deterministic metrics (crypto-trading):
+**CodeGrader** - For deterministic metrics:
 ```python
-from eval_kit import CodeGrader
+from tracelens import CodeGrader
 
 class SharpeGrader(CodeGrader):
     def compute_metrics(self, transcript, task):
@@ -78,7 +79,7 @@ class SharpeGrader(CodeGrader):
 
 **LLMGrader** - For subjective quality (planning, summarisation, helpfulness):
 ```python
-from eval_kit import LLMGrader
+from tracelens import LLMGrader
 
 class SpecificityGrader(LLMGrader):
     def build_grading_prompt(self, transcript, task):
@@ -98,7 +99,7 @@ class SpecificityGrader(LLMGrader):
 A Trial represents a single execution of a Task:
 
 ```python
-from eval_kit import Trial, TrialStatus
+from tracelens import Trial, TrialStatus
 
 trial = Trial(
     task_id=task.task_id,
@@ -121,7 +122,7 @@ trial = Trial(
 - Higher k = lower pass^k (harder to pass every time)
 
 ```python
-from eval_kit.statistics import pass_at_k, pass_to_k
+from tracelens.statistics import pass_at_k, pass_to_k
 
 # Capability: can it succeed at least once in 5 tries?
 capability = pass_at_k(n=10, c=7, k=5)  # 0.99+
@@ -135,7 +136,7 @@ reliability = pass_to_k(results=[True, True, False, True, True], k=3)  # 0.33
 `DecisionSpec` captures all parameters affecting agent behavior for reproducibility. The fingerprint is a SHA-256 hash of the entire configuration.
 
 ```python
-from eval_kit.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
+from tracelens.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
 
 # Capture agent configuration
 decision_spec = DecisionSpec(
@@ -171,7 +172,7 @@ Graders can have two roles in composite evaluation:
 - **SCORE_CONTRIBUTOR**: Quality graders. Contribute to weighted average.
 
 ```python
-from eval_kit import CompositeGrader, GraderRole, GraderConfig
+from tracelens import CompositeGrader, GraderRole, GraderConfig
 
 # Safety grader - must pass or entire trial fails
 safety_config = GraderConfig(role=GraderRole.MUST_PASS)
@@ -197,7 +198,7 @@ outcome = await composite.grade(transcript, task)
 ### Baseline Regression Detection
 
 ```python
-from eval_kit.baselines import BaselineManager, RegressionDetector
+from tracelens.baselines import BaselineManager, RegressionDetector
 
 manager = BaselineManager("baselines/baselines.json")
 baseline = manager.get_baseline("btc_backtest")
@@ -218,7 +219,7 @@ Baselines can be protected or auto-promoted based on their type:
 - **EXPERIMENTAL**: For testing. No restrictions.
 
 ```python
-from eval_kit.baselines import BaselineManager, BaselineType, PromotionPolicy
+from tracelens.baselines import BaselineManager, BaselineType, PromotionPolicy
 
 manager = BaselineManager("baselines/baselines.json")
 
@@ -254,7 +255,7 @@ promoted = manager.try_promote(
 Research-grade statistical comparison with confidence intervals:
 
 ```python
-from eval_kit.statistics.inference import (
+from tracelens.statistics.inference import (
     compare_metrics,
     compare_to_baseline_summary,
     estimate_metric,
@@ -295,7 +296,7 @@ summary = compare_to_baseline_summary(
 ```yaml
 - name: Run Evaluation
   run: |
-    eval-kit run \
+    tracelens run \
       --eval-set eval/suite.json \
       --graders quality,personalization \
       --num-runs 5 \
@@ -303,7 +304,7 @@ summary = compare_to_baseline_summary(
       --fail-on-regression moderate
 
 - name: Comment on PR
-  run: eval-kit report --format github-pr
+  run: tracelens report --format github-pr
 ```
 
 ### Regression Thresholds
@@ -339,18 +340,18 @@ See [docs/accuracy.md](docs/accuracy.md) for calibration best practices.
 
 ## Installation
 
-Since this is a private package, install directly from GitHub:
+Until the first PyPI release is published, install directly from GitHub:
 
 ```bash
 # Using uv (recommended)
-uv pip install git+https://github.com/ssf0409/eval-kit.git
+uv pip install git+https://github.com/ssf0409/tracelens.git
 
 # With LLM support
-uv pip install "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git"
+uv pip install "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git"
 
 # Or add to pyproject.toml
 # dependencies = [
-#     "eval-kit @ git+https://github.com/ssf0409/eval-kit.git",
+#     "tracelens @ git+https://github.com/ssf0409/tracelens.git",
 # ]
 ```
 
@@ -358,8 +359,8 @@ uv pip install "eval-kit[llm] @ git+https://github.com/ssf0409/eval-kit.git"
 
 ```bash
 # Clone and install
-git clone https://github.com/ssf0409/eval-kit.git
-cd eval-kit
+git clone https://github.com/ssf0409/tracelens.git
+cd tracelens
 uv pip install -e ".[dev]"
 
 # Run tests
@@ -373,11 +374,11 @@ docker compose run --rm test
 
 ```python
 import asyncio
-from eval_kit import (
+from tracelens import (
     Task, EvalSet, SimpleAdapter, CodeGrader,
     EvaluationRunner, RunnerConfig, Transcript,
 )
-from eval_kit.reporting.generator import ReportGenerator
+from tracelens.reporting.generator import ReportGenerator
 
 # 1. Define tasks
 tasks = [

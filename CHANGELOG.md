@@ -4,13 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) —
 but while `0.x`, minor bumps may contain breaking changes. Treat the
-top-level `eval_kit.*` imports as the stable surface; submodule paths may move.
+top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
 Everything under this heading is shipped on branch
-`feat/eval-kit-feature-gaps` (15 commits ahead of `main`) and is queued for
-the next release. Two themes:
+`feat/tracelens-feature-gaps` and is queued for the next release. Two
+themes:
 
 1. **Productization pre-v1.0** — turn the engine into something an external
    user can actually install, understand, and trust.
@@ -63,11 +63,15 @@ the next release. Two themes:
 - **4-job GitHub Actions CI workflow** at `.github/workflows/ci.yml`:
   `core` (Python 3.11 / 3.12 / 3.13), `with-llm`, `examples-smoke`, and
   `lint`. Concurrency group cancels in-flight runs on re-push.
-- **Curated public API** at `eval_kit/*` (83 symbols). Top-level imports
+- **Curated public API** at `tracelens/*` (83 symbols). Top-level imports
   are the stable surface; submodules may move.
 - **OSS hygiene files**: `LICENSE` (MIT), `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`,
-  `CHANGELOG.md` (this file).
+  `CHANGELOG.md` (this file), GitHub issue templates, and a pull
+  request template.
+- **Typed package marker**: `src/tracelens/py.typed` now ships in
+  wheels so the `Typing :: Typed` classifier reflects the package
+  artifact.
 
 ### Changed
 
@@ -75,6 +79,13 @@ the next release. Two themes:
   issues, changelog), richer classifiers, descriptive keywords. Moved
   `[project.urls]` below `dependencies` to fix a hatchling editable-
   install break.
+- **Public installation docs** — first-path README, installation, and
+  CI/CD guidance now describe public GitHub installs instead of private
+  repository authentication.
+- **CI type gate** — the workflow now runs strict mypy as a required
+  job, matching the contributor verification checklist.
+- **sdist contents** — maintainer-local `CLAUDE.md` is excluded from
+  source distributions.
 - **Ruff baseline** — applied autofixes to 67 pre-existing findings
   (unused imports, `datetime.utcnow()` → `datetime.now(UTC)`, f-string
   cleanup). Configured `ignore = ["E501", "UP042"]` for the remaining
@@ -83,7 +94,7 @@ the next release. Two themes:
   now only supports `"in-memory"`; passing any other alias raises
   `ValueError` with guidance to subclass `LLMProvider` directly. This
   replaces the shipped LiteLLM wrapper with a documented subclassing
-  pattern; eval-kit no longer tries to own the provider integration
+  pattern; tracelens no longer tries to own the provider integration
   layer.
 
 ### Removed
@@ -93,7 +104,7 @@ the next release. Two themes:
   step grading outcomes then silently dropped them on the floor. No
   example, benchmark, CLI, or README referenced the workflow layer.
   Breaking change for the top-level API, but no known downstream user.
-- **`LiteLLMProvider`** (`src/eval_kit/llm/litellm_provider.py`, ~40
+- **`LiteLLMProvider`** (`src/tracelens/llm/litellm_provider.py`, ~40
   LOC). A thin wrapper over `litellm.acompletion` with no distinct
   value over the vendor SDK. Users now subclass `LLMProvider`
   directly; the factory module docstring shows the pattern. The
@@ -105,7 +116,7 @@ the next release. Two themes:
   anything.
 - **Dead `if False` block + hardcoded `v0.1.0` strings** in
   `ReportGenerator.render_html`. Version string now sourced from
-  `eval_kit._version.__version__`.
+  `tracelens._version.__version__`.
 
 ### Fixed
 
@@ -114,18 +125,26 @@ the next release. Two themes:
   core-only CI job passes cleanly without the optional dep. Now
   obsolete after the LiteLLMProvider removal, but preserved the
   pattern for any future optional-dep-gated tests.
+- **Degenerate regression samples no longer emit SciPy precision-loss
+  warnings.** Zero-variance current samples now short-circuit the
+  one-sample t-test and preserve the same significance outcome without
+  leaking runtime warnings during Python 3.13 test runs.
+- **Core installs no longer require the `[http]` extra at import time.**
+  `HTTPAPIAdapter` still raises a targeted install hint when used
+  without `httpx`, but `import tracelens` and `tracelens --help` now work
+  from a base wheel install.
 
 ### Notes on backward compatibility
 
 This is a `0.x` release, so breaking changes are allowed per the
 version scheme noted at the top. The visible breaks are:
 
-- `from eval_kit import WorkflowTask` (and siblings) will now raise
+- `from tracelens import WorkflowTask` (and siblings) will now raise
   `ImportError`. No known downstream user imports these, but flagging
   the break in case you had one.
-- `from eval_kit.llm.litellm_provider import LiteLLMProvider` is gone;
+- `from tracelens.llm.litellm_provider import LiteLLMProvider` is gone;
   write a `LLMProvider` subclass against your vendor SDK instead.
-  The pattern is in the `eval_kit.llm.factory` module docstring.
+  The pattern is in the `tracelens.llm.factory` module docstring.
 - `BehaviorContract(tool_param_constraints=...)` or `max_cost_usd=...`
   will now raise `pydantic.ValidationError`. Neither had any effect
   before, so removing the kwarg is a no-op for real usage.
@@ -136,5 +155,5 @@ Initial scaffold shipped prior to this branch — `Task`, `Trial`,
 `Grader`, `Transcript`, `AgentAdapter`, `EvaluationRunner`,
 `BaselineManager`, `RegressionDetector`, `ReportGenerator`,
 `DecisionSpec`, pass@k / pass^k / bootstrap CI statistics,
-`eval-kit run` CLI, etc. See git history before branch point for
+`tracelens run` CLI, etc. See git history before branch point for
 the full list.

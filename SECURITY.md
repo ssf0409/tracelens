@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-eval-kit is currently in `0.x` alpha. Only the latest minor release receives
+TraceLens is currently in `0.x` alpha. Only the latest minor release receives
 security fixes; older `0.x` lines are not patched.
 
 | Version | Supported |
@@ -20,7 +20,7 @@ Email **ssf0409@gmail.com** with:
 
 - A description of the vulnerability and its impact.
 - A minimal reproduction (code snippet, malformed input, or attack scenario).
-- The affected version (`pip show eval-kit`) and Python version.
+- The affected version (`pip show tracelens`) and Python version.
 - Whether you'd like to be credited in the fix announcement.
 
 You can expect:
@@ -47,7 +47,7 @@ In scope:
 Out of scope:
 
 - Vulnerabilities in third-party LLM providers, sandboxes, or transports
-  that eval-kit merely calls into. Report those upstream.
+  that tracelens merely calls into. Report those upstream.
 - Denial-of-service achieved purely by configuring large `num_runs`,
   `concurrency`, or memory limits — those are user-controlled inputs.
 - Issues in example code under `examples/` or `benchmarks/` that are

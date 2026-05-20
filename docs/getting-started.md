@@ -2,7 +2,7 @@
 
 This is the fastest path from `pip install` to your first eval run. No
 LLM keys, no config files, no boilerplate. After this guide you'll
-understand the four-piece skeleton every eval-kit run uses, and you'll
+understand the four-piece skeleton every tracelens run uses, and you'll
 know which example to read next when you have a real agent.
 
 ---
@@ -11,24 +11,26 @@ know which example to read next when you have a real agent.
 
 ```bash
 # Recommended: uv
-uv pip install git+https://github.com/ssf0409/eval-kit.git
+uv pip install git+https://github.com/ssf0409/tracelens.git
 
 # Or: plain pip
-pip install git+https://github.com/ssf0409/eval-kit.git
+pip install git+https://github.com/ssf0409/tracelens.git
 ```
 
 For local development:
 
 ```bash
-git clone https://github.com/ssf0409/eval-kit.git
-cd eval-kit
+git clone https://github.com/ssf0409/tracelens.git
+cd tracelens
 uv pip install -e ".[dev,http,llm]"
 ```
 
 The `[dev]` extras pull in pytest, ruff, mypy, and type stubs so
-`make verify` runs out of the box. `[http]` adds httpx for the HTTP
-adapter. `[llm]` adds the OpenAI and Anthropic SDKs as a convenience
-bundle if you plan to subclass `LLMProvider`.
+the standard local verification commands run out of the box:
+`pytest -q`, `ruff check src/ tests/`, and `mypy src/tracelens/`.
+`[http]` adds httpx for the HTTP adapter. `[llm]` adds the OpenAI and
+Anthropic SDKs as a convenience bundle if you plan to subclass
+`LLMProvider`.
 
 ---
 
@@ -41,7 +43,7 @@ python examples/hello_world.py
 You should see:
 
 ```
-eval-kit hello-world
+tracelens hello-world
 --------------------
 trials run : 3
 pass rate  : 100%
@@ -61,7 +63,7 @@ four-piece skeleton.
 
 ## 3. The Four-Piece Skeleton
 
-Every eval-kit run combines four pieces:
+Every TraceLens run combines four pieces:
 
 | Piece | What it answers | Concrete classes |
 |-------|-----------------|------------------|
@@ -103,17 +105,17 @@ When your agent is real and your eval set has grown, move on to:
 - **[Accuracy Best Practices](./accuracy.md)** — how to keep LLM-judge
   graders calibrated to humans (the difference between "we ran an eval"
   and "we trust this eval").
-- **[CI/CD Integration](./ci-cd-integration.md)** — wiring eval-kit into
+- **[CI/CD Integration](./ci-cd-integration.md)** — wiring TraceLens into
   GitHub Actions with regression gating.
 - **[High-Stakes Autonomous Benchmark](../benchmarks/high-stakes-autonomous/README.md)**
-  — the flagship benchmark pack that demonstrates eval-kit's
+  — the flagship benchmark pack that demonstrates TraceLens's
   infra-noise-aware regression detection on safety-critical tasks.
 
 ---
 
 ## 6. The 60-Second Mental Model
 
-eval-kit is opinionated about two things, and ergonomic about
+TraceLens is opinionated about two things, and ergonomic about
 everything else:
 
 1. **Grade outcomes, not paths.** A `CodeGrader` looks at

@@ -10,10 +10,10 @@ import asyncio
 
 import pytest
 
-from eval_kit.core.grader import EvalPolicy, GraderConfig
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
-from eval_kit.metrics.validators import (
+from tracelens.core.grader import EvalPolicy, GraderConfig
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
+from tracelens.metrics.validators import (
     ConstraintGrader,
     ContainsGrader,
     JsonSchemaGrader,
@@ -130,7 +130,7 @@ class TestStructuredOutputGrader:
     """Tests for StructuredOutputGrader."""
 
     # We use a well-known Pydantic model from pydantic itself for testing
-    MODEL_PATH = "eval_kit.core.task.TaskExpectation"
+    MODEL_PATH = "tracelens.core.task.TaskExpectation"
 
     def test_default_policy_is_gate(self) -> None:
         grader = StructuredOutputGrader("structured", model_path=self.MODEL_PATH)

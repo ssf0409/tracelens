@@ -1,13 +1,14 @@
 """Tests for regression detection."""
 
+import warnings
 
-from eval_kit.baselines.comparison import (
+from tracelens.baselines.comparison import (
     MetricRegression,
     RegressionDetector,
     RegressionReport,
     RegressionSeverity,
 )
-from eval_kit.baselines.manager import TaskBaseline
+from tracelens.baselines.manager import TaskBaseline
 
 
 class TestRegressionSeverity:
@@ -226,6 +227,20 @@ class TestRegressionDetector:
 
         assert "btc_backtest" in reports
 
+    def test_compare_degenerate_current_samples_without_runtime_warning(
+        self,
+        sample_baseline: TaskBaseline,
+    ):
+        """Zero-variance samples should not leak scipy precision warnings."""
+        detector = RegressionDetector(min_delta_percent=1.0)
+        current_results = [{"sharpe_ratio": 1.0}] * 5
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            report = detector.compare(sample_baseline, current_results)
+
+        assert report.has_regression is True
+
 
 # --- Noise-aware regression detection (Track 2 / Anthropic infra-noise) ---
 
@@ -256,7 +271,7 @@ class TestNoiseAwareRegression:
     def test_compare_with_specs_no_specs_degrades_to_plain_compare(self):
         """When specs are not provided, compare_with_specs() must behave
         exactly like compare() — infra_config_mismatch stays False."""
-        from eval_kit.baselines.comparison import RegressionDetector
+        from tracelens.baselines.comparison import RegressionDetector
 
         detector = RegressionDetector(min_delta_percent=1.0)
         baseline = self._make_pass_rate_baseline()
@@ -270,8 +285,8 @@ class TestNoiseAwareRegression:
     def test_matching_infra_configs_do_not_trigger_noise_band(self):
         """Identical infra configs → infra_config_mismatch is False,
         and regressions retain their original severity even if small."""
-        from eval_kit.baselines.comparison import RegressionDetector
-        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+        from tracelens.baselines.comparison import RegressionDetector
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 
         detector = RegressionDetector(min_delta_percent=1.0)
         baseline = self._make_pass_rate_baseline()
@@ -289,8 +304,8 @@ class TestNoiseAwareRegression:
     def test_mismatched_infra_and_small_delta_flagged_within_noise_band(self):
         """Different infra + <3pp delta → regression is marked
         within_noise_band and drops from blocking_regressions."""
-        from eval_kit.baselines.comparison import RegressionDetector
-        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+        from tracelens.baselines.comparison import RegressionDetector
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 
         detector = RegressionDetector(min_delta_percent=1.0)
         # 2pp drop: 0.75 -> 0.73
@@ -314,8 +329,8 @@ class TestNoiseAwareRegression:
     def test_mismatched_infra_but_large_delta_still_blocks(self):
         """A 10pp drop with mismatched infra should still register as a
         real regression — the noise-band applies only to small deltas."""
-        from eval_kit.baselines.comparison import RegressionDetector
-        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+        from tracelens.baselines.comparison import RegressionDetector
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 
         detector = RegressionDetector(min_delta_percent=1.0)
         baseline = self._make_pass_rate_baseline(value=0.75)
@@ -335,8 +350,8 @@ class TestNoiseAwareRegression:
         """Callers can opt out of noise-band leniency by passing
         ignore_noise_band=False — then every regression counts even if
         the infra configs differ."""
-        from eval_kit.baselines.comparison import RegressionDetector
-        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+        from tracelens.baselines.comparison import RegressionDetector
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 
         detector = RegressionDetector(min_delta_percent=1.0)
         baseline = self._make_pass_rate_baseline(value=0.75)
@@ -361,8 +376,8 @@ class TestNoiseAwareRegression:
     def test_noise_band_aware_false_disables_flagging(self):
         """Setting noise_band_aware=False on the detector disables the
         downgrade entirely, even when specs mismatch."""
-        from eval_kit.baselines.comparison import RegressionDetector
-        from eval_kit.core.decision_spec import DecisionSpec, InfraConfig
+        from tracelens.baselines.comparison import RegressionDetector
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 
         detector = RegressionDetector(
             min_delta_percent=1.0,

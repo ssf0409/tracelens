@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from eval_kit.statistics.inference import (
+from tracelens.statistics.inference import (
     ComparisonResult,
     MetricEstimate,
     bootstrap_ci,

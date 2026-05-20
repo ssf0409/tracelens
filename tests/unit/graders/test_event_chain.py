@@ -3,9 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
-from eval_kit.graders.event_chain import (
+from tracelens.core.task import Task
+from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
+from tracelens.graders.event_chain import (
     EventChainConfig,
     EventChainVerifier,
     EventExpectation,

@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import StepType, Transcript
-from eval_kit.execution.agent_adapter import AgentAdapter, SimpleAdapter
+from tracelens.core.task import Task
+from tracelens.core.transcript import StepType, Transcript
+from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
 
 
 class TestSimpleAdapter:

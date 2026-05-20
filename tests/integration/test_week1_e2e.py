@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from eval_kit.core.grader import (
+from tracelens.core.grader import (
     CodeGrader,
     CompositeGrader,
     EvalPolicy,
@@ -22,13 +22,13 @@ from eval_kit.core.grader import (
     GraderRole,
     LLMGrader,
 )
-from eval_kit.core.task import EvalSet, Task
-from eval_kit.core.transcript import Transcript
-from eval_kit.core.trial import TrialBatch, TrialStatus
-from eval_kit.execution.agent_adapter import SimpleAdapter
-from eval_kit.execution.runner import EvaluationRunner, RunnerConfig
-from eval_kit.llm.provider import InMemoryProvider
-from eval_kit.reporting.generator import ReportGenerator
+from tracelens.core.task import EvalSet, Task
+from tracelens.core.transcript import Transcript
+from tracelens.core.trial import TrialBatch, TrialStatus
+from tracelens.execution.agent_adapter import SimpleAdapter
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.llm.provider import InMemoryProvider
+from tracelens.reporting.generator import ReportGenerator
 
 # ── Test graders ───────────────────────────────────────────────
 

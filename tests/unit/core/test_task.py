@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from eval_kit.core.task import (
+from tracelens.core.task import (
     EvalSet,
     JSONTaskLoader,
     Task,

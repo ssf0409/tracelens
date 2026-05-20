@@ -1,10 +1,10 @@
-# eval-kit User Guide
+# TraceLens User Guide
 
-Comprehensive guide to the eval-kit evaluation framework.
+Comprehensive guide to the TraceLens evaluation framework.
 
 ## Architecture Overview
 
-eval-kit follows a linear pipeline:
+TraceLens follows a linear pipeline:
 
 ```
 Task → Adapter → Transcript → Grader → Outcome → Trial → TrialBatch → Report
@@ -22,7 +22,7 @@ Task → Adapter → Transcript → Grader → Outcome → Trial → TrialBatch 
 ### Task Fields
 
 ```python
-from eval_kit import Task
+from tracelens import Task
 
 task = Task(
     task_id="unique-id",              # Auto-generated UUID if omitted
@@ -46,7 +46,7 @@ task = Task(
 Optional structured expectations for graders that need them:
 
 ```python
-from eval_kit.core.task import TaskExpectation
+from tracelens.core.task import TaskExpectation
 
 task = Task(
     name="Format check",
@@ -64,7 +64,7 @@ task = Task(
 Load tasks from JSON files:
 
 ```python
-from eval_kit.core.task import JSONTaskLoader
+from tracelens.core.task import JSONTaskLoader
 
 loader = JSONTaskLoader()
 
@@ -83,7 +83,7 @@ loader.save(tasks, "output/tasks.json")
 An `EvalSet` groups tasks together:
 
 ```python
-from eval_kit import EvalSet
+from tracelens import EvalSet
 
 eval_set = EvalSet(
     name="Goal Decomposition v1",
@@ -107,9 +107,9 @@ subset = eval_set.filtered_eval_set(categories=["programming"], max_tasks=10)
 The abstract base class for all adapters:
 
 ```python
-from eval_kit import AgentAdapter
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens import AgentAdapter
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 class MyAdapter(AgentAdapter):
     async def run(self, task: Task) -> Transcript:
@@ -135,7 +135,7 @@ class MyAdapter(AgentAdapter):
 Wraps any async callable — ideal for testing and simple agents:
 
 ```python
-from eval_kit import SimpleAdapter
+from tracelens import SimpleAdapter
 
 async def my_fn(input_data: dict) -> dict:
     return {"answer": 42}
@@ -174,7 +174,7 @@ class LangChainAdapter(AgentAdapter):
 A `Transcript` is a complete execution record:
 
 ```python
-from eval_kit.core.transcript import Transcript, TranscriptStep, StepType
+from tracelens.core.transcript import Transcript, TranscriptStep, StepType
 
 transcript = Transcript(task_id="task-1")
 
@@ -207,7 +207,7 @@ Transcripts are invaluable for debugging. When a grader produces unexpected resu
 Deterministic grading based on computed metrics:
 
 ```python
-from eval_kit import CodeGrader
+from tracelens import CodeGrader
 
 class AccuracyGrader(CodeGrader):
     def __init__(self):
@@ -234,7 +234,7 @@ class AccuracyGrader(CodeGrader):
 LLM-as-judge grading for subjective quality:
 
 ```python
-from eval_kit import LLMGrader
+from tracelens import LLMGrader
 
 class ClarityGrader(LLMGrader):
     def __init__(self):
@@ -265,7 +265,7 @@ class ClarityGrader(LLMGrader):
 Combines multiple graders with role-based aggregation:
 
 ```python
-from eval_kit import CompositeGrader, GraderRole, GraderConfig
+from tracelens import CompositeGrader, GraderRole, GraderConfig
 
 # Safety grader — must pass or entire trial fails
 safety_config = GraderConfig(role=GraderRole.MUST_PASS)
@@ -309,7 +309,7 @@ config = GraderConfig(
 ### Outcome Fields
 
 ```python
-from eval_kit.core.outcome import Outcome, GradeLevel
+from tracelens.core.outcome import Outcome, GradeLevel
 
 outcome = Outcome(
     trial_id="...",
@@ -340,7 +340,7 @@ Automatic categorical mapping:
 Suite-level statistics from multiple outcomes:
 
 ```python
-from eval_kit.core.outcome import AggregatedOutcome
+from tracelens.core.outcome import AggregatedOutcome
 
 agg = AggregatedOutcome.from_outcomes(outcomes)
 print(f"Pass rate: {agg.pass_rate:.1%}")
@@ -355,7 +355,7 @@ print(f"Per-grader pass rates: {agg.grader_pass_rates}")
 Orchestrates parallel execution with concurrency control:
 
 ```python
-from eval_kit import EvaluationRunner, RunnerConfig
+from tracelens import EvaluationRunner, RunnerConfig
 
 config = RunnerConfig(
     num_runs=5,             # Runs per task (for pass@k)
@@ -401,7 +401,7 @@ for trial in batch.get_trials_for_task("task-1"):
 "What's the probability of at least one success in k attempts?"
 
 ```python
-from eval_kit.statistics.pass_at_k import pass_at_k, PassAtKAnalyzer
+from tracelens.statistics.pass_at_k import pass_at_k, PassAtKAnalyzer
 
 # Single task: 10 runs, 7 passed, what's pass@5?
 prob = pass_at_k(n=10, c=7, k=5)  # 0.99+
@@ -420,7 +420,7 @@ results_with_ci = analyzer.analyze_with_ci(pass_results_by_task)
 "What's the probability that ALL k attempts succeed?"
 
 ```python
-from eval_kit.statistics.consistency import pass_to_k, ConsistencyAnalyzer
+from tracelens.statistics.consistency import pass_to_k, ConsistencyAnalyzer
 
 # Single task: [T, T, F, T, T], what's pass^3?
 prob = pass_to_k([True, True, False, True, True], k=3)  # 0.333
@@ -437,7 +437,7 @@ stability = analyzer.compute_stability_metrics(pass_results_by_task)
 ### Bootstrap CI and Comparison
 
 ```python
-from eval_kit.statistics.inference import compare_metrics, estimate_metric
+from tracelens.statistics.inference import compare_metrics, estimate_metric
 
 # Compare current run against baseline
 result = compare_metrics(
@@ -469,7 +469,7 @@ print(f"Significant: {result.significant_improvement}")
 Captures all parameters affecting agent behavior:
 
 ```python
-from eval_kit.core.decision_spec import (
+from tracelens.core.decision_spec import (
     DecisionSpec, ModelConfig, AgentSpec, PromptSpec, ToolSpec
 )
 
@@ -506,7 +506,7 @@ When comparing baselines, mismatched fingerprints indicate configuration changes
 ### BaselineManager
 
 ```python
-from eval_kit.baselines import BaselineManager
+from tracelens.baselines import BaselineManager
 
 manager = BaselineManager("baselines.json")
 
@@ -542,7 +542,7 @@ manager.create_canary_baseline(
 )
 
 # Capability — auto-promotes on improvement
-from eval_kit.baselines.manager import PromotionPolicy
+from tracelens.baselines.manager import PromotionPolicy
 manager.create_capability_baseline(
     task_id="quality",
     metrics={"quality_score": 0.75},
@@ -572,7 +572,7 @@ policy = PromotionPolicy(
 ### RegressionDetector
 
 ```python
-from eval_kit.baselines.comparison import RegressionDetector, RegressionSeverity
+from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
 
 detector = RegressionDetector(significance_level=0.05)
 report = detector.compare(baseline, current_results)
@@ -595,7 +595,7 @@ if report.should_block_ci(threshold=RegressionSeverity.MODERATE):
 ### ReportGenerator
 
 ```python
-from eval_kit.reporting.generator import ReportGenerator
+from tracelens.reporting.generator import ReportGenerator
 
 gen = ReportGenerator(
     k_values=[1, 3, 5],               # pass@k values to compute
@@ -623,7 +623,7 @@ with open("results.json", "w") as f:
     json.dump(data, f, indent=2, default=str)
 
 # Load
-from eval_kit.reporting.generator import ReportData
+from tracelens.reporting.generator import ReportData
 with open("results.json") as f:
     report = ReportData.from_dict(json.load(f))
 ```
@@ -642,10 +642,10 @@ Sections: summary cards, pass@k/pass^k bar charts, per-task results table, pass 
 
 ## CLI
 
-### eval-kit run
+### tracelens run
 
 ```bash
-eval-kit run \
+tracelens run \
   --eval-set tasks.json \
   --adapter myproject.adapters.MyAdapter \
   --graders myproject.graders.Grader1 myproject.graders.Grader2 \
@@ -660,13 +660,13 @@ eval-kit run \
   --fail-on-regression moderate
 ```
 
-### eval-kit report
+### tracelens report
 
 ```bash
 # From saved results
-eval-kit report --results results.json --format markdown
-eval-kit report --results results.json --format json
-eval-kit report --results results.json --format html
+tracelens report --results results.json --format markdown
+tracelens report --results results.json --format json
+tracelens report --results results.json --format html
 ```
 
 ## Plugin System
@@ -674,7 +674,7 @@ eval-kit report --results results.json --format html
 The `registry` module loads classes from dotted import paths at runtime:
 
 ```python
-from eval_kit.execution.registry import load_class, instantiate
+from tracelens.execution.registry import load_class, instantiate
 
 # Load a class
 cls = load_class("myproject.graders.QualityGrader")

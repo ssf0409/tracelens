@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from eval_kit.baselines.manager import TaskBaseline
-from eval_kit.core._time import utc_now
-from eval_kit.core.outcome import Outcome
-from eval_kit.core.task import Task, TaskExpectation
-from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
-from eval_kit.core.trial import Trial, TrialStatus
+from tracelens.baselines.manager import TaskBaseline
+from tracelens.core._time import utc_now
+from tracelens.core.outcome import Outcome
+from tracelens.core.task import Task, TaskExpectation
+from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
+from tracelens.core.trial import Trial, TrialStatus
 
 
 @pytest.fixture

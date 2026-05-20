@@ -1,5 +1,5 @@
 <!--
-Thanks for contributing to eval-kit!
+Thanks for contributing to tracelens!
 Please keep one logical change per PR. Split branches that touch
 multiple layers (e.g. adapter + statistics) into separate PRs.
 -->
@@ -27,10 +27,10 @@ What alternatives did you consider and why did you reject them?
 
 - [ ] `pytest -q` passes locally
 - [ ] `ruff check src/ tests/` passes
-- [ ] `mypy src/eval_kit/` passes (strict)
+- [ ] `mypy src/tracelens/` passes (strict)
 - [ ] New / changed code is covered by tests
 - [ ] If touching `DecisionSpec`, baseline, or regression logic: backwards-compat note added to `CHANGELOG.md`
-- [ ] If adding to `src/eval_kit/__init__.py`: this symbol is intended as stable public API
+- [ ] If adding to `src/tracelens/__init__.py`: this symbol is intended as stable public API
 
 ## Linked issues
 

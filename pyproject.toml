@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "eval-kit"
+name = "tracelens"
 version = "0.1.0"
-description = "Trustworthy evaluation infrastructure for autonomous AI agents: reproducibility fingerprinting, regression gating, and calibration-aware grading."
+description = "Friendly evaluation and regression-testing framework for AI agents: inspectable traces, graded outcomes, baseline comparisons, and CI-ready reliability signals."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -47,13 +47,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ssf0409/eval-kit"
-Repository = "https://github.com/ssf0409/eval-kit"
-Issues = "https://github.com/ssf0409/eval-kit/issues"
-Changelog = "https://github.com/ssf0409/eval-kit/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ssf0409/tracelens"
+Repository = "https://github.com/ssf0409/tracelens"
+Issues = "https://github.com/ssf0409/tracelens/issues"
+Changelog = "https://github.com/ssf0409/tracelens/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-# NOTE: eval-kit no longer ships a built-in third-party provider wrapper.
+# NOTE: TraceLens no longer ships a built-in third-party provider wrapper.
 # The [llm] extra is retained as a convenience bundle of the SDKs users
 # commonly pull in when they subclass LLMProvider themselves.
 llm = [
@@ -75,10 +75,15 @@ dev = [
 ]
 
 [project.scripts]
-eval-kit = "eval_kit.cli.main:main"
+tracelens = "tracelens.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/eval_kit"]
+packages = ["src/tracelens"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/CLAUDE.md",
+]
 
 [tool.ruff]
 line-length = 100

@@ -18,7 +18,7 @@ services:
       - ./src:/app/src:ro
       - ./tests:/app/tests:ro
       - ./coverage:/app/coverage
-    command: uv run pytest tests/ -v --cov=eval_kit --cov-report=html:coverage/html --cov-report=term-missing
+    command: uv run pytest tests/ -v --cov=tracelens --cov-report=html:coverage/html --cov-report=term-missing
 
   # Type checking with mypy
   type-check:
@@ -27,7 +27,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./src:/app/src:ro
-    command: uv run mypy src/eval_kit/ --ignore-missing-imports
+    command: uv run mypy src/tracelens/ --ignore-missing-imports
 
   # Linting with ruff
   lint:

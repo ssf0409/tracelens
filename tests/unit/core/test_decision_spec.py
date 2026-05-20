@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from eval_kit.core.decision_spec import (
+from tracelens.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
     EnvironmentSpec,
@@ -354,7 +354,7 @@ class TestDecisionSpecIntegration:
 
     def test_transcript_with_decision_spec(self):
         """Test that DecisionSpec works with Transcript."""
-        from eval_kit.core.transcript import Transcript
+        from tracelens.core.transcript import Transcript
 
         spec = DecisionSpec(
             model=ModelConfig(
@@ -381,8 +381,8 @@ class TestDecisionSpecIntegration:
 
     def test_trial_fingerprint_property(self):
         """Test that Trial can access fingerprint from transcript."""
-        from eval_kit.core.transcript import Transcript
-        from eval_kit.core.trial import Trial
+        from tracelens.core.transcript import Transcript
+        from tracelens.core.trial import Trial
 
         spec = DecisionSpec(
             model=ModelConfig(provider="test", model_id="test-model"),
@@ -403,8 +403,8 @@ class TestDecisionSpecIntegration:
 
     def test_trial_fingerprint_none_without_spec(self):
         """Test that Trial fingerprint is None without decision_spec."""
-        from eval_kit.core.transcript import Transcript
-        from eval_kit.core.trial import Trial
+        from tracelens.core.transcript import Transcript
+        from tracelens.core.trial import Trial
 
         transcript = Transcript(task_id="test-task")
         trial = Trial(task_id="test-task", transcript=transcript)
@@ -434,7 +434,7 @@ class TestInfraConfig:
             concurrency_level=8,
             runtime_platform="kubernetes",
             sandbox_provider="gke",
-            harness_version="eval-kit-0.1.0",
+            harness_version="tracelens-0.1.0",
         )
         assert infra.cpu_guaranteed == 1.0
         assert infra.cpu_hard_limit == 3.0

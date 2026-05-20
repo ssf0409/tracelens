@@ -2,12 +2,12 @@
 
 import pytest
 
-from eval_kit.calibration.analyzer import (
+from tracelens.calibration.analyzer import (
     AnnotationSet,
     CalibrationAnalyzer,
     HumanAnnotation,
 )
-from eval_kit.core.outcome import Outcome
+from tracelens.core.outcome import Outcome
 
 
 def _make_outcome(score: float, passed: bool) -> Outcome:

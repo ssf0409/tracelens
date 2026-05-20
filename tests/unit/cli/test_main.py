@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from eval_kit.cli.calibrate import cmd_calibrate
-from eval_kit.cli.main import build_parser
+from tracelens.cli.calibrate import cmd_calibrate
+from tracelens.cli.main import build_parser
 
 
 class TestBuildParser:
@@ -178,7 +178,7 @@ class TestCmdCalibrateIntegration:
         parser = build_parser()
         args = parser.parse_args([
             "calibrate",
-            "--grader", "eval_kit.core.grader.Grader",
+            "--grader", "tracelens.core.grader.Grader",
             "--samples", str(samples_path),
             "--annotations", str(ann_path),
             "--results", str(res_path),
@@ -206,7 +206,7 @@ class TestCmdCalibrateIntegration:
         parser = build_parser()
         args = parser.parse_args([
             "calibrate",
-            "--grader", "eval_kit.core.grader.Grader",
+            "--grader", "tracelens.core.grader.Grader",
             "--samples", str(samples_path),
             "--annotations", str(ann_path),
         ])

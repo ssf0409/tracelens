@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from eval_kit.core.decision_spec import (
+from tracelens.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
     EnvironmentSpec,
@@ -13,9 +13,9 @@ from eval_kit.core.decision_spec import (
     PromptSpec,
     ToolSpec,
 )
-from eval_kit.core.outcome import Outcome
-from eval_kit.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
-from eval_kit.core.trial import Trial, TrialBatch, TrialStatus
+from tracelens.core.outcome import Outcome
+from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
+from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 
 
 class TestTranscriptSerialization:

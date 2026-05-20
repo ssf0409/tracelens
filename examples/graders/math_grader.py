@@ -4,9 +4,9 @@ A deterministic grader that compares the agent's numerical answer
 against an expected value stored in task metadata.
 """
 
-from eval_kit import CodeGrader
-from eval_kit.core.task import Task
-from eval_kit.core.transcript import Transcript
+from tracelens import CodeGrader
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 
 class MathGrader(CodeGrader):

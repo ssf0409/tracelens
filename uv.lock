@@ -184,7 +184,7 @@ wheels = [
 ]
 
 [[package]]
-name = "eval-kit"
+name = "tracelens"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
