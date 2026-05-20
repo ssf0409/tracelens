@@ -42,7 +42,7 @@ steps:
 Create `.github/workflows/eval.yml` in your project:
 
 ```yaml
-name: Agent Evaluation
+name: TraceLens Evaluation
 
 on:
   pull_request:
