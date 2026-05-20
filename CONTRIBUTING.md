@@ -42,6 +42,12 @@ mypy src/tracelens/                 # type check (strict mode)
 
 All three must pass before opening a PR.
 
+For changes that affect packaging, console scripts, public imports, examples,
+or downstream dependency behavior, also run the relevant environment checks in
+[docs/contributor-testing.md](docs/contributor-testing.md). In particular,
+wheel smoke tests should use a clean virtual environment, not the editable dev
+checkout.
+
 ## Pull request guidelines
 
 1. **One change per PR.** If your branch touches the adapter layer *and* the statistics layer, split it.

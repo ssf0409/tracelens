@@ -106,6 +106,28 @@ focuses on local, inspectable, CI-ready evaluation.
 | A baseline and new candidate run | `examples/noise_aware_regression.py` |
 | A safety/resource-sensitive workflow | `benchmarks/high-stakes-autonomous/` |
 
+## Current Example Coverage
+
+The current example set is enough for a first open-source release: it covers
+the main path a new user needs to understand TraceLens and the highest-risk
+release surfaces that tend to break packaging or CI adoption.
+
+| Covered Today | Runnable Example |
+|---------------|------------------|
+| Minimal local agent eval | `examples/hello_world.py` |
+| Behavior-contract graders | `examples/contract_eval.py` |
+| HTTP JSON agent evaluation | `examples/http_agent_eval.py` |
+| Baseline regression with infra-noise awareness | `examples/noise_aware_regression.py` |
+| CLI task loading and report generation | `examples/run_eval.py` |
+
+The next most useful examples to add are:
+
+- LLM-as-judge with a fake or recorded provider so it is safe in CI.
+- Multi-step tool-use trace review with transcript inspection.
+- Human-calibration workflow that compares human labels to grader output.
+- A tiny downstream project fixture that installs TraceLens from PyPI and runs
+  one eval in CI.
+
 ## Minimum Production Setup
 
 For a real project, aim for:

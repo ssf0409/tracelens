@@ -58,18 +58,23 @@ No PyPI API token is required when trusted publishing is configured correctly.
    uv build --sdist --wheel
    ```
 
-3. Commit the release notes.
+3. Run the release-relevant environment checks from
+   [Contributor Testing](contributor-testing.md), especially the clean wheel
+   smoke when packaging, CLI, README, public imports, or dependency metadata
+   changed.
 
-4. Create and push the tag:
+4. Commit the release notes.
+
+5. Create and push the tag:
 
    ```bash
    git tag v0.1.0
    git push origin v0.1.0
    ```
 
-5. Watch the GitHub Actions release workflow.
+6. Watch the GitHub Actions release workflow.
 
-6. After PyPI publish completes, smoke test from a clean environment:
+7. After PyPI publish completes, smoke test from a clean environment:
 
    ```bash
    python -m venv /tmp/tracelens-release-smoke
@@ -89,3 +94,7 @@ dependencies = [
 
 Public GitHub or PyPI dependencies do not need a CI secret. A secret is only
 needed when a downstream CI job checks out or installs a private repository.
+
+For local pre-release checks, prefer the built-wheel and downstream smoke
+guidance in [Contributor Testing](contributor-testing.md). TestPyPI is optional
+and mainly useful when changing the publishing workflow itself.

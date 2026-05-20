@@ -425,6 +425,7 @@ print(gen.render_markdown(report))
 - **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
 - **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
 - **[CI/CD Integration](docs/ci-cd-integration.md)** — GitHub Actions with regression gating.
+- **[Contributor Testing](docs/contributor-testing.md)** — Local, wheel-smoke, downstream, and release-safety environments.
 - **[Examples](examples/)** — Four working scripts: `hello_world.py` → `contract_eval.py` → `http_agent_eval.py` → `noise_aware_regression.py`.
 - **[Releasing](docs/releasing.md)** — Maintainer guide for tag-driven PyPI releases.
 

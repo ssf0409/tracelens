@@ -59,3 +59,16 @@ python examples/noise_aware_regression.py
 
 This demonstrates how TraceLens separates agent regressions from small
 infrastructure-driven differences.
+
+## Coverage Notes
+
+These four examples are intentionally small and dependency-light. They are
+enough to teach the core framework and support the first public release.
+
+Future examples should focus on scenarios that are documented but not yet
+represented as runnable scripts:
+
+- LLM-as-judge using a fake or recorded provider.
+- Multi-step tool-use transcript review.
+- Human calibration against grader output.
+- Downstream project CI that installs TraceLens from PyPI.
