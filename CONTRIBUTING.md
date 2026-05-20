@@ -76,11 +76,21 @@ These guide reviews; deviations should be justified in the PR description:
 
 ## Releasing (maintainers only)
 
-1. Bump version in `pyproject.toml` and `src/tracelens/__init__.py`.
-2. Move `[Unreleased]` notes to a new dated section in `CHANGELOG.md`.
-3. Build and inspect the artifacts: `uv build --sdist --wheel`.
-4. Publish with the configured maintainer credentials.
-5. `git tag vX.Y.Z && git push --tags`.
+TraceLens uses tag-driven releases. Do not commit a version bump just to
+release. Package versions are generated from git tags by `hatch-vcs`.
+
+1. Move `[Unreleased]` notes to a new dated section in `CHANGELOG.md`.
+2. Run the full verification gate:
+   `uv lock --check`, `uv run --frozen pytest -q`,
+   `uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous`,
+   `uv run --frozen --extra dev mypy src/tracelens/`, and
+   `uv build --sdist --wheel`.
+3. Commit the release notes.
+4. Push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+5. Watch `.github/workflows/release.yml`.
+
+See [docs/releasing.md](docs/releasing.md) for the PyPI trusted publishing
+setup and release checklist.
 
 ## Questions?
 

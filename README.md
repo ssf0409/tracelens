@@ -355,6 +355,12 @@ uv pip install "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git"
 # ]
 ```
 
+After the first PyPI release:
+
+```bash
+uv pip install tracelens
+```
+
 ### Development Setup
 
 ```bash
@@ -420,11 +426,27 @@ print(gen.render_markdown(report))
 
 - **[Getting Started](docs/getting-started.md)** — Run your first eval in five minutes; the example ladder.
 - **[Quickstart](docs/quickstart.md)** — Build a custom grader, JSON task loader, and CLI workflow.
+- **[Supported Scenarios](docs/scenarios.md)** — Which agent-evaluation problems TraceLens is designed for.
 - **[User Guide](docs/user-guide.md)** — Comprehensive framework guide.
 - **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
 - **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
 - **[CI/CD Integration](docs/ci-cd-integration.md)** — GitHub Actions with regression gating.
 - **[Examples](examples/)** — Four working scripts: `hello_world.py` → `contract_eval.py` → `http_agent_eval.py` → `noise_aware_regression.py`.
+- **[Releasing](docs/releasing.md)** — Maintainer guide for tag-driven PyPI releases.
+
+## Contributing
+
+TraceLens is MIT licensed and open to contributions. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md), run the local verification gate, and open a
+focused PR:
+
+```bash
+uv run --frozen pytest -q
+uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+uv run --frozen --extra dev mypy src/tracelens/
+```
+
+Security issues should be reported privately using [SECURITY.md](SECURITY.md).
 
 ### References
 

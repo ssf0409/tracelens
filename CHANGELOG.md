@@ -8,8 +8,7 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
-Everything under this heading is shipped on branch
-`feat/tracelens-feature-gaps` and is queued for the next release. Two
+Everything under this heading is queued for the next tag-driven release. Two
 themes:
 
 1. **Productization pre-v1.0** — turn the engine into something an external
@@ -63,6 +62,12 @@ themes:
 - **4-job GitHub Actions CI workflow** at `.github/workflows/ci.yml`:
   `core` (Python 3.11 / 3.12 / 3.13), `with-llm`, `examples-smoke`, and
   `lint`. Concurrency group cancels in-flight runs on re-push.
+- **Tag-driven release workflow** at `.github/workflows/release.yml`.
+  Versions come from `vX.Y.Z` git tags via `hatch-vcs`; the workflow builds,
+  validates, checks the tag/version match, and publishes with PyPI trusted
+  publishing.
+- **OSS launch guidance**: `docs/releasing.md`, `docs/scenarios.md`, and
+  `examples/README.md`.
 - **Curated public API** at `tracelens/*` (83 symbols). Top-level imports
   are the stable surface; submodules may move.
 - **OSS hygiene files**: `LICENSE` (MIT), `CONTRIBUTING.md`,

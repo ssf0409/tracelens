@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "tracelens"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Friendly evaluation and regression-testing framework for AI agents: inspectable traces, graded outcomes, baseline comparisons, and CI-ready reliability signals."
 readme = "README.md"
 license = "MIT"
@@ -79,6 +79,13 @@ tracelens = "tracelens.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracelens"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+fallback_version = "0.1.0"
+local_scheme = "no-local-version"
 
 [tool.hatch.build.targets.sdist]
 exclude = [

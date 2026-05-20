@@ -100,6 +100,8 @@ When your agent is real and your eval set has grown, move on to:
 
 - **[User Guide](./user-guide.md)** — every public API explained, with
   decision trees for choosing graders, adapters, and analysis methods.
+- **[Supported Scenarios](./scenarios.md)** — which agent-evaluation
+  problems TraceLens fits, and which first example to copy.
 - **[Evaluation Levels](./evaluation-levels.md)** — function vs task vs
   system-level evaluation; pass@k vs pass^k semantics.
 - **[Accuracy Best Practices](./accuracy.md)** — how to keep LLM-judge

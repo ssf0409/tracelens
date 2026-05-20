@@ -25,6 +25,8 @@ After PyPI publishing, the install command will become:
 uv pip install tracelens
 ```
 
+For release mechanics, see [Releasing TraceLens](releasing.md).
+
 ### Option 2: Add as a Dependency in pyproject.toml
 
 Add to your project's `pyproject.toml`:

@@ -1,8 +1,8 @@
-"""Single source of truth for the package version.
+"""Package version helpers."""
 
-Kept in its own module so submodules (like reporting.generator) can
-import the version without hitting a circular import through
-``tracelens/__init__.py``.
-"""
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("tracelens")
+except PackageNotFoundError:  # pragma: no cover - source tree without install
+    __version__ = "0.0.0+unknown"

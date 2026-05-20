@@ -174,7 +174,7 @@ class TestReportGenerator:
 
         assert "<!DOCTYPE html>" in html
         assert "<title>TraceLens Report</title>" in html
-        assert "TraceLens v0.1.0" in html
+        assert "TraceLens v" in html
 
     def test_render_html_contains_summary_cards(self):
         """HTML report has summary cards with correct values."""
