@@ -13,13 +13,13 @@ The CI/CD integration provides:
 ## Prerequisites
 
 Install tracelens the same way you install the rest of your project's
-dependencies. For GitHub installs, use the public repository URL in
+dependencies. For PyPI installs, add a normal package constraint in
 `pyproject.toml`:
 
 ```toml
 [project]
 dependencies = [
-    "tracelens @ git+https://github.com/ssf0409/tracelens.git",
+    "tracelens>=0.1.0",
 ]
 ```
 

@@ -4,25 +4,17 @@ This guide explains how to install and use the `tracelens` framework in your pro
 
 ## Installation Options
 
-### Option 1: Install from GitHub
-
-Until the first PyPI release is published, install directly from GitHub:
+### Option 1: Install from PyPI
 
 ```bash
 # Using uv (recommended)
-uv pip install git+https://github.com/ssf0409/tracelens.git
+uv pip install tracelens
 
 # Using pip
-pip install git+https://github.com/ssf0409/tracelens.git
+pip install tracelens
 
 # With LLM support (for LLM-based graders)
-uv pip install "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git"
-```
-
-After PyPI publishing, the install command will become:
-
-```bash
-uv pip install tracelens
+uv pip install "tracelens[llm]"
 ```
 
 For release mechanics, see [Releasing TraceLens](releasing.md).
@@ -34,17 +26,12 @@ Add to your project's `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "tracelens @ git+https://github.com/ssf0409/tracelens.git",
-]
-
-# Or with a specific version/tag
-dependencies = [
-    "tracelens @ git+https://github.com/ssf0409/tracelens.git@v0.1.0",
+    "tracelens>=0.1.0",
 ]
 
 # With LLM extras
 dependencies = [
-    "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git",
+    "tracelens[llm]>=0.1.0",
 ]
 ```
 
@@ -77,15 +64,14 @@ uv pip install -e ".[dev,http,llm]"
 Extras compose normally:
 
 ```bash
-uv pip install "tracelens[http,llm] @ git+https://github.com/ssf0409/tracelens.git"
+uv pip install "tracelens[http,llm]"
 ```
 
 ## CI Installation
 
 For GitHub Actions, install your project dependencies normally. If your
-project depends on tracelens from GitHub, `uv sync` or `pip install -e .`
-is enough; no extra repository authentication is required for a public
-repository.
+project depends on `tracelens>=0.1.0`, `uv sync` or `pip install -e .`
+is enough; no extra repository checkout or authentication is required.
 
 ```yaml
 jobs:

@@ -79,15 +79,7 @@ No PyPI API token is required when trusted publishing is configured correctly.
 
 ## Dependency Guidance
 
-Before the first PyPI release, downstream projects can depend on GitHub:
-
-```toml
-dependencies = [
-    "tracelens @ git+https://github.com/ssf0409/tracelens.git",
-]
-```
-
-After the first PyPI release, prefer normal package constraints:
+Downstream projects should depend on TraceLens from PyPI:
 
 ```toml
 dependencies = [

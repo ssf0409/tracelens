@@ -11,10 +11,10 @@ know which example to read next when you have a real agent.
 
 ```bash
 # Recommended: uv
-uv pip install git+https://github.com/ssf0409/tracelens.git
+uv pip install tracelens
 
 # Or: plain pip
-pip install git+https://github.com/ssf0409/tracelens.git
+pip install tracelens
 ```
 
 For local development:

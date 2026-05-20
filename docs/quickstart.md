@@ -10,8 +10,8 @@ Get a working evaluation pipeline running from scratch.
 ## 1. Install TraceLens
 
 ```bash
-# From GitHub
-uv pip install git+https://github.com/ssf0409/tracelens.git
+# From PyPI
+uv pip install tracelens
 
 # Or for development
 git clone https://github.com/ssf0409/tracelens.git

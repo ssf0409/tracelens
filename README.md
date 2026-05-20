@@ -340,25 +340,19 @@ See [docs/accuracy.md](docs/accuracy.md) for calibration best practices.
 
 ## Installation
 
-Until the first PyPI release is published, install directly from GitHub:
+Install from PyPI:
 
 ```bash
 # Using uv (recommended)
-uv pip install git+https://github.com/ssf0409/tracelens.git
+uv pip install tracelens
 
 # With LLM support
-uv pip install "tracelens[llm] @ git+https://github.com/ssf0409/tracelens.git"
+uv pip install "tracelens[llm]"
 
 # Or add to pyproject.toml
 # dependencies = [
-#     "tracelens @ git+https://github.com/ssf0409/tracelens.git",
+#     "tracelens>=0.1.0",
 # ]
-```
-
-After the first PyPI release:
-
-```bash
-uv pip install tracelens
 ```
 
 ### Development Setup
