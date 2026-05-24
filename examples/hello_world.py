@@ -227,11 +227,17 @@ async def main() -> None:
     print(f"report json: {_relative_to_cwd(report_json)}")
     print(f"sample md  : {_relative_to_cwd(report_markdown)}")
     print()
-    for trial in batch.trials:
-        output = trial.transcript.final_output if trial.transcript else None
+    summaries_by_task = {summary.task_id: summary for summary in report.task_summaries}
+    for task in eval_set.tasks:
+        task_summary = summaries_by_task[task.task_id]
+        trials = batch.get_trials_for_task(task_summary.task_id)
+        representative = next((trial for trial in trials if trial.transcript), None)
+        output = representative.transcript.final_output if representative and representative.transcript else None
+        pass_rate = f"{task_summary.pass_rate:.0%}"
         print(
-            f"  {trial.task_id:<24s} "
-            f"status={trial.status.value:<8s} "
+            f"  {task_summary.task_id:<24s} "
+            f"runs={task_summary.num_trials:<2d} "
+            f"pass_rate={pass_rate:<4s} "
             f"output={output!r}"
         )
 

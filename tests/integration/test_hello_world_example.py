@@ -21,6 +21,8 @@ def test_hello_world_generates_sample_report_artifacts() -> None:
     report_md = repo_root / "examples" / "reports" / "hello_world_report.md"
 
     assert "tracelens hello-world" in result.stdout
+    assert result.stdout.count("add-2-2") == 1
+    assert "runs=3" in result.stdout
     assert report_json.exists()
     assert report_md.exists()
 

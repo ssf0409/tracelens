@@ -52,11 +52,9 @@ pass rate  : 100%
 report json: examples/reports/hello_world_report.json
 sample md  : examples/reports/hello_world_report.md
 
-  add-2-2                 status=completed output='4'
-  add-2-2                 status=completed output='4'
-  add-2-2                 status=completed output='4'
-  add-10-5                status=completed output='15'
-  ...
+  add-2-2                  runs=3  pass_rate=100% output='4'
+  add-10-5                 runs=3  pass_rate=100% output='15'
+  add-7-8                  runs=3  pass_rate=100% output='15'
 ```
 
 Render the generated report through the CLI:
