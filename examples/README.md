@@ -3,7 +3,7 @@
 Run these examples from the repository root after installing TraceLens:
 
 ```bash
-uv pip install -e ".[dev,http,llm]"
+uv pip install -e ".[dev]"
 ```
 
 ## Example Ladder
@@ -19,6 +19,7 @@ uv pip install -e ".[dev,http,llm]"
 
 ```bash
 python examples/hello_world.py
+tracelens report --results examples/reports/hello_world_report.json --format markdown
 ```
 
 Expected output:
@@ -26,12 +27,16 @@ Expected output:
 ```text
 tracelens hello-world
 --------------------
-trials run : 3
+trials run : 9
 pass rate  : 100%
+report json: examples/reports/hello_world_report.json
+sample md  : examples/reports/hello_world_report.md
 ```
 
 Use this file as the template when you want to evaluate a normal Python
-function or local agent loop.
+function or local agent loop. The generated sample report at
+`examples/reports/hello_world_report.md` shows tasks, trials, pass@k,
+pass^k, graders, baseline comparison, regression result, and CI summary.
 
 ## HTTP Agent
 
@@ -59,3 +64,16 @@ python examples/noise_aware_regression.py
 
 This demonstrates how TraceLens separates agent regressions from small
 infrastructure-driven differences.
+
+## Coverage Notes
+
+These four examples are intentionally small and dependency-light. They are
+enough to teach the core framework and support the first public release.
+
+Future examples should focus on scenarios that are documented but not yet
+represented as runnable scripts:
+
+- LLM-as-judge using a fake or recorded provider.
+- Multi-step tool-use transcript review.
+- Human calibration against grader output.
+- Downstream project CI that installs TraceLens from PyPI.

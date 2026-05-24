@@ -4,6 +4,62 @@ TraceLens is a friendly evaluation and regression-testing framework for AI agent
 
 迹镜是一个面向 AI Agent 的评测与回归检测框架。它把每次 agent run 转化成可观察的轨迹、可评分的结果、可比较的 baseline，以及可用于 CI 的可靠性信号。
 
+## Why TraceLens
+
+Agents are non-deterministic. Unit tests are not enough. TraceLens helps teams capture agent traces, grade outcomes, compare against baselines, and block regressions in CI.
+
+Use it when you need to answer questions like:
+
+- Did this agent produce the right outcome, not just run without crashing?
+- Is a flaky success still a real capability after 3-5 attempts?
+- Did a prompt, model, tool, or infra change regress a baseline?
+- Can CI block unsafe or lower-quality agent behavior before it ships?
+
+## 5-Minute Demo
+
+### Install
+
+PyPI is live for normal use:
+
+```bash
+# Recommended: uv
+uv pip install tracelens
+
+# Or: plain pip
+pip install tracelens
+```
+
+For the repository examples and local development tools:
+
+```bash
+git clone https://github.com/ssf0409/tracelens.git
+cd tracelens
+uv pip install -e ".[dev]"
+```
+
+### Run The Smallest Eval
+
+```bash
+python examples/hello_world.py
+tracelens report --results examples/reports/hello_world_report.json --format markdown
+```
+
+Expected first output:
+
+```text
+tracelens hello-world
+--------------------
+trials run : 9
+pass rate  : 100%
+report json: examples/reports/hello_world_report.json
+sample md  : examples/reports/hello_world_report.md
+```
+
+The checked-in sample report is here:
+[`examples/reports/hello_world_report.md`](examples/reports/hello_world_report.md).
+It shows the concrete pieces a real eval needs: tasks, trials, pass@k,
+pass^k, graders, baseline comparison, regression result, and CI summary.
+
 ## Overview
 
 TraceLens provides a unified evaluation methodology for AI agent projects. It supports both **subjective evaluations** (LLM-as-judge for quality assessment) and **objective evaluations** (deterministic metrics like schema validity, tool-use constraints, latency, budget, or domain-specific scores).
@@ -414,6 +470,7 @@ print(gen.render_markdown(report))
 ```
 
 > Five-minute version: [`examples/hello_world.py`](examples/hello_world.py).
+> Sample report: [`examples/reports/hello_world_report.md`](examples/reports/hello_world_report.md).
 > Walkthrough: [docs/getting-started.md](docs/getting-started.md).
 
 ## Documentation
@@ -425,6 +482,7 @@ print(gen.render_markdown(report))
 - **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
 - **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
 - **[CI/CD Integration](docs/ci-cd-integration.md)** — GitHub Actions with regression gating.
+- **[Contributor Testing](docs/contributor-testing.md)** — Local, wheel-smoke, downstream, and release-safety environments.
 - **[Examples](examples/)** — Four working scripts: `hello_world.py` → `contract_eval.py` → `http_agent_eval.py` → `noise_aware_regression.py`.
 - **[Releasing](docs/releasing.md)** — Maintainer guide for tag-driven PyPI releases.
 
