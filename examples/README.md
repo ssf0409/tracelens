@@ -14,6 +14,7 @@ uv pip install -e ".[dev]"
 | 2 | `contract_eval.py` | Generate graders from a behavior contract. |
 | 3 | `http_agent_eval.py` | Evaluate an agent exposed as an HTTP JSON endpoint. |
 | 4 | `noise_aware_regression.py` | Compare runs with different infrastructure fingerprints. |
+| 5 | `llm_provider_examples.py` | Wire OpenAI and Anthropic SDK clients into `LLMGrader` through `LLMProvider`. |
 
 ## Hello World
 
@@ -65,15 +66,39 @@ python examples/noise_aware_regression.py
 This demonstrates how TraceLens separates agent regressions from small
 infrastructure-driven differences.
 
+## OpenAI and Anthropic Provider Examples
+
+```bash
+python examples/llm_provider_examples.py
+```
+
+This runs in dry-run mode by default, using recorded judge responses so no API
+keys or network calls are required. It shows one `LLMGrader` quality dimension,
+`instruction_following`, and the provider subclass pattern TraceLens expects.
+
+For live calls, install the optional LLM dependencies and set one provider:
+
+```bash
+uv pip install -e ".[llm]"
+TRACELENS_LIVE=1 TRACELENS_PROVIDER=openai OPENAI_API_KEY=... python examples/llm_provider_examples.py
+TRACELENS_LIVE=1 TRACELENS_PROVIDER=anthropic ANTHROPIC_API_KEY=... python examples/llm_provider_examples.py
+```
+
+Environment variables for live runs:
+
+- `TRACELENS_PROVIDER`: `openai`, `anthropic`, or `all` for dry-run mode.
+- `TRACELENS_LIVE`: set to `1` to make live SDK calls; omitted means dry-run.
+- `OPENAI_API_KEY`: required only when `TRACELENS_PROVIDER=openai`.
+- `ANTHROPIC_API_KEY`: required only when `TRACELENS_PROVIDER=anthropic`.
+
 ## Coverage Notes
 
-These four examples are intentionally small and dependency-light. They are
+These examples are intentionally small and dependency-light. They are
 enough to teach the core framework and support the first public release.
 
 Future examples should focus on scenarios that are documented but not yet
 represented as runnable scripts:
 
-- LLM-as-judge using a fake or recorded provider.
 - Multi-step tool-use transcript review.
 - Human calibration against grader output.
 - Downstream project CI that installs TraceLens from PyPI.
