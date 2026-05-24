@@ -9,12 +9,13 @@ making network calls:
 For live provider calls, install the LLM extra and choose a provider:
 
     uv pip install -e ".[llm]"
-    TRACELENS_LIVE=1 TRACELENS_PROVIDER=openai OPENAI_API_KEY=... python examples/llm_provider_examples.py
-    TRACELENS_LIVE=1 TRACELENS_PROVIDER=anthropic ANTHROPIC_API_KEY=... python examples/llm_provider_examples.py
+    OPENAI_API_KEY=... python examples/llm_provider_examples.py --provider openai --live
+    ANTHROPIC_API_KEY=... python examples/llm_provider_examples.py --provider anthropic --live
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -57,7 +58,7 @@ class OpenAIChatProvider(LLMProvider):
 class AnthropicMessagesProvider(LLMProvider):
     """Minimal Anthropic Messages provider."""
 
-    def __init__(self, model: str = "claude-3-5-haiku-latest") -> None:
+    def __init__(self, model: str = "claude-haiku-4-5-20251001") -> None:
         from anthropic import AsyncAnthropic
 
         self.model = model
@@ -140,20 +141,39 @@ Return only JSON:
         )
 
 
-def provider_from_environment(provider_name: str) -> LLMProvider:
-    """Return a live provider if requested and configured; otherwise dry-run."""
+def provider_from_options(provider_name: str, *, live: bool) -> LLMProvider:
+    """Return the requested provider, failing loudly for incomplete live setup."""
 
-    live_mode = os.getenv("TRACELENS_LIVE") == "1"
+    if not live:
+        return RecordedProvider(provider_name)
 
-    if live_mode and provider_name == "openai" and os.getenv("OPENAI_API_KEY"):
-        return OpenAIChatProvider()
-    if live_mode and provider_name == "anthropic" and os.getenv("ANTHROPIC_API_KEY"):
-        return AnthropicMessagesProvider()
+    if provider_name == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise RuntimeError("OPENAI_API_KEY is required for --provider openai --live")
+        try:
+            return OpenAIChatProvider()
+        except ImportError as exc:
+            raise RuntimeError(
+                'Install optional dependencies with: uv pip install -e ".[llm]"'
+            ) from exc
+
+    if provider_name == "anthropic":
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is required for --provider anthropic --live"
+            )
+        try:
+            return AnthropicMessagesProvider()
+        except ImportError as exc:
+            raise RuntimeError(
+                'Install optional dependencies with: uv pip install -e ".[llm]"'
+            ) from exc
+
     return RecordedProvider(provider_name)
 
 
-async def run_provider_example(provider_name: str) -> None:
-    provider = provider_from_environment(provider_name)
+async def run_provider_example(provider_name: str, *, live: bool) -> None:
+    provider = provider_from_options(provider_name, live=live)
     grader = InstructionFollowingGrader(provider=provider, provider_name=provider_name)
 
     task = Task(
@@ -180,14 +200,43 @@ async def run_provider_example(provider_name: str) -> None:
     print(f"  feedback: {outcome.feedback}")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run OpenAI and Anthropic LLMProvider examples.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=("openai", "anthropic", "all"),
+        default=os.getenv("TRACELENS_PROVIDER", "all").lower(),
+        help=(
+            "Provider to run. Defaults to TRACELENS_PROVIDER when set, "
+            "otherwise all."
+        ),
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        default=os.getenv("TRACELENS_LIVE") == "1",
+        help=(
+            "Make live SDK calls. Defaults to TRACELENS_LIVE=1 when set. "
+            "Requires the matching API key."
+        ),
+    )
+    args = parser.parse_args()
+    if args.provider not in {"openai", "anthropic", "all"}:
+        parser.error(
+            "--provider, or TRACELENS_PROVIDER, must be openai, anthropic, or all"
+        )
+    return args
+
+
 async def main() -> None:
-    selected = os.getenv("TRACELENS_PROVIDER", "all").lower()
+    args = parse_args()
+    selected = args.provider
     provider_names = ["openai", "anthropic"] if selected == "all" else [selected]
 
     for provider_name in provider_names:
-        if provider_name not in {"openai", "anthropic"}:
-            raise ValueError("TRACELENS_PROVIDER must be 'openai', 'anthropic', or 'all'")
-        await run_provider_example(provider_name)
+        await run_provider_example(provider_name, live=args.live)
 
 
 if __name__ == "__main__":

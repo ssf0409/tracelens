@@ -80,16 +80,24 @@ For live calls, install the optional LLM dependencies and set one provider:
 
 ```bash
 uv pip install -e ".[llm]"
-TRACELENS_LIVE=1 TRACELENS_PROVIDER=openai OPENAI_API_KEY=... python examples/llm_provider_examples.py
-TRACELENS_LIVE=1 TRACELENS_PROVIDER=anthropic ANTHROPIC_API_KEY=... python examples/llm_provider_examples.py
+OPENAI_API_KEY=... python examples/llm_provider_examples.py --provider openai --live
+ANTHROPIC_API_KEY=... python examples/llm_provider_examples.py --provider anthropic --live
 ```
 
-Environment variables for live runs:
+CLI options:
 
-- `TRACELENS_PROVIDER`: `openai`, `anthropic`, or `all` for dry-run mode.
-- `TRACELENS_LIVE`: set to `1` to make live SDK calls; omitted means dry-run.
-- `OPENAI_API_KEY`: required only when `TRACELENS_PROVIDER=openai`.
-- `ANTHROPIC_API_KEY`: required only when `TRACELENS_PROVIDER=anthropic`.
+- `--provider`: `openai`, `anthropic`, or `all`; defaults to all providers.
+- `--live`: make live SDK calls; omitted means dry-run mode.
+
+Environment variables can be used as optional fallbacks:
+
+- `TRACELENS_PROVIDER`: used when `--provider` is omitted.
+- `TRACELENS_LIVE`: set to `1` to make live SDK calls when `--live` is omitted.
+- `OPENAI_API_KEY`: required for `--provider openai --live`.
+- `ANTHROPIC_API_KEY`: required for `--provider anthropic --live`.
+
+Live mode fails with a clear error if the requested provider API key or optional
+SDK dependency is missing.
 
 ## Coverage Notes
 
