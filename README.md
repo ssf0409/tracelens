@@ -22,7 +22,11 @@ Use it when you need to answer questions like:
 PyPI is live for normal use:
 
 ```bash
+# Recommended: uv
 uv pip install tracelens
+
+# Or: plain pip
+pip install tracelens
 ```
 
 For the repository examples and local development tools:

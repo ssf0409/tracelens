@@ -9,6 +9,18 @@ know which example to read next when you have a real agent.
 
 ## 1. Install
 
+For using TraceLens as a dependency:
+
+```bash
+# Recommended: uv
+uv pip install tracelens
+
+# Or: plain pip
+pip install tracelens
+```
+
+For local development and to run the repository examples:
+
 ```bash
 git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
@@ -19,11 +31,8 @@ The `[dev]` extra pulls in pytest, ruff, mypy, and type stubs so
 the standard local verification commands run out of the box:
 `pytest -q`, `ruff check src/ tests/`, and `mypy src/tracelens/`.
 
-If you only want the published package in another project:
-
-```bash
-uv pip install tracelens
-```
+The published package gives you the `tracelens` library and CLI. The
+checkout gives you the `examples/` files used in the demo below.
 
 ---
 
