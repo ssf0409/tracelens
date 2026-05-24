@@ -93,7 +93,13 @@ jobs:
 ```bash
 python -c "import tracelens; print(tracelens.__version__)"
 tracelens --help
+```
+
+From a repository checkout, verify the example/report path:
+
+```bash
 python examples/hello_world.py
+tracelens report --results examples/reports/hello_world_report.json --format markdown
 ```
 
 ## Quick Start

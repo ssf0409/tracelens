@@ -1,0 +1,63 @@
+{
+  "total_trials": 9,
+  "total_tasks": 3,
+  "overall_pass_rate": 1.0,
+  "overall_mean_score": 1.0,
+  "infra_error_count": 0,
+  "infra_error_rate": 0.0,
+  "pass_at_k": {
+    "pass@1": 1.0,
+    "pass@3": 1.0
+  },
+  "reliability": {
+    "pass^2": 1.0,
+    "pass^3": 1.0
+  },
+  "task_summaries": [
+    {
+      "task_id": "add-10-5",
+      "num_trials": 3,
+      "pass_rate": 1.0,
+      "mean_score": 1.0,
+      "std_score": 0.0,
+      "pass_at_k": {
+        "pass@1": 1.0,
+        "pass@3": 1.0
+      },
+      "reliability": {
+        "pass^2": 1.0,
+        "pass^3": 1.0
+      }
+    },
+    {
+      "task_id": "add-2-2",
+      "num_trials": 3,
+      "pass_rate": 1.0,
+      "mean_score": 1.0,
+      "std_score": 0.0,
+      "pass_at_k": {
+        "pass@1": 1.0,
+        "pass@3": 1.0
+      },
+      "reliability": {
+        "pass^2": 1.0,
+        "pass^3": 1.0
+      }
+    },
+    {
+      "task_id": "add-7-8",
+      "num_trials": 3,
+      "pass_rate": 1.0,
+      "mean_score": 1.0,
+      "std_score": 0.0,
+      "pass_at_k": {
+        "pass@1": 1.0,
+        "pass@3": 1.0
+      },
+      "reliability": {
+        "pass^2": 1.0,
+        "pass^3": 1.0
+      }
+    }
+  ]
+}

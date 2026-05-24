@@ -1,8 +1,8 @@
 # Getting Started in Five Minutes
 
-This is the fastest path from `pip install` to your first eval run. No
-LLM keys, no config files, no boilerplate. After this guide you'll
-understand the four-piece skeleton every tracelens run uses, and you'll
+This is the fastest path from a fresh checkout to your first eval run.
+No LLM keys, no config files, no boilerplate. After this guide you'll
+understand the four-piece skeleton every TraceLens run uses, and you'll
 know which example to read next when you have a real agent.
 
 ---
@@ -10,27 +10,20 @@ know which example to read next when you have a real agent.
 ## 1. Install
 
 ```bash
-# Recommended: uv
-uv pip install tracelens
-
-# Or: plain pip
-pip install tracelens
-```
-
-For local development:
-
-```bash
 git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
-uv pip install -e ".[dev,http,llm]"
+uv pip install -e ".[dev]"
 ```
 
-The `[dev]` extras pull in pytest, ruff, mypy, and type stubs so
+The `[dev]` extra pulls in pytest, ruff, mypy, and type stubs so
 the standard local verification commands run out of the box:
 `pytest -q`, `ruff check src/ tests/`, and `mypy src/tracelens/`.
-`[http]` adds httpx for the HTTP adapter. `[llm]` adds the OpenAI and
-Anthropic SDKs as a convenience bundle if you plan to subclass
-`LLMProvider`.
+
+If you only want the published package in another project:
+
+```bash
+uv pip install tracelens
+```
 
 ---
 
@@ -45,15 +38,30 @@ You should see:
 ```
 tracelens hello-world
 --------------------
-trials run : 3
+trials run : 9
 pass rate  : 100%
+report json: examples/reports/hello_world_report.json
+sample md  : examples/reports/hello_world_report.md
 
-  add-2-2     status=completed output='4'
-  add-10-5    status=completed output='15'
-  add-7-8     status=completed output='15'
+  add-2-2                 status=completed output='4'
+  add-2-2                 status=completed output='4'
+  add-2-2                 status=completed output='4'
+  add-10-5                status=completed output='15'
+  ...
 ```
 
-That's the entire framework, end to end. ~50 lines of code, ~50ms
+Render the generated report through the CLI:
+
+```bash
+tracelens report --results examples/reports/hello_world_report.json --format markdown
+```
+
+Then read the checked-in sample:
+[`examples/reports/hello_world_report.md`](../examples/reports/hello_world_report.md).
+It includes tasks, trials, pass@k, pass^k, graders, baseline comparison,
+regression result, and CI summary.
+
+That's the entire framework, end to end. One small file, sub-second
 runtime, no external services. Open
 [`examples/hello_world.py`](../examples/hello_world.py) in your editor
 and read it top to bottom — the comments map every line to the
@@ -132,4 +140,5 @@ everything else:
 Everything else — async vs sync, single agent vs HTTP, code grader vs
 LLM judge — is a knob you can turn without rewriting your eval set.
 
-That's it. Run `python examples/hello_world.py`, then open the file.
+That's it. Run `python examples/hello_world.py`, render the JSON report,
+then open the sample Markdown report.
