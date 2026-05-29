@@ -26,10 +26,13 @@ from tracelens.core.transcript import Transcript
 from tracelens.execution.registry import load_class
 
 
-def add_calibrate_parser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
-    """Add the 'calibrate' subcommand to the CLI."""
+def add_calibrate_parser(
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    name: str = "calibrate",
+) -> None:
+    """Add the 'calibrate' subcommand (and its 'reconcile' alias) to the CLI."""
     parser = subparsers.add_parser(
-        "calibrate",
+        name,
         help="Check grader calibration against human annotations",
     )
     parser.add_argument(

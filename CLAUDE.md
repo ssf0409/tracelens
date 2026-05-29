@@ -47,11 +47,12 @@ src/tracelens/
 │   └── comparison.py    # RegressionDetector - detect regressions
 ├── reporting/
 │   └── generator.py     # ReportGenerator - markdown, CI summary, HTML
+├── calibration/
+│   ├── analyzer.py      # CalibrationAnalyzer - grader vs human agreement
+│   └── sampler.py       # sample_for_review - select trials for human review
 └── cli/
-    └── main.py          # tracelens run / tracelens report
+    └── main.py          # run / report / sample / calibrate (alias: reconcile)
 ```
-
-> **Planned**: `human_eval/` (sampler.py, reconciliation.py) is designed but not yet implemented.
 
 ## Grader Types
 
@@ -163,11 +164,15 @@ tracelens report --format json --output results.json
 
 ## Human Evaluation Workflow
 
-Weekly calibration (20 samples):
-1. `tracelens sample --strategy diverse --size 20`
-2. Human rates samples in UI
-3. `tracelens reconcile --human human_grades.json --llm llm_grades.json`
-4. Review correlation report, adjust graders if < 0.7
+Periodic calibration to catch LLM-grader drift (see [docs/human-eval.md](docs/human-eval.md)):
+1. `tracelens run ... --save-trials trials.json` — keep raw trials.
+2. `tracelens sample --trials trials.json --size 20 --strategy diverse --output review.json` —
+   select trials to hand-grade. Strategies: `diverse` (span the score range),
+   `boundary` (cases nearest the pass/fail line), `failures`, `random`.
+3. A human fills `human_score` / `human_passed` in `review.json` (bring your own grades; no UI shipped).
+4. `tracelens reconcile --grader my.Grader --samples tasks.json --results results.json
+   --annotations review.json` — reports correlation/agreement, exits non-zero below threshold.
+   (`reconcile` is an alias for `calibrate`.)
 
 ## Key Principles (from Anthropic)
 

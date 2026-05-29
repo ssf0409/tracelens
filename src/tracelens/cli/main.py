@@ -15,6 +15,7 @@ from pathlib import Path
 from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
 from tracelens.baselines.manager import BaselineManager
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
+from tracelens.cli.sample import add_sample_parser, cmd_sample
 from tracelens.core.task import EvalSet, JSONTaskLoader
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
@@ -101,8 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format (default: markdown)",
     )
 
-    # -- tracelens calibrate --
+    # -- tracelens sample --
+    add_sample_parser(subparsers)
+
+    # -- tracelens calibrate (and its 'reconcile' alias) --
     add_calibrate_parser(subparsers)
+    add_calibrate_parser(subparsers, name="reconcile")
 
     return parser
 
@@ -244,7 +249,9 @@ def main() -> None:
         sys.exit(cmd_run(args))
     elif args.command == "report":
         sys.exit(cmd_report(args))
-    elif args.command == "calibrate":
+    elif args.command == "sample":
+        sys.exit(cmd_sample(args))
+    elif args.command in ("calibrate", "reconcile"):
         sys.exit(cmd_calibrate(args))
     else:
         parser.print_help()
