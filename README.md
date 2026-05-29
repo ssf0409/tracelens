@@ -500,7 +500,7 @@ print(gen.render_markdown(report))
 - **[Evaluation Recipes](docs/evaluation-recipes.md)** — The producer/evaluator/consumer pattern for using TraceLens in a larger system.
 - **[CI/CD Integration](docs/ci-cd-integration.md)** — GitHub Actions with regression gating.
 - **[Contributor Testing](docs/contributor-testing.md)** — Local, wheel-smoke, downstream, and release-safety environments.
-- **[Examples](examples/)** — Four working scripts: `hello_world.py` → `contract_eval.py` → `http_agent_eval.py` → `noise_aware_regression.py`.
+- **[Examples](examples/)** — Working scripts from `hello_world.py` through `http_agent_eval.py`, `noise_aware_regression.py`, and `human_eval_calibration.py`.
 - **[Releasing](docs/releasing.md)** — Maintainer guide for tag-driven PyPI releases.
 
 ## Contributing

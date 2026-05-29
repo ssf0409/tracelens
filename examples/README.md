@@ -15,6 +15,7 @@ uv pip install -e ".[dev]"
 | 3 | `http_agent_eval.py` | Evaluate an agent exposed as an HTTP JSON endpoint. |
 | 4 | `noise_aware_regression.py` | Compare runs with different infrastructure fingerprints. |
 | 5 | `llm_provider_examples.py` | Wire OpenAI and Anthropic SDK clients into `LLMGrader` through `LLMProvider`. |
+| 6 | `human_eval_calibration.py` | Reconcile an automated grader against human grades; detect drift (no API keys). |
 
 ## Hello World
 
@@ -108,5 +109,4 @@ Future examples should focus on scenarios that are documented but not yet
 represented as runnable scripts:
 
 - Multi-step tool-use transcript review.
-- Human calibration against grader output.
 - Downstream project CI that installs TraceLens from PyPI.
