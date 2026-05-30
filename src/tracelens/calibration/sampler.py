@@ -60,6 +60,7 @@ class ReviewWorksheet(BaseModel):
         return [
             {
                 "task_id": item.task_id,
+                "trial_id": item.trial_id,
                 "human_score": item.human_score,
                 "human_passed": item.human_passed,
                 "notes": item.notes,
@@ -87,7 +88,11 @@ def _excerpt(trial: Trial, max_chars: int) -> str:
 
 
 def _diverse(trials: list[Trial], size: int) -> list[Trial]:
-    """Pick `size` trials spread evenly across the sorted score range."""
+    """Pick `size` trials spread evenly across the sorted score range.
+
+    For ``size >= len(trials)`` returns all trials. For ``size == 1`` there is
+    no "spread" to compute, so it returns the single lowest-scoring trial.
+    """
     ordered = sorted(trials, key=lambda t: t.aggregate_score or 0.0)
     if size >= len(ordered):
         return ordered

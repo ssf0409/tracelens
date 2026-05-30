@@ -27,13 +27,11 @@ tracelens run \
   --adapter my.Adapter \
   --graders my.Grader \
   --num-runs 5 \
-  --output results.json \
   --save-trials trials.json
 ```
 
 `trials.json` is a serialized `TrialBatch`: every trial with its transcript and
-grader outcome. `results.json` is the per-task report `reconcile` reads to get
-grader scores (see step 4).
+grader outcome. That is all `sample` needs.
 
 ## 2. Select a sample to hand-grade
 
@@ -67,12 +65,14 @@ them. Trials without a transcript or grader score are skipped automatically.
 
 `review.json` is a list of rows. The reviewer fills in `human_score` (0–1) and
 `human_passed`; the `grader_*` and `output_excerpt` fields are read-only context
-to grade against:
+to grade against. `trial_id` ties each row back to its exact trial (so multiple
+runs of the same `task_id` stay distinct):
 
 ```json
 [
   {
     "task_id": "add-7-8",
+    "trial_id": "9b1c...",
     "human_score": null,
     "human_passed": null,
     "notes": "",
@@ -93,23 +93,19 @@ grader being wrong. A few rules of thumb:
 - Don't peek at `grader_score` before forming your own judgement.
 - Use `notes` to record *why* you disagreed — that's the most actionable output.
 
-The filled file is, by design, a valid TraceLens annotations file. The extra
-`grader_*` context columns are ignored on load.
+The filled worksheet is self-contained: each row holds both the grader outcome
+and your grade, so `reconcile` needs nothing else.
 
 ## 4. Reconcile grader vs human
 
 ```bash
-tracelens reconcile \
-  --grader my.Grader \
-  --samples tasks.json \
-  --results results.json \
-  --annotations review.json \
-  --threshold 0.7
+tracelens reconcile --annotations review.json --threshold 0.7
 ```
 
 `reconcile` is an alias for `calibrate` — same command, clearer name for this
-step. It matches each human annotation to the grader outcome for that task and
-reports:
+step. Because the worksheet carries the grader outcome next to each human grade,
+it pairs them per-row (no separate results file, and multi-run trials that share
+a `task_id` stay distinct) and reports:
 
 ```
 Calibration Report
@@ -138,14 +134,22 @@ Calibrated:           YES
 The command **exits non-zero when Pearson r is below `--threshold`**, so you can
 run it in CI (e.g. a weekly scheduled job) and get alerted when a grader drifts.
 
-### Where grader scores come from
+### Re-grading instead of reusing recorded scores
 
-`reconcile` needs the grader's outcome per task. Two ways to provide it:
+The self-contained worksheet above reuses the grader scores recorded at `run`
+time. If you've *changed* the grader and want to re-check it against the same
+human grades, point `reconcile` at the transcripts and re-grade on the fly:
 
-- `--results results.json` — reuse the report from your `run` (fastest).
-- `--transcripts transcripts.json` — re-grade transcripts on the fly with
-  `--grader`. Use this when you've changed the grader and want to re-check it
-  against the *same* human grades.
+```bash
+tracelens reconcile \
+  --grader my.Grader \
+  --samples tasks.json \
+  --transcripts transcripts.json \
+  --annotations review.json
+```
+
+`--transcripts` expects a `{task_id: transcript}` JSON map. You can also pass a
+precomputed `--results {task_id: outcome}` map if you have one.
 
 ## When to recalibrate
 

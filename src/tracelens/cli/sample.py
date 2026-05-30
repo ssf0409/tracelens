@@ -18,6 +18,8 @@ import json
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from tracelens.calibration.sampler import STRATEGIES, sample_for_review
 from tracelens.core.trial import TrialBatch
 
@@ -61,6 +63,16 @@ def cmd_sample(args: argparse.Namespace) -> int:
             batch = TrialBatch.from_dict(json.load(f))
     except FileNotFoundError:
         print(f"Error: trials file not found: {args.trials}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as exc:
+        print(f"Error: invalid JSON in {args.trials}: {exc}", file=sys.stderr)
+        return 1
+    except ValidationError as exc:
+        print(
+            f"Error: {args.trials} is not a valid trials file "
+            f"(expected 'tracelens run --save-trials' output): {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     worksheet = sample_for_review(

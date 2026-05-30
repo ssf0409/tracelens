@@ -99,6 +99,9 @@ def recommend_action(result: CalibrationResult) -> str:
     bias = result.grader_bias or 0.0
     corr = result.pearson_r if result.pearson_r is not None else 0.0
 
+    # Heuristics: "ranking is acceptable" = correlation within 80% of the
+    # calibration threshold; "scores are shifted" = mean bias of at least 0.1
+    # on the 0-1 score scale. Tune these for your own grader.
     if corr >= result.threshold * 0.8 and abs(bias) >= 0.1:
         direction = "generous" if bias > 0 else "harsh"
         return (

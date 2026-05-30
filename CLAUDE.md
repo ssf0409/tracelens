@@ -170,9 +170,9 @@ Periodic calibration to catch LLM-grader drift (see [docs/human-eval.md](docs/hu
    select trials to hand-grade. Strategies: `diverse` (span the score range),
    `boundary` (cases nearest the pass/fail line), `failures`, `random`.
 3. A human fills `human_score` / `human_passed` in `review.json` (bring your own grades; no UI shipped).
-4. `tracelens reconcile --grader my.Grader --samples tasks.json --results results.json
-   --annotations review.json` — reports correlation/agreement, exits non-zero below threshold.
-   (`reconcile` is an alias for `calibrate`.)
+4. `tracelens reconcile --annotations review.json` — the worksheet carries the grader outcome
+   next to each human grade, so it pairs them per-row, reports correlation/agreement, and exits
+   non-zero below threshold. (`reconcile` is an alias for `calibrate`.)
 
 ## Key Principles (from Anthropic)
 

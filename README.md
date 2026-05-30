@@ -396,13 +396,13 @@ tracelens run --eval-set tasks.json --adapter my.Adapter --graders my.Grader \
 tracelens sample --trials trials.json --size 20 --strategy diverse --output review.json
 
 # 3. A human fills in human_score / human_passed in review.json, then:
-tracelens reconcile --grader my.Grader --samples tasks.json \
-  --results results.json --annotations review.json --threshold 0.7
+tracelens reconcile --annotations review.json --threshold 0.7
 ```
 
-`reconcile` reports Pearson/Spearman correlation, pass/fail agreement, and
-Cohen's kappa; it exits non-zero when correlation drops below the threshold so
-you can catch grader drift in CI. (`reconcile` is an alias for `calibrate`.)
+The worksheet carries the grader outcome next to each human grade, so `reconcile`
+needs nothing else. It reports Pearson/Spearman correlation, pass/fail agreement,
+and Cohen's kappa, and exits non-zero when correlation drops below the threshold
+so you can catch grader drift in CI. (`reconcile` is an alias for `calibrate`.)
 Bring-your-own human grades — TraceLens does not ship a rating UI.
 
 See **[docs/human-eval.md](docs/human-eval.md)** for the full walkthrough and

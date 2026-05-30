@@ -19,6 +19,7 @@ from pathlib import Path
 from tracelens.calibration.analyzer import (
     AnnotationSet,
     CalibrationAnalyzer,
+    CalibrationResult,
 )
 from tracelens.core.outcome import Outcome
 from tracelens.core.task import JSONTaskLoader
@@ -36,16 +37,16 @@ def add_calibrate_parser(
         help="Check grader calibration against human annotations",
     )
     parser.add_argument(
-        "--grader", required=True,
-        help="Dotted path to Grader class",
+        "--grader",
+        help="Dotted path to Grader class (required only with --transcripts)",
     )
     parser.add_argument(
-        "--samples", required=True,
-        help="Path to eval set / samples JSON file",
+        "--samples",
+        help="Path to eval set / samples JSON file (required only with --transcripts)",
     )
     parser.add_argument(
         "--annotations", required=True,
-        help="Path to human annotations JSON file",
+        help="Path to annotations / review-worksheet JSON file",
     )
     parser.add_argument(
         "--transcripts",
@@ -66,10 +67,28 @@ def add_calibrate_parser(
 
 
 def cmd_calibrate(args: argparse.Namespace) -> int:
-    """Execute the 'calibrate' subcommand."""
+    """Execute the 'calibrate' / 'reconcile' subcommand."""
     # Load annotations
     with open(args.annotations) as f:
         annotations_data = json.load(f)
+
+    analyzer = CalibrationAnalyzer(threshold=args.threshold)
+
+    # Self-contained review worksheet: each row carries the grader outcome next
+    # to the human grade, so no separate --results/--transcripts is needed. This
+    # is what `tracelens sample` produces and the documented default flow.
+    if not args.results and not args.transcripts:
+        result = analyzer.analyze_worksheet(annotations_data)
+        if result.sample_count == 0:
+            print(
+                f"Error: no usable rows in {args.annotations}. Expected a filled "
+                f"review worksheet (rows with grader_score + human_score), or pass "
+                f"--results / --transcripts.",
+                file=sys.stderr,
+            )
+            return 1
+        return _emit_calibration(result, args)
+
     annotations = AnnotationSet.from_json_list(annotations_data)
 
     # Determine grader outcomes
@@ -82,6 +101,12 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         for task_id, outcome_data in results_data.items():
             grader_outcomes[task_id] = Outcome(**outcome_data)
     elif args.transcripts:
+        if not args.grader or not args.samples:
+            print(
+                "Error: --transcripts requires --grader and --samples",
+                file=sys.stderr,
+            )
+            return 1
         # Grade transcripts on the fly
         grader_cls = load_class(args.grader)
         grader_id = args.grader.rsplit(".", 1)[-1]
@@ -111,18 +136,13 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
             return outcomes
 
         grader_outcomes = asyncio.run(_grade_all())
-    else:
-        print(
-            "Error: provide either --transcripts or --results",
-            file=sys.stderr,
-        )
-        return 1
 
-    # Analyze calibration
-    analyzer = CalibrationAnalyzer(threshold=args.threshold)
     result = analyzer.analyze(grader_outcomes, annotations)
+    return _emit_calibration(result, args)
 
-    # Output
+
+def _emit_calibration(result: CalibrationResult, args: argparse.Namespace) -> int:
+    """Print the calibration report, optionally write JSON, return exit code."""
     print(result.render_table())
 
     if args.output:

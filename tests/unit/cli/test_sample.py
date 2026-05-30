@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tracelens.cli.calibrate import cmd_calibrate
 from tracelens.cli.main import build_parser
 from tracelens.cli.sample import cmd_sample
 from tracelens.core.outcome import Outcome
@@ -94,3 +95,49 @@ def test_cmd_sample_warns_when_no_gradeable_trials(
     captured = capsys.readouterr()
     assert rc == 0
     assert "no gradeable trials" in captured.err
+
+
+def test_cmd_sample_handles_malformed_json(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json")
+
+    args = argparse.Namespace(
+        trials=str(bad), size=2, strategy="diverse", seed=0,
+        excerpt_chars=280, output=None,
+    )
+    # Should return an error code, not raise an unhandled exception.
+    assert cmd_sample(args) == 1
+
+
+def test_cmd_reconcile_from_self_contained_worksheet(tmp_path: Path) -> None:
+    # A filled worksheet carries grader + human grades per row, so reconcile
+    # needs no --results/--transcripts/--grader/--samples.
+    rows = [
+        {
+            "task_id": f"t{i}",
+            "trial_id": f"x{i}",
+            "grader_score": g,
+            "grader_passed": g >= 0.5,
+            "human_score": h,
+            "human_passed": h >= 0.5,
+        }
+        for i, (g, h) in enumerate(
+            [(0.9, 0.85), (0.8, 0.9), (0.6, 0.55), (0.7, 0.75), (0.4, 0.45)]
+        )
+    ]
+    wf = tmp_path / "review.json"
+    wf.write_text(json.dumps(rows))
+
+    args = argparse.Namespace(
+        grader=None,
+        samples=None,
+        annotations=str(wf),
+        transcripts=None,
+        results=None,
+        threshold=0.7,
+        output=None,
+    )
+    rc = cmd_calibrate(args)
+
+    # Grader tracks human closely here -> calibrated -> exit 0.
+    assert rc == 0
