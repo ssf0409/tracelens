@@ -8,8 +8,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
-Everything under this heading is queued for the next tag-driven release. Two
-themes:
+Nothing yet — queued for the next tag-driven release.
+
+## [0.2.0] - 2026-05-30
+
+This release productizes the engine (install, understand, trust) and ships the
+infra-noise differentiator. Two themes:
 
 1. **Productization pre-v1.0** — turn the engine into something an external
    user can actually install, understand, and trust.
@@ -19,6 +23,15 @@ themes:
 
 ### Added
 
+- **Human-eval calibration loop.** `sample_for_review()` and the
+  `tracelens sample` command select trials for human review (strategies:
+  `diverse`, `boundary`, `failures`, `random`) and emit a self-contained
+  fill-in worksheet. The reviewer fills in grades, then `tracelens reconcile`
+  (an alias for `calibrate`) pairs grader vs. human **per row** — carrying the
+  grader outcome and `trial_id` in the worksheet, so no separate results file
+  is needed and multi-run trials sharing a `task_id` stay distinct.
+  `CalibrationAnalyzer.analyze_worksheet()` backs this. Bring-your-own human
+  grades; no rating UI shipped.
 - **`DecisionSpec.InfraConfig`.** Resource limits (CPU/memory guaranteed
   vs. hard-limit), time budget, concurrency level, sandbox provider, and
   harness version are now first-class experimental variables that feed
@@ -59,6 +72,9 @@ themes:
   - `noise_aware_regression.py` — 98-line version of the infra-noise
     differentiator: two runs, different memory budgets, fingerprint
     mismatch, noise-aware regression report.
+  - `human_eval_calibration.py` — reconcile a (deliberately miscalibrated)
+    recorded grader against human grades; no API keys. Shows correlation,
+    disagreement cases, and a tuning recommendation.
 - **4-job GitHub Actions CI workflow** at `.github/workflows/ci.yml`:
   `core` (Python 3.11 / 3.12 / 3.13), `with-llm`, `examples-smoke`, and
   `lint`. Concurrency group cancels in-flight runs on re-push.
@@ -68,6 +84,10 @@ themes:
   publishing.
 - **OSS launch guidance**: `docs/releasing.md`, `docs/scenarios.md`, and
   `examples/README.md`.
+- **Onboarding & recipe docs**: `docs/human-eval.md` (the full sample →
+  grade → reconcile loop), `docs/baseline-regression-tutorial.md` (verified
+  first-eval → CI-blocking baseline walkthrough), and
+  `docs/evaluation-recipes.md` (the producer/evaluator/consumer pattern).
 - **Curated public API** at `tracelens/*` (83 symbols). Top-level imports
   are the stable surface; submodules may move.
 - **OSS hygiene files**: `LICENSE` (MIT), `CONTRIBUTING.md`,
@@ -138,6 +158,11 @@ themes:
   `HTTPAPIAdapter` still raises a targeted install hint when used
   without `httpx`, but `import tracelens` and `tracelens --help` now work
   from a base wheel install.
+- **Metric grader tests no longer depend on a current event loop.** The sync
+  test helpers in `test_validators.py` / `test_budgets.py` used
+  `asyncio.get_event_loop().run_until_complete()`, which raised under
+  `pytest-asyncio` 1.0 (it unsets the loop after async tests). Switched to
+  `asyncio.run()`.
 
 ### Notes on backward compatibility
 
