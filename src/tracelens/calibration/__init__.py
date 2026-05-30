@@ -7,6 +7,11 @@ from tracelens.calibration.analyzer import (
     CalibrationResult,
     HumanAnnotation,
 )
+from tracelens.calibration.sampler import (
+    ReviewItem,
+    ReviewWorksheet,
+    sample_for_review,
+)
 
 __all__ = [
     "CalibrationAnalyzer",
@@ -14,4 +19,7 @@ __all__ = [
     "CalibrationPair",
     "HumanAnnotation",
     "AnnotationSet",
+    "ReviewItem",
+    "ReviewWorksheet",
+    "sample_for_review",
 ]

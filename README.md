@@ -88,11 +88,12 @@ src/tracelens/
 │   └── comparison.py        # RegressionDetector, severity levels
 ├── reporting/               # Output
 │   └── generator.py         # ReportGenerator (markdown, CI summary, HTML)
+├── calibration/             # Human-eval loop
+│   ├── analyzer.py          # CalibrationAnalyzer - grader vs human agreement
+│   └── sampler.py           # sample_for_review - pick trials for human review
 └── cli/                     # Command-line interface
-    └── main.py              # tracelens run / tracelens report
+    └── main.py              # run / report / sample / calibrate (alias: reconcile)
 ```
-
-> **Planned modules**: `human_eval/` (sample selection, LLM-human reconciliation) is designed but not yet implemented.
 
 ## Core Concepts
 
@@ -381,18 +382,31 @@ THRESHOLDS = {
 }
 ```
 
-## Human Evaluation Calibration (Planned)
+## Human Evaluation Calibration
 
-> The `human_eval/` module is planned but not yet implemented. The recommended workflow:
+LLM-as-judge graders drift, so calibrate them against human judgement on a
+periodic sample. TraceLens covers the whole loop:
 
-Weekly process to calibrate LLM graders:
+```bash
+# 1. Run an eval and keep the raw trials
+tracelens run --eval-set tasks.json --adapter my.Adapter --graders my.Grader \
+  --num-runs 5 --save-trials trials.json
 
-1. **Sample Selection**: Select 20 diverse samples from recent eval runs
-2. **Human Rating**: Rate on 1-10 scale per dimension
-3. **Correlation Analysis**: Compare LLM vs human scores
-4. **Grader Tuning**: Adjust prompts if correlation < 0.7
+# 2. Select a diverse sample to hand-grade (writes a fill-in worksheet)
+tracelens sample --trials trials.json --size 20 --strategy diverse --output review.json
 
-See [docs/accuracy.md](docs/accuracy.md) for calibration best practices.
+# 3. A human fills in human_score / human_passed in review.json, then:
+tracelens reconcile --annotations review.json --threshold 0.7
+```
+
+The worksheet carries the grader outcome next to each human grade, so `reconcile`
+needs nothing else. It reports Pearson/Spearman correlation, pass/fail agreement,
+and Cohen's kappa, and exits non-zero when correlation drops below the threshold
+so you can catch grader drift in CI. (`reconcile` is an alias for `calibrate`.)
+Bring-your-own human grades — TraceLens does not ship a rating UI.
+
+See **[docs/human-eval.md](docs/human-eval.md)** for the full walkthrough and
+[docs/accuracy.md](docs/accuracy.md) for calibration best practices.
 
 ## Installation
 
@@ -481,9 +495,12 @@ print(gen.render_markdown(report))
 - **[User Guide](docs/user-guide.md)** — Comprehensive framework guide.
 - **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
 - **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
+- **[Human-Eval Calibration](docs/human-eval.md)** — Sample trials, hand-grade, and reconcile grader vs human to catch drift.
+- **[Baseline Regression Tutorial](docs/baseline-regression-tutorial.md)** — First passing eval to stored baseline, failing candidate, promotion, and CI gate.
+- **[Evaluation Recipes](docs/evaluation-recipes.md)** — The producer/evaluator/consumer pattern for using TraceLens in a larger system.
 - **[CI/CD Integration](docs/ci-cd-integration.md)** — GitHub Actions with regression gating.
 - **[Contributor Testing](docs/contributor-testing.md)** — Local, wheel-smoke, downstream, and release-safety environments.
-- **[Examples](examples/)** — Four working scripts: `hello_world.py` → `contract_eval.py` → `http_agent_eval.py` → `noise_aware_regression.py`.
+- **[Examples](examples/)** — Working scripts from `hello_world.py` through `http_agent_eval.py`, `noise_aware_regression.py`, and `human_eval_calibration.py`.
 - **[Releasing](docs/releasing.md)** — Maintainer guide for tag-driven PyPI releases.
 
 ## Contributing

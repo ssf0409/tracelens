@@ -170,6 +170,44 @@ class CalibrationAnalyzer:
                 pass_agree=grader_passed == annotation.human_passed,
             ))
 
+        return self._finalize(pairs)
+
+    def analyze_worksheet(
+        self, rows: list[Mapping[str, Any]]
+    ) -> CalibrationResult:
+        """Compute calibration directly from a self-contained review worksheet.
+
+        Each row carries the grader outcome (``grader_score``/``grader_passed``)
+        next to the human grade (``human_score``/``human_passed``), so pairing
+        is per-row. This avoids a separate results file and keeps trials that
+        share a ``task_id`` (e.g. multi-run evals) as distinct pairs.
+
+        Rows missing ``human_score`` or ``grader_score`` are skipped (an
+        unfilled or non-worksheet row).
+        """
+        pairs: list[CalibrationPair] = []
+        for row in rows:
+            human_score = row.get("human_score")
+            grader_score = row.get("grader_score")
+            if human_score is None or grader_score is None:
+                continue
+            gs = float(grader_score)
+            hs = float(human_score)
+            gp = bool(row.get("grader_passed"))
+            hp = bool(row.get("human_passed"))
+            pairs.append(CalibrationPair(
+                task_id=str(row.get("task_id", "?")),
+                grader_score=gs,
+                grader_passed=gp,
+                human_score=hs,
+                human_passed=hp,
+                score_delta=gs - hs,
+                pass_agree=gp == hp,
+            ))
+        return self._finalize(pairs)
+
+    def _finalize(self, pairs: list[CalibrationPair]) -> CalibrationResult:
+        """Compute correlation/agreement metrics from paired comparisons."""
         if len(pairs) < 2:
             return CalibrationResult(
                 pairs=pairs,
