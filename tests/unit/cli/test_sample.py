@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 from tracelens.cli.main import build_parser
 from tracelens.cli.sample import cmd_sample
 from tracelens.core.outcome import Outcome
@@ -69,3 +71,26 @@ def test_cmd_sample_writes_a_fillable_worksheet(tmp_path: Path) -> None:
     assert len(rows) == 2
     assert all(row["human_score"] is None for row in rows)
     assert all("task_id" in row for row in rows)
+
+
+def test_cmd_sample_warns_when_no_gradeable_trials(
+    tmp_path: Path, capsys: "pytest.CaptureFixture[str]"
+) -> None:
+    # A valid JSON that yields no gradeable trials (e.g. the wrong file, or an
+    # empty batch) should warn rather than silently emit an empty worksheet.
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps(TrialBatch().to_dict()))
+
+    args = argparse.Namespace(
+        trials=str(empty),
+        size=5,
+        strategy="diverse",
+        seed=0,
+        excerpt_chars=280,
+        output=None,
+    )
+    rc = cmd_sample(args)
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "no gradeable trials" in captured.err

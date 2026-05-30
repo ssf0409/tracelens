@@ -72,6 +72,14 @@ def cmd_sample(args: argparse.Namespace) -> int:
     )
     rows = worksheet.to_annotation_template()
 
+    if not rows:
+        print(
+            f"Warning: no gradeable trials found in {args.trials} "
+            f"(need trials with a transcript and a grader outcome). "
+            f"Is this a 'tracelens run --save-trials' file?",
+            file=sys.stderr,
+        )
+
     if args.output:
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         with open(args.output, "w") as f:
