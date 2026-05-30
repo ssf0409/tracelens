@@ -36,8 +36,13 @@ def _make_task() -> Task:
 
 
 def _run(coro):  # noqa: ANN001, ANN202
-    """Convenience wrapper to run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Convenience wrapper to run an async coroutine synchronously.
+
+    Uses ``asyncio.run`` rather than ``get_event_loop().run_until_complete``
+    so it does not depend on a current event loop being set — pytest-asyncio
+    unsets the loop after async tests, which makes the legacy pattern raise.
+    """
+    return asyncio.run(coro)
 
 
 # ===========================================================================

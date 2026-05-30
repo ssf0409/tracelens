@@ -127,9 +127,7 @@ class TestLatencyGrader:
         grader = LatencyGrader("latency", max_ms=2000.0)
         transcript = _make_transcript(duration_ms=1000.0)
 
-        outcome = asyncio.get_event_loop().run_until_complete(
-            grader.grade(transcript, task)
-        )
+        outcome = asyncio.run(grader.grade(transcript, task))
         assert outcome.passed is True
         assert "duration_ms" in outcome.metrics
         assert outcome.score == pytest.approx(0.5, abs=0.05)
@@ -209,9 +207,7 @@ class TestTokenBudgetGrader:
         ]
         transcript = _make_transcript(steps=steps)
 
-        outcome = asyncio.get_event_loop().run_until_complete(
-            grader.grade(transcript, task)
-        )
+        outcome = asyncio.run(grader.grade(transcript, task))
         assert outcome.passed is True
         assert outcome.metrics["total_tokens"] == 200.0
 
@@ -326,9 +322,7 @@ class TestToolCallGrader:
         tool_calls = [ToolCall(tool_name="search", arguments={})]
         transcript = _make_transcript(tool_calls=tool_calls)
 
-        outcome = asyncio.get_event_loop().run_until_complete(
-            grader.grade(transcript, task)
-        )
+        outcome = asyncio.run(grader.grade(transcript, task))
         assert outcome.passed is True
 
 
@@ -477,8 +471,6 @@ class TestTraceConsistencyGrader:
         grader = TraceConsistencyGrader("consistency")
         transcript = _make_transcript()
 
-        outcome = asyncio.get_event_loop().run_until_complete(
-            grader.grade(transcript, task)
-        )
+        outcome = asyncio.run(grader.grade(transcript, task))
         assert outcome.passed is True
         assert outcome.score == 1.0
