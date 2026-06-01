@@ -77,9 +77,9 @@ default to `review_first`.
 
 ## Worked examples
 
-- **Trading strategy gates** — see `crypto-trading-system`'s
-  `docs/leveraged-strategy-evaluation.md` for a full producer/evaluator/consumer
-  design built on this pattern.
+- **Strategy gates** — compare candidate decisions against canonical producer
+  evidence, then let CI or a rollout system decide whether to block, review, or
+  promote.
 - **Retrieval** — compare a candidate chunking policy against a baseline using
   canonical search-result evidence and a deterministic relevance grader.
 - **Prompt routing** — compare candidate routing rules against a baseline using

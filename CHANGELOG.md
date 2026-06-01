@@ -8,7 +8,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
-Nothing yet — queued for the next tag-driven release.
+### Changed
+
+- Generalized maintainer guidance and public docs for the open source library:
+  removed private downstream project references, refreshed CI examples for the
+  current CLI, and updated package constraints to the latest PyPI release
+  (`0.2.0`).
 
 ## [0.2.0] - 2026-05-30
 
