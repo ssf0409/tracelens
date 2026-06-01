@@ -4,7 +4,11 @@ How to evaluate AI agents at different levels of granularity using tracelens.
 
 ## Overview
 
-Agent evaluation isn't one-size-fits-all. A trading signal calculator needs different evaluation than a full trading pipeline. A goal parser needs different evaluation than an end-to-end goal decomposition agent. tracelens operates at the **Task** level — one Task, one adapter call, one Transcript — but what you put *inside* that Task determines the evaluation granularity.
+Agent evaluation isn't one-size-fits-all. A scoring component needs different
+evaluation than a full multi-step pipeline. A parser needs different evaluation
+than an end-to-end planning agent. tracelens operates at the **Task** level —
+one Task, one adapter call, one Transcript — but what you put *inside* that
+Task determines the evaluation granularity.
 
 This document defines three evaluation levels, shows how to implement each using the existing framework, and identifies gaps for future first-class support.
 
@@ -35,11 +39,11 @@ Use `Task.category = "function"` and `Task.metadata` to identify the component:
 ```python
 from tracelens import Task
 
-# Evaluate the goal parser in isolation
+# Evaluate a planning parser in isolation
 parser_task = Task(
     name="Parse compound fitness goal",
     category="function",
-    tags=["function", "parser", "strideai"],
+    tags=["function", "parser", "planning"],
     metadata={
         "component": "goal_parser",
         "level": "function",
@@ -68,10 +72,10 @@ from tracelens.core.task import Task
 from tracelens.core.transcript import Transcript
 
 class GoalParserAdapter(AgentAdapter):
-    """Calls the goal parser component directly."""
+    """Calls one parser component directly."""
 
     async def run(self, task: Task) -> Transcript:
-        from strideai.parsing import parse_goal  # Your component
+        from myproject.planning import parse_goal  # Your component
 
         transcript = self.start_transcript(task)
         result = parse_goal(task.input_data["raw_input"])
@@ -111,19 +115,19 @@ class GoalParserGrader(CodeGrader):
 
 ### Concrete Examples
 
-**Goal-decomposition agent:**
+**Planning agent:**
 | Component | Input | Expected Output |
 |---|---|---|
 | Goal parser | Raw user text | Structured goal objects |
 | Priority scorer | Goals + user context | Priority-ordered list with scores |
 | Time estimator | Task + difficulty | Hours estimate within 20% of reference |
 
-**Algorithmic-trading agent:**
+**Decision agent:**
 | Component | Input | Expected Output |
 |---|---|---|
-| Indicator calculator | OHLCV candles | RSI/MACD/Bollinger values matching reference |
-| Risk validator | Position + portfolio | Accept/reject with reason |
-| Signal classifier | Market features | Buy/sell/hold label |
+| Feature calculator | Raw events | Normalized features matching reference |
+| Policy validator | Proposed action + constraints | Accept/reject with reason |
+| Action classifier | Context features | Route/hold/escalate label |
 
 ---
 
@@ -141,7 +145,7 @@ class GoalParserGrader(CodeGrader):
 task = Task(
     name="Decompose beginner web portfolio goal",
     category="task",
-    tags=["task", "web", "beginner", "strideai"],
+    tags=["task", "web", "beginner", "planning"],
     input_data={
         "goal": "Build a personal portfolio website",
         "user_context": {"experience": "beginner", "hours_per_week": 15},
@@ -157,12 +161,12 @@ Use the full agent adapter — `SimpleAdapter` for simple callables, or a custom
 ```python
 from tracelens.execution.agent_adapter import SimpleAdapter
 
-async def invoke_stride_agent(input_data: dict) -> dict:
-    from strideai.agent import GoalDecompositionAgent
-    agent = GoalDecompositionAgent()
+async def invoke_planning_agent(input_data: dict) -> dict:
+    from myproject.agent import PlanningAgent
+    agent = PlanningAgent()
     return await agent.decompose(input_data["goal"], input_data["user_context"])
 
-adapter = SimpleAdapter(invoke_stride_agent)
+adapter = SimpleAdapter(invoke_planning_agent)
 ```
 
 ### Grader
@@ -219,10 +223,10 @@ config = RunnerConfig(
 - Decompose "Train for a 5K" for someone with a knee injury
 - Decompose "Build a SaaS product" for a solo developer
 
-**Algorithmic-trading agent:**
-- Execute a single BTC long trade given market conditions
-- Size a position given portfolio constraints and risk limits
-- Generate a market analysis report for ETH/USDT
+**Decision-support agent:**
+- Choose a support escalation path given customer history
+- Size a resource allocation given account constraints
+- Generate a risk summary from structured event data
 
 ---
 
@@ -238,17 +242,17 @@ Use `Task.metadata` to describe the pipeline stages:
 
 ```python
 task = Task(
-    name="Full trading pipeline: signal to confirmation",
+    name="Full request pipeline: intake to confirmation",
     category="system",
-    tags=["system", "pipeline", "crypto"],
+    tags=["system", "pipeline", "operations"],
     metadata={
         "level": "system",
-        "pipeline": ["signal_generator", "risk_checker", "order_executor", "confirmation"],
+        "pipeline": ["request_parser", "policy_checker", "action_executor", "confirmation"],
         "expected_stages": 4,
     },
     input_data={
-        "market_data": {"symbol": "BTC/USDT", "timeframe": "1h"},
-        "portfolio": {"balance": 10000, "positions": []},
+        "request": {"kind": "upgrade", "priority": "high"},
+        "account": {"tier": "team", "open_cases": 1},
     },
     timeout_seconds=600.0,  # System-level needs more time
 )
@@ -262,44 +266,44 @@ Write a custom `AgentAdapter` that orchestrates the full pipeline and records in
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.core.transcript import Transcript, TranscriptStep, StepType
 
-class TradingPipelineAdapter(AgentAdapter):
-    """Runs the full signal → risk → order → confirm pipeline."""
+class RequestPipelineAdapter(AgentAdapter):
+    """Runs the full parse → policy → execute → confirm pipeline."""
 
     async def run(self, task: Task) -> Transcript:
         transcript = self.start_transcript(task)
 
         try:
-            # Stage 1: Signal generation
-            signal = await self.signal_generator.analyze(task.input_data["market_data"])
+            # Stage 1: Request parsing
+            parsed = await self.request_parser.parse(task.input_data["request"])
             transcript.intermediate_outputs.append({
-                "stage": "signal_generator",
-                "output": signal,
+                "stage": "request_parser",
+                "output": parsed,
             })
             transcript.add_step(TranscriptStep(
                 step_type=StepType.INTERNAL,
-                content={"stage": "signal_generator", "result": signal},
+                content={"stage": "request_parser", "result": parsed},
             ))
 
-            # Stage 2: Risk check
-            risk_result = await self.risk_checker.evaluate(signal, task.input_data["portfolio"])
+            # Stage 2: Policy check
+            policy_result = await self.policy_checker.evaluate(parsed, task.input_data["account"])
             transcript.intermediate_outputs.append({
-                "stage": "risk_checker",
-                "output": risk_result,
+                "stage": "policy_checker",
+                "output": policy_result,
             })
 
-            if not risk_result["approved"]:
-                transcript.final_output = {"status": "rejected", "reason": risk_result["reason"]}
+            if not policy_result["approved"]:
+                transcript.final_output = {"status": "rejected", "reason": policy_result["reason"]}
                 return transcript
 
-            # Stage 3: Order execution
-            order = await self.order_executor.execute(signal, risk_result)
+            # Stage 3: Action execution
+            action = await self.action_executor.execute(parsed, policy_result)
             transcript.intermediate_outputs.append({
-                "stage": "order_executor",
-                "output": order,
+                "stage": "action_executor",
+                "output": action,
             })
 
             # Stage 4: Confirmation
-            confirmation = await self.confirmer.verify(order)
+            confirmation = await self.confirmer.verify(action)
             transcript.intermediate_outputs.append({
                 "stage": "confirmation",
                 "output": confirmation,
@@ -307,7 +311,7 @@ class TradingPipelineAdapter(AgentAdapter):
 
             transcript.final_output = {
                 "status": "completed",
-                "order": order,
+                "action": action,
                 "confirmation": confirmation,
             }
         except Exception as exc:
@@ -341,24 +345,24 @@ class PipelineCompletionGrader(CodeGrader):
         return passed, metrics["completion_ratio"]
 
 
-class SafetyGateGrader(CodeGrader):
-    """MUST_PASS: Were risk limits respected throughout the pipeline?"""
+class PolicyGateGrader(CodeGrader):
+    """MUST_PASS: Were project policy constraints respected throughout the pipeline?"""
 
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
-        # Check risk_checker stage output
-        risk_stage = next(
-            (o for o in transcript.intermediate_outputs if o["stage"] == "risk_checker"),
+        # Check policy_checker stage output
+        policy_stage = next(
+            (o for o in transcript.intermediate_outputs if o["stage"] == "policy_checker"),
             None,
         )
-        risk_evaluated = 1.0 if risk_stage is not None else 0.0
+        policy_evaluated = 1.0 if policy_stage is not None else 0.0
 
-        # Check position size limits
+        # Check action limits
         final = transcript.final_output or {}
-        order = final.get("order", {})
-        position_pct = order.get("position_size_pct", 0)
-        within_limits = 1.0 if position_pct <= 5.0 else 0.0  # Max 5% per position
+        action = final.get("action", {})
+        estimated_cost = action.get("estimated_cost", 0)
+        within_limits = 1.0 if estimated_cost <= 100.0 else 0.0
 
-        return {"risk_evaluated": risk_evaluated, "within_limits": within_limits}
+        return {"policy_evaluated": policy_evaluated, "within_limits": within_limits}
 
     def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
         passed = all(v == 1.0 for v in metrics.values())
@@ -373,9 +377,9 @@ composite = CompositeGrader(
     graders=[
         # Gates — must pass
         (PipelineCompletionGrader("completion", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
-        (SafetyGateGrader("safety", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
+        (PolicyGateGrader("policy", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
         # Quality — score contributors
-        (EndToEndPnLGrader("pnl", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.5),
+        (EndToEndQualityGrader("quality", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.5),
         (ExecutionQualityGrader("exec_quality", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.3),
     ],
 )
@@ -404,10 +408,10 @@ stability = analyzer.compute_stability_metrics(results_per_task)
 2. Test: "I want to transition from accounting to data science in 6 months"
 3. Grading: Did it produce a valid multi-phase plan? Is each phase achievable? Are resources appropriate for the user's background?
 
-**Algorithmic-trading pipeline:**
-1. Signal generation → risk assessment → order placement → execution confirmation → monitoring setup
-2. Test: "BTC/USDT shows bullish divergence on 1h timeframe with $10k portfolio"
-3. Grading: Did the pipeline complete? Were risk limits respected? Was the position sized correctly? Did confirmation succeed?
+**Operations pipeline:**
+1. Request parsing → policy assessment → action execution → confirmation → monitoring setup
+2. Test: "High-priority upgrade request for a team account with one open case"
+3. Grading: Did the pipeline complete? Were policy limits respected? Was the action appropriate? Did confirmation succeed?
 
 ---
 
@@ -418,7 +422,7 @@ stability = analyzer.compute_stability_metrics(results_per_task)
 | "Is this component producing correct outputs?" | **Function** | Goal parser returns valid structured goals |
 | "Can the agent solve this problem?" | **Task** (pass@k) | Agent decomposes a fitness goal into a plan |
 | "Is the agent reliable on this problem?" | **Task** (pass^k) | Agent consistently produces good decompositions |
-| "Does the full pipeline work end-to-end?" | **System** | Signal → risk → order → confirmation completes |
+| "Does the full pipeline work end-to-end?" | **System** | Parse → policy → execute → confirmation completes |
 | "Is the pipeline production-reliable?" | **System** (pass^k) | Pipeline succeeds 95%+ of the time |
 
 ### Recommended Suite Composition
@@ -480,20 +484,20 @@ planner_functions = full_suite.filter_tasks(
     {
       "name": "Parse compound goal",
       "category": "function",
-      "tags": ["function", "parser", "strideai"],
+      "tags": ["function", "parser", "planning"],
       "metadata": {"component": "goal_parser", "level": "function"},
       "input_data": {"raw_input": "Run a marathon and lose weight"}
     },
     {
       "name": "Decompose beginner fitness goal",
       "category": "task",
-      "tags": ["task", "fitness", "strideai"],
+      "tags": ["task", "fitness", "planning"],
       "input_data": {"goal": "Get fit for summer", "user_context": {"experience": "beginner"}}
     },
     {
       "name": "Full decomposition pipeline",
       "category": "system",
-      "tags": ["system", "pipeline", "strideai"],
+      "tags": ["system", "pipeline", "planning"],
       "metadata": {"level": "system", "pipeline": ["parser", "decomposer", "validator"]},
       "input_data": {"goal": "Career transition to data science", "user_context": {"background": "accounting"}}
     }
@@ -605,14 +609,14 @@ Wide thresholds. Pipelines have high variance.
 ```python
 # Safety baseline — never auto-updates
 manager.create_canary_baseline(
-    task_id="trading_pipeline_safety",
-    metrics={"risk_compliance": 1.0, "position_limit_respected": 1.0},
+    task_id="request_pipeline_policy",
+    metrics={"policy_compliance": 1.0, "action_limit_respected": 1.0},
     fingerprint="abc123...",  # Tied to specific config
 )
 
 # Performance baseline — can auto-update with wide tolerance
 manager.create_capability_baseline(
-    task_id="trading_pipeline_performance",
+    task_id="request_pipeline_performance",
     metrics={"pipeline_completion_rate": 0.85, "avg_latency_ms": 4500},
     promotion_policy=PromotionPolicy(
         min_improvement_relative=0.10,   # 10% — wide
