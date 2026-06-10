@@ -215,6 +215,10 @@ class EvaluationRunner:
             try:
                 outcome = await grader.grade(trial.transcript, task)
                 trial.add_outcome(outcome)
+            except MemoryError:
+                # Known-corrupt process state: propagate instead of
+                # recording bogus 0-score outcomes for the rest of the run.
+                raise
             except Exception as exc:
                 # Grader failure → failed outcome (not an agent failure)
                 logger.error(
@@ -230,4 +234,5 @@ class EvaluationRunner:
                     score=0.0,
                     metrics={"_grader_error": 1.0},
                     feedback=f"GRADER CRASH (not an agent failure): {exc}",
+                    grader_error=True,
                 ))

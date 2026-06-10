@@ -146,6 +146,16 @@ class Trial(BaseModel):
         return self.status == TrialStatus.COMPLETED and not self.error_message
 
     @property
+    def has_grader_error(self) -> bool:
+        """Whether any grader crashed while grading this trial.
+
+        Grader crashes are synthesized as failed outcomes so the trial
+        stays conservative (not passed), but they must be counted
+        separately — they measure the eval harness, not the agent.
+        """
+        return any(o.grader_error for o in self.outcomes)
+
+    @property
     def is_infra_failure(self) -> bool:
         """Whether this trial failed due to infrastructure, not the agent.
 
@@ -272,6 +282,22 @@ class TrialBatch(BaseModel):
         if not self.trials:
             return 0.0
         return self.infra_error_count / len(self.trials)
+
+    @property
+    def grader_error_count(self) -> int:
+        """Number of trials where at least one grader crashed."""
+        return sum(1 for t in self.trials if t.has_grader_error)
+
+    @property
+    def grader_error_rate(self) -> float:
+        """Fraction of trials affected by grader crashes.
+
+        Report this alongside ``pass_rate``: a spike here means the
+        grading harness is broken, not that the agent regressed.
+        """
+        if not self.trials:
+            return 0.0
+        return self.grader_error_count / len(self.trials)
 
     @property
     def all_complete(self) -> bool:

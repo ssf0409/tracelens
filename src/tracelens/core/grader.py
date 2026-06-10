@@ -8,6 +8,7 @@ Graders evaluate Transcripts and produce Outcomes. There are three main types:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import traceback
 import uuid
@@ -66,6 +67,7 @@ class GraderConfig(BaseModel):
     timeout_seconds: float = 60.0
     retry_on_error: bool = True
     max_retries: int = 3
+    retry_backoff_seconds: float = 1.0  # Base for exponential backoff between retries
 
     # For LLM graders
     model: str | None = None
@@ -345,28 +347,66 @@ class LLMGrader(Grader):
         )
 
     async def grade(self, transcript: Transcript, task: Task) -> Outcome:
-        """Grade by calling LLM and parsing response."""
+        """Grade by calling LLM and parsing response.
+
+        Honors ``GraderConfig``: each attempt (LLM call + parse) is bounded
+        by ``timeout_seconds``; transient failures — including malformed
+        responses, which a fresh LLM call often fixes — are retried up to
+        ``max_retries`` times with exponential backoff when
+        ``retry_on_error`` is set. ``NotImplementedError`` (no provider
+        configured) is a setup bug, never retried.
+        """
         prompt = self.build_grading_prompt(transcript, task)
 
-        response = await self._call_llm(prompt)
+        max_attempts = 1 + (self.config.max_retries if self.config.retry_on_error else 0)
+        last_exc: Exception | None = None
 
-        try:
-            passed, score, metrics, feedback = self.parse_llm_response(response, task)
-        except Exception as exc:
-            preview = response[:200]
-            raise RuntimeError(
-                f"parse_llm_response failed for grader '{self.grader_id}': {exc}. "
-                f"LLM response preview: {preview!r}"
-            ) from exc
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                delay = self.config.retry_backoff_seconds * (2 ** (attempt - 1))
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                logger.warning(
+                    "Retrying grader '%s' (attempt %d/%d) after: %s",
+                    self.grader_id,
+                    attempt + 1,
+                    max_attempts,
+                    last_exc,
+                )
 
-        return self.create_outcome(
-            trial_id=transcript.task_id,
-            passed=passed,
-            score=score,
-            metrics=metrics,
-            feedback=feedback,
-            reasoning=response,  # Store raw LLM response
-        )
+            try:
+                response = await asyncio.wait_for(
+                    self._call_llm(prompt),
+                    timeout=self.config.timeout_seconds,
+                )
+            except NotImplementedError:
+                raise  # Misconfiguration, retrying can't help
+            except Exception as exc:
+                last_exc = exc
+                continue
+
+            try:
+                passed, score, metrics, feedback = self.parse_llm_response(response, task)
+            except Exception as exc:
+                preview = response[:200]
+                last_exc = RuntimeError(
+                    f"parse_llm_response failed for grader '{self.grader_id}': {exc}. "
+                    f"LLM response preview: {preview!r}"
+                )
+                last_exc.__cause__ = exc
+                continue
+
+            return self.create_outcome(
+                trial_id=transcript.task_id,
+                passed=passed,
+                score=score,
+                metrics=metrics,
+                feedback=feedback,
+                reasoning=response,  # Store raw LLM response
+            )
+
+        assert last_exc is not None
+        raise last_exc
 
 
 class CompositeGrader(Grader):
@@ -454,9 +494,15 @@ class CompositeGrader(Grader):
         blocking_results: list[tuple[Grader, Outcome]] = []
         warn_results: list[tuple[Grader, Outcome]] = []
 
+        any_grader_error = False
+
         for grader, weight in self.graders:
             try:
                 outcome = await grader.grade(transcript, task)
+            except MemoryError:
+                # Known-corrupt process state: propagate instead of
+                # silently recording 0-score outcomes from here on.
+                raise
             except Exception as exc:
                 logger.error(
                     "Sub-grader '%s' crashed: %s\n%s",
@@ -464,12 +510,14 @@ class CompositeGrader(Grader):
                     exc,
                     traceback.format_exc(),
                 )
+                any_grader_error = True
                 outcome = self.create_outcome(
                     trial_id=transcript.task_id,
                     passed=False,
                     score=0.0,
                     feedback=f"Sub-grader '{grader.grader_id}' crashed: {exc}",
                     metrics={"_grader_error": 1.0},
+                    grader_error=True,
                 )
 
             # Prefix metrics with grader ID
@@ -524,4 +572,5 @@ class CompositeGrader(Grader):
             score=total_score,
             metrics=all_metrics,
             feedback="\n".join(feedbacks) if feedbacks else None,
+            grader_error=any_grader_error,
         )

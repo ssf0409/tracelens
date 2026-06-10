@@ -5,6 +5,8 @@
   "overall_mean_score": 1.0,
   "infra_error_count": 0,
   "infra_error_rate": 0.0,
+  "grader_error_count": 0,
+  "grader_error_rate": 0.0,
   "pass_at_k": {
     "pass@1": 1.0,
     "pass@3": 1.0
