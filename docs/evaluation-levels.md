@@ -39,7 +39,7 @@ from tracelens import Task
 parser_task = Task(
     name="Parse compound fitness goal",
     category="function",
-    tags=["function", "parser", "strideai"],
+    tags=["function", "parser"],
     metadata={
         "component": "goal_parser",
         "level": "function",
@@ -71,7 +71,7 @@ class GoalParserAdapter(AgentAdapter):
     """Calls the goal parser component directly."""
 
     async def run(self, task: Task) -> Transcript:
-        from strideai.parsing import parse_goal  # Your component
+        from my_agent.parsing import parse_goal  # Your component
 
         transcript = self.start_transcript(task)
         result = parse_goal(task.input_data["raw_input"])
@@ -141,7 +141,7 @@ class GoalParserGrader(CodeGrader):
 task = Task(
     name="Decompose beginner web portfolio goal",
     category="task",
-    tags=["task", "web", "beginner", "strideai"],
+    tags=["task", "web", "beginner"],
     input_data={
         "goal": "Build a personal portfolio website",
         "user_context": {"experience": "beginner", "hours_per_week": 15},
@@ -157,12 +157,12 @@ Use the full agent adapter — `SimpleAdapter` for simple callables, or a custom
 ```python
 from tracelens.execution.agent_adapter import SimpleAdapter
 
-async def invoke_stride_agent(input_data: dict) -> dict:
-    from strideai.agent import GoalDecompositionAgent
+async def invoke_agent(input_data: dict) -> dict:
+    from my_agent.agent import GoalDecompositionAgent
     agent = GoalDecompositionAgent()
     return await agent.decompose(input_data["goal"], input_data["user_context"])
 
-adapter = SimpleAdapter(invoke_stride_agent)
+adapter = SimpleAdapter(invoke_agent)
 ```
 
 ### Grader
@@ -240,7 +240,7 @@ Use `Task.metadata` to describe the pipeline stages:
 task = Task(
     name="Full trading pipeline: signal to confirmation",
     category="system",
-    tags=["system", "pipeline", "crypto"],
+    tags=["system", "pipeline", "trading"],
     metadata={
         "level": "system",
         "pipeline": ["signal_generator", "risk_checker", "order_executor", "confirmation"],
@@ -480,20 +480,20 @@ planner_functions = full_suite.filter_tasks(
     {
       "name": "Parse compound goal",
       "category": "function",
-      "tags": ["function", "parser", "strideai"],
+      "tags": ["function", "parser"],
       "metadata": {"component": "goal_parser", "level": "function"},
       "input_data": {"raw_input": "Run a marathon and lose weight"}
     },
     {
       "name": "Decompose beginner fitness goal",
       "category": "task",
-      "tags": ["task", "fitness", "strideai"],
+      "tags": ["task", "fitness"],
       "input_data": {"goal": "Get fit for summer", "user_context": {"experience": "beginner"}}
     },
     {
       "name": "Full decomposition pipeline",
       "category": "system",
-      "tags": ["system", "pipeline", "strideai"],
+      "tags": ["system", "pipeline"],
       "metadata": {"level": "system", "pipeline": ["parser", "decomposer", "validator"]},
       "input_data": {"goal": "Career transition to data science", "user_context": {"background": "accounting"}}
     }

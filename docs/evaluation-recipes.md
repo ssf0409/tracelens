@@ -77,9 +77,9 @@ default to `review_first`.
 
 ## Worked examples
 
-- **Trading strategy gates** — see `crypto-trading-system`'s
-  `docs/leveraged-strategy-evaluation.md` for a full producer/evaluator/consumer
-  design built on this pattern.
+- **Trading strategy gates** — a backtester produces canonical run evidence,
+  deterministic graders score risk/return metrics against the baseline, and the
+  deploy pipeline consumes the verdict before promoting a strategy.
 - **Retrieval** — compare a candidate chunking policy against a baseline using
   canonical search-result evidence and a deterministic relevance grader.
 - **Prompt routing** — compare candidate routing rules against a baseline using

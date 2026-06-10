@@ -242,7 +242,7 @@ jobs:
             });
 ```
 
-### Crypto-Trading Workflow
+### Trading-Agent Workflow
 
 Create `.github/workflows/eval.yml` in a trading project:
 
@@ -496,7 +496,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### Crypto-Trading CI Runner
+### Trading CI Runner
 
 Create `evaluation/ci/runner.py`:
 
@@ -509,7 +509,7 @@ import json
 import sys
 from pathlib import Path
 
-from evaluation.framework.harness import CryptoTradingEvaluator
+from evaluation.framework.harness import TradingEvaluator
 from evaluation.framework.task import BTC_DAILY_BACKTEST, ETH_HOURLY_VOLATILE
 from tracelens.baselines.comparison import RegressionSeverity
 
@@ -573,7 +573,7 @@ async def main():
         print(f"No valid tasks found. Available: {list(TASK_MAP.keys())}")
         sys.exit(1)
 
-    evaluator = CryptoTradingEvaluator(num_runs=args.num_runs)
+    evaluator = TradingEvaluator(num_runs=args.num_runs)
 
     print(f"Running evaluation on {len(tasks)} tasks with {args.num_runs} runs...")
     results = await evaluator.run_evaluation(tasks)
