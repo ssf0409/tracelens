@@ -60,6 +60,17 @@ class ReportData:
     infra_error_count: int = 0
     infra_error_rate: float = 0.0
 
+    # Grader-harness health: trials where a grader crashed and a failed
+    # outcome was synthesized. A spike here means the grading harness is
+    # broken, not that the agent regressed.
+    grader_error_count: int = 0
+    grader_error_rate: float = 0.0
+
+    # Token usage across all trial transcripts — cost visibility for
+    # LLM-heavy evals without walking every transcript by hand.
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+
     # Per-task summaries
     task_summaries: list[TaskSummary] = field(default_factory=list)
 
@@ -78,6 +89,10 @@ class ReportData:
             "overall_mean_score": self.overall_mean_score,
             "infra_error_count": self.infra_error_count,
             "infra_error_rate": self.infra_error_rate,
+            "grader_error_count": self.grader_error_count,
+            "grader_error_rate": self.grader_error_rate,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
             "pass_at_k": self.pass_at_k,
             "reliability": self.reliability,
             "task_summaries": [s.to_dict() for s in self.task_summaries],
@@ -104,6 +119,10 @@ class ReportData:
             overall_mean_score=data.get("overall_mean_score", 0.0),
             infra_error_count=data.get("infra_error_count", 0),
             infra_error_rate=data.get("infra_error_rate", 0.0),
+            grader_error_count=data.get("grader_error_count", 0),
+            grader_error_rate=data.get("grader_error_rate", 0.0),
+            total_input_tokens=data.get("total_input_tokens", 0),
+            total_output_tokens=data.get("total_output_tokens", 0),
             task_summaries=summaries,
             pass_at_k=data.get("pass_at_k", {}),
             reliability=data.get("reliability", {}),
@@ -182,6 +201,10 @@ class ReportGenerator:
             overall_mean_score=float(np.mean(all_scores)) if all_scores else 0.0,
             infra_error_count=batch.infra_error_count,
             infra_error_rate=batch.infra_error_rate,
+            grader_error_count=batch.grader_error_count,
+            grader_error_rate=batch.grader_error_rate,
+            total_input_tokens=batch.total_input_tokens,
+            total_output_tokens=batch.total_output_tokens,
             task_summaries=task_summaries,
             pass_at_k=suite_pass_at_k,
             reliability=suite_reliability,

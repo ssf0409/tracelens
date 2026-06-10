@@ -66,6 +66,12 @@ class Outcome(BaseModel):
     passed: bool
     score: float = Field(ge=0.0, le=1.0)  # Normalized 0-1
 
+    # True when this outcome was synthesized because the grader itself
+    # crashed. A grader crash says nothing about the agent's capability,
+    # so report grader_error rates separately from pass rates — otherwise
+    # a broken grader silently inflates the failure rate.
+    grader_error: bool = False
+
     # Detailed metrics (grader-specific)
     metrics: dict[str, float] = Field(default_factory=dict)
 

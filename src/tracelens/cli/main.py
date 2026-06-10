@@ -17,6 +17,7 @@ from tracelens.baselines.manager import BaselineManager
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
 from tracelens.cli.sample import add_sample_parser, cmd_sample
 from tracelens.core.task import EvalSet, JSONTaskLoader
+from tracelens.core.trial import TrialBatch
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
 from tracelens.execution.runner import EvaluationRunner, RunnerConfig
@@ -88,6 +89,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--save-trials", default=None,
         help="Path to write raw trial data (JSON) for replay and comparison",
     )
+    run_parser.add_argument(
+        "--progress", action="store_true",
+        help="Print per-trial progress to stderr",
+    )
+    run_parser.add_argument(
+        "--checkpoint", default=None,
+        help=(
+            "Path to a checkpoint file. Trials are periodically persisted "
+            "there; re-running with the same path resumes, skipping "
+            "already-completed trials"
+        ),
+    )
 
     # -- tracelens report --
     report_parser = subparsers.add_parser(
@@ -114,6 +127,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _severity_from_str(s: str) -> RegressionSeverity:
     return RegressionSeverity(s)
+
+
+def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]]:
+    """One metric sample per trial for regression detection.
+
+    RegressionDetector.compare() runs a t-test over the sample
+    distribution, so it needs per-trial values — a pre-aggregated
+    single dict would collapse it to a one-sample z-test. The sample
+    mean of the per-trial ``pass_rate`` indicators equals the task's
+    pass rate, so baseline metric names stay unchanged.
+    """
+    results: list[dict[str, float]] = []
+    for trial in batch.get_trials_for_task(task_id):
+        results.append({
+            "pass_rate": 1.0 if trial.passed else 0.0,
+            "mean_score": (
+                trial.aggregate_score if trial.aggregate_score is not None else 0.0
+            ),
+        })
+    return results
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -157,10 +190,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     # Build runner config
+    def _print_progress(done: int, total: int) -> None:
+        print(f"[tracelens] {done}/{total} trials complete", file=sys.stderr)
+
     config = RunnerConfig(
         num_runs=args.num_runs,
         max_concurrency=args.max_concurrency,
         timeout_seconds=args.timeout,
+        progress_callback=_print_progress if args.progress else None,
+        checkpoint_path=args.checkpoint,
     )
 
     # Run evaluation
@@ -208,9 +246,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         for task_summary in report.task_summaries:
             baseline = manager.get_baseline(task_summary.task_id)
             if baseline:
-                current_results = [
-                    {"pass_rate": task_summary.pass_rate, "mean_score": task_summary.mean_score}
-                ]
+                current_results = _per_trial_results(batch, task_summary.task_id)
                 reg_report = detector.compare(baseline, current_results)
                 if reg_report.should_block_ci(threshold):
                     print(reg_report.to_ci_output())

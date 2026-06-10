@@ -16,7 +16,7 @@ unpublished downstream integrations.
 
 - Core data models: `Task`, `EvalSet`, `Trial`, `Transcript`, `Outcome`
 - Execution primitives: `AgentAdapter`, `SimpleAdapter`, `HTTPAPIAdapter`,
-  `EvaluationRunner`
+  `EvaluationRunner` (concurrency, timeouts, progress, checkpoint/resume)
 - Grader abstractions: `CodeGrader`, `LLMGrader`, `CompositeGrader`
 - Built-in validators and budget/event-chain graders
 - Statistical analysis: `pass@k`, `pass^k`, bootstrap confidence intervals
@@ -47,9 +47,9 @@ src/tracelens/
 │   ├── grader.py        # Grader ABCs - CodeGrader, LLMGrader, CompositeGrader
 │   ├── transcript.py    # Transcript - execution record
 │   ├── decision_spec.py # DecisionSpec - reproducibility fingerprinting
-│   └── outcome.py       # Outcome - grading result
+│   └── outcome.py       # Outcome - grading result (incl. grader_error flag)
 ├── execution/
-│   ├── runner.py        # EvaluationRunner - parallel execution
+│   ├── runner.py        # EvaluationRunner - parallel execution, checkpoint/resume
 │   ├── agent_adapter.py # AgentAdapter ABC, SimpleAdapter
 │   ├── http_adapter.py  # HTTPAPIAdapter for JSON endpoints
 │   └── registry.py      # Plugin loading via dotted import paths
@@ -107,6 +107,10 @@ Use LLM-as-judge grading for subjective quality dimensions such as helpfulness,
 specificity, reasoning quality, or rubric adherence. LLM graders are
 non-deterministic, so they need calibration against human judgement.
 
+`GraderConfig` controls per-attempt timeout (`timeout_seconds`) and retry on
+transient or malformed responses (`retry_on_error`, `max_retries`,
+`retry_backoff_seconds`).
+
 ```python
 class HelpfulnessGrader(LLMGrader):
     def build_grading_prompt(self, transcript, task) -> str:
@@ -121,6 +125,10 @@ class HelpfulnessGrader(LLMGrader):
 Use `CompositeGrader` when some graders are hard gates and others contribute to
 score. Use `BehaviorContract.to_graders()` when output rules can be declared as
 a reusable contract.
+
+A sub-grader crash is recorded as a `grader_error` outcome and surfaced
+separately from agent failures (`TrialBatch.grader_error_count/rate`, also in
+reports) — a spike there means the grading harness broke, not the agent.
 
 ## Statistical Analysis
 
@@ -159,6 +167,12 @@ pass_to_k(results=[True, True, False, True, True], k=3)
 - **CAPABILITY**: Tracks current capability; can auto-promote on improvement
 - **EXPERIMENTAL**: Loose baseline for active exploration
 
+### Reproducibility
+
+Pass a `DecisionSpec` to `EvaluationRunner` and it is stamped onto every
+transcript that doesn't already carry one, so baselines record a fingerprint
+of the exact configuration that produced them.
+
 ## CLI Usage
 
 ```bash
@@ -187,6 +201,10 @@ tracelens run \
   --fail-on-regression moderate
 ```
 
+Long runs: `--progress` prints per-trial progress to stderr, and
+`--checkpoint path.json` persists trials periodically so a rerun with the same
+path resumes, skipping completed trials.
+
 ## Human Evaluation Workflow
 
 Periodic calibration catches LLM-grader drift:
@@ -204,10 +222,17 @@ TraceLens does not ship a rating UI or human-grade store.
 ## Testing
 
 ```bash
+# Single-entry verification gate (lock check -> lint -> typecheck -> tests + coverage)
+make verify
+```
+
+Individual steps (what `make verify` runs):
+
+```bash
 uv lock --check
-uv run --frozen pytest -q
 uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
 uv run --frozen --extra dev mypy src/tracelens/
+uv run --frozen pytest -q --cov=tracelens --cov-fail-under=90
 ```
 
 For packaging, CLI, README, public imports, or dependency metadata changes, also
@@ -231,3 +256,6 @@ run the built-wheel smoke path in `docs/contributor-testing.md`.
 5. **Calibrate regularly** - LLM graders drift without human calibration.
 6. **Keep TraceLens general** - Domain truth and rollout policy belong in
    downstream projects.
+7. **Separate harness failures from agent failures** - Track infra_error and
+   grader_error rates alongside pass rates; a spike there means the eval is
+   broken, not the agent.
