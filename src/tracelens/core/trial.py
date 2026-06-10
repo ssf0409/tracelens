@@ -284,6 +284,25 @@ class TrialBatch(BaseModel):
         return self.infra_error_count / len(self.trials)
 
     @property
+    def total_input_tokens(self) -> int:
+        """Total input tokens across all trial transcripts."""
+        return sum(
+            t.transcript.input_tokens for t in self.trials if t.transcript is not None
+        )
+
+    @property
+    def total_output_tokens(self) -> int:
+        """Total output tokens across all trial transcripts."""
+        return sum(
+            t.transcript.output_tokens for t in self.trials if t.transcript is not None
+        )
+
+    @property
+    def total_tokens(self) -> int:
+        """Total tokens (input + output) across all trial transcripts."""
+        return self.total_input_tokens + self.total_output_tokens
+
+    @property
     def grader_error_count(self) -> int:
         """Number of trials where at least one grader crashed."""
         return sum(1 for t in self.trials if t.has_grader_error)

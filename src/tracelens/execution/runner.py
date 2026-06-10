@@ -9,11 +9,16 @@ The EvaluationRunner orchestrates:
 """
 
 import asyncio
+import json
 import logging
+import os
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from tracelens.core._time import utc_now
+from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.grader import Grader
 from tracelens.core.outcome import Outcome
 from tracelens.core.task import EvalSet, Task
@@ -53,6 +58,15 @@ class RunnerConfig:
     timeout_seconds: float = 300.0
     fail_fast: bool = False
 
+    # Called as (completed_trials, total_trials) after each trial finishes.
+    progress_callback: Callable[[int, int], None] | None = None
+
+    # When set, the batch is persisted here every ``checkpoint_interval``
+    # trials (and once at the end). A later run with the same path resumes:
+    # trials already complete in the checkpoint are loaded instead of re-run.
+    checkpoint_path: str | None = None
+    checkpoint_interval: int = 10
+
 
 class EvaluationRunner:
     """Runs evaluations with concurrency control and timeout enforcement.
@@ -72,31 +86,77 @@ class EvaluationRunner:
         adapter: AgentAdapter,
         graders: list[Grader],
         config: RunnerConfig | None = None,
+        decision_spec: DecisionSpec | None = None,
     ) -> None:
         self.adapter = adapter
         self.graders = graders
         self.config = config or RunnerConfig()
+        # Stamped onto every transcript that doesn't already carry one,
+        # so baselines can be compared by reproducibility fingerprint.
+        self.decision_spec = decision_spec
 
     async def run(self, eval_set: EvalSet) -> TrialBatch:
         """Run all tasks × runs and grade results."""
         batch = TrialBatch(started_at=utc_now())
+        completed_keys = self._load_resume_state(batch)
         semaphore = asyncio.Semaphore(self.config.max_concurrency)
 
-        # Build work items: (task, run_index)
+        # Build work items: (task, run_index), skipping trials already
+        # completed in a resumed checkpoint.
         work_items: list[tuple[Task, int]] = []
         for task in eval_set.tasks:
             for run_index in range(self.config.num_runs):
-                work_items.append((task, run_index))
+                if (task.task_id, run_index) not in completed_keys:
+                    work_items.append((task, run_index))
+
+        total = len(work_items) + len(completed_keys)
 
         # Run all concurrently with semaphore
         tasks = [
-            self._run_one(task, run_index, semaphore, batch)
+            self._run_one(task, run_index, semaphore, batch, total)
             for task, run_index in work_items
         ]
         await asyncio.gather(*tasks)
 
         batch.completed_at = utc_now()
+        self._save_checkpoint(batch)
         return batch
+
+    def _load_resume_state(self, batch: TrialBatch) -> set[tuple[str, int]]:
+        """Load completed trials from an existing checkpoint, if any.
+
+        Returns the (task_id, run_index) keys to skip. Incomplete trials
+        (e.g. RUNNING at crash time) are not loaded and will re-run.
+        """
+        completed: set[tuple[str, int]] = set()
+        if not self.config.checkpoint_path:
+            return completed
+
+        path = Path(self.config.checkpoint_path)
+        if not path.exists():
+            return completed
+
+        loaded = TrialBatch.from_dict(json.loads(path.read_text()))
+        for trial in loaded.trials:
+            if trial.is_complete:
+                batch.add_trial(trial)
+                completed.add((trial.task_id, trial.run_index))
+        logger.info(
+            "Resumed %d completed trials from checkpoint %s",
+            len(completed),
+            path,
+        )
+        return completed
+
+    def _save_checkpoint(self, batch: TrialBatch) -> None:
+        """Atomically persist the batch to the checkpoint path."""
+        if not self.config.checkpoint_path:
+            return
+        path = Path(self.config.checkpoint_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(batch.to_dict()))
+        os.replace(tmp, path)
 
     async def _run_one(
         self,
@@ -104,6 +164,7 @@ class EvaluationRunner:
         run_index: int,
         semaphore: asyncio.Semaphore,
         batch: TrialBatch,
+        total: int,
     ) -> None:
         """Execute a single trial with lifecycle hooks, timeout, and error handling.
 
@@ -150,6 +211,8 @@ class EvaluationRunner:
                         self.adapter.run(task),
                         timeout=self.config.timeout_seconds,
                     )
+                    if transcript.decision_spec is None and self.decision_spec is not None:
+                        transcript.decision_spec = self.decision_spec
                     trial.transcript = transcript
                     trial.status = TrialStatus.COMPLETED
                 except TimeoutError:
@@ -207,6 +270,16 @@ class EvaluationRunner:
             await self._grade_trial(trial, task)
 
         batch.add_trial(trial)
+
+        if self.config.progress_callback is not None:
+            self.config.progress_callback(len(batch.trials), total)
+
+        if (
+            self.config.checkpoint_path
+            and self.config.checkpoint_interval > 0
+            and len(batch.trials) % self.config.checkpoint_interval == 0
+        ):
+            self._save_checkpoint(batch)
 
     async def _grade_trial(self, trial: Trial, task: Task) -> None:
         """Run all graders on a trial's transcript."""
