@@ -81,7 +81,7 @@ project:
 ```toml
 [project]
 dependencies = [
-    "tracelens>=0.1.0",
+    "tracelens>=0.2.0",
 ]
 ```
 

@@ -355,13 +355,17 @@ summary = compare_to_baseline_summary(
   run: |
     tracelens run \
       --eval-set eval/suite.json \
-      --graders quality,personalization \
+      --adapter myproject.eval.adapters.CIAgentAdapter \
+      --graders myproject.eval.graders.QualityGrader \
       --num-runs 5 \
+      --output reports/results.json \
+      --report reports/results.md \
       --baseline-check \
+      --baselines-file eval/baselines.json \
       --fail-on-regression moderate
 
 - name: Comment on PR
-  run: tracelens report --format github-pr
+  run: tracelens report --results reports/results.json --format markdown >> "$GITHUB_STEP_SUMMARY"
 ```
 
 ### Regression Thresholds
@@ -421,7 +425,7 @@ uv pip install "tracelens[llm]"
 
 # Or add to pyproject.toml
 # dependencies = [
-#     "tracelens>=0.1.0",
+#     "tracelens>=0.2.0",
 # ]
 ```
 

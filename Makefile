@@ -1,7 +1,8 @@
 # Single-entry verification gate. `make verify` runs everything CI runs
-# locally: lint -> typecheck -> tests (with the coverage floor CI enforces).
+# locally: lock check -> lint -> typecheck -> tests (with the coverage floor
+# CI enforces).
 
-.PHONY: test lint typecheck coverage format verify
+.PHONY: test lint typecheck coverage format lockcheck verify
 
 test:
 	uv run --frozen pytest -q
@@ -18,5 +19,8 @@ format:
 typecheck:
 	uv run --frozen --extra dev mypy src/tracelens/
 
-verify: lint typecheck coverage
+lockcheck:
+	uv lock --check
+
+verify: lockcheck lint typecheck coverage
 	@echo "✓ verify passed"

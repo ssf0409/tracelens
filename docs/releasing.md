@@ -16,17 +16,14 @@ version constraint.
 
 ## One-Time PyPI Setup
 
-Before the first release, create the PyPI project and configure trusted
-publishing:
+TraceLens already has a PyPI project and trusted publishing configured. Re-run
+this section only if the repository, workflow name, or PyPI ownership changes.
 
-1. Confirm the package name is available:
+1. Confirm the package metadata:
 
    ```bash
    python -m pip index versions tracelens
    ```
-
-   A "No matching distribution found" response means the name is currently
-   unclaimed on PyPI.
 
 2. In PyPI, add a trusted publisher for this repository:
 
@@ -45,7 +42,7 @@ No PyPI API token is required when trusted publishing is configured correctly.
 1. Move changelog entries from `[Unreleased]` to a dated version section:
 
    ```markdown
-   ## [0.1.0] - 2026-05-20
+   ## [X.Y.Z] - YYYY-MM-DD
    ```
 
 2. Ensure the verification gate is green:
@@ -68,8 +65,8 @@ No PyPI API token is required when trusted publishing is configured correctly.
 5. Create and push the tag:
 
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
    ```
 
 6. Watch the GitHub Actions release workflow.
@@ -88,7 +85,7 @@ Downstream projects should depend on TraceLens from PyPI:
 
 ```toml
 dependencies = [
-    "tracelens>=0.1.0",
+    "tracelens>=0.2.0",
 ]
 ```
 

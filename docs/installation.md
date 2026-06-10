@@ -26,12 +26,12 @@ Add to your project's `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "tracelens>=0.1.0",
+    "tracelens>=0.2.0",
 ]
 
 # With LLM extras
 dependencies = [
-    "tracelens[llm]>=0.1.0",
+    "tracelens[llm]>=0.2.0",
 ]
 ```
 
@@ -70,7 +70,7 @@ uv pip install "tracelens[http,llm]"
 ## CI Installation
 
 For GitHub Actions, install your project dependencies normally. If your
-project depends on `tracelens>=0.1.0`, `uv sync` or `pip install -e .`
+project depends on `tracelens>=0.2.0`, `uv sync` or `pip install -e .`
 is enough; no extra repository checkout or authentication is required.
 
 ```yaml
@@ -85,7 +85,14 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run evaluation
-        run: uv run python -m eval.harness --baseline-check
+        run: |
+          uv run tracelens run \
+            --eval-set eval/tasks.json \
+            --adapter myproject.eval.adapters.CIAgentAdapter \
+            --graders myproject.eval.graders.CIQualityGrader \
+            --num-runs 3 \
+            --output eval/results/results.json \
+            --report eval/results/report.md
 ```
 
 ## Verify the Install
