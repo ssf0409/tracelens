@@ -8,6 +8,49 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-10
+
+Hardening release: the grading path now honors its own configuration, harness
+failures are first-class signals, and long evaluations survive crashes.
+
+### Added
+
+- **Grader-crash tracking.** `Outcome.grader_error` marks outcomes synthesized
+  from grader crashes; `Trial.has_grader_error` and
+  `TrialBatch.grader_error_count`/`grader_error_rate` aggregate them, and
+  reports carry the counts next to the existing infra-error stats. A spike
+  here means the grading harness broke — not that the agent regressed.
+- **Checkpoint/resume.** `RunnerConfig.checkpoint_path` and
+  `checkpoint_interval` persist the batch atomically during long runs;
+  re-running with the same path resumes, skipping completed trials. CLI:
+  `--checkpoint`.
+- **Progress reporting.** `RunnerConfig.progress_callback` is called with
+  `(completed, total)` after each trial. CLI: `--progress` prints per-trial
+  progress to stderr.
+- **DecisionSpec wiring.** `EvaluationRunner(decision_spec=...)` stamps the
+  spec onto every transcript that doesn't already carry one, so baselines
+  record the reproducibility fingerprint of the run that produced them.
+- **Token usage roll-up.** `TrialBatch.total_input_tokens` /
+  `total_output_tokens` / `total_tokens`, mirrored on `ReportData`, for cost
+  visibility without walking every transcript.
+- **Quality infrastructure.** CLI end-to-end integration tests, a `Makefile`
+  with a single `make verify` gate (lock check → lint → typecheck → tests +
+  coverage), and a 90% coverage floor enforced in CI.
+
+### Fixed
+
+- **`LLMGrader` honors `GraderConfig`.** Each grading attempt is bounded by
+  `timeout_seconds`, and transient failures — including malformed responses,
+  which a fresh LLM call often fixes — retry per `retry_on_error` /
+  `max_retries` with exponential backoff (new `retry_backoff_seconds` knob).
+  These fields were previously accepted and silently ignored; a hung provider
+  stalled the whole eval indefinitely.
+- **`MemoryError` from graders propagates** (kill-switch) instead of being
+  converted into bogus 0-score outcomes for the rest of the run.
+- **CLI `--baseline-check` statistics.** The regression detector now receives
+  one metric sample per trial instead of a single pre-aggregated dict,
+  restoring the intended t-test over the sample distribution.
+
 ### Changed
 
 - Generalized maintainer guidance and public docs for the open source library:
