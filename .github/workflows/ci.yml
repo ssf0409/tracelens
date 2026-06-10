@@ -42,8 +42,8 @@ jobs:
       - name: Verify core-only import
         run: |
           python -c "import tracelens; print(f'{len(tracelens.__all__)} public exports')"
-      - name: Run tests
-        run: pytest -q --no-header
+      - name: Run tests with coverage
+        run: pytest -q --no-header --cov=tracelens --cov-report=term-missing --cov-fail-under=90
 
   # ------------------------------------------------------------------
   # with-llm: install the [llm] convenience bundle so subclasses of

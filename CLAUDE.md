@@ -2,26 +2,28 @@
 
 ## Project Overview
 
-This is a **common evaluation framework** for AI agents, designed to be used by:
-- **StrideAI** (`/Users/ssf0409/Dev/StrideAI`) - Goal decomposition agent
-- **crypto-trading-system** (`/Users/ssf0409/Dev/crypto-trading-system`) - Trading agent
+TraceLens is an **open-source evaluation framework for AI agents**. It provides
+the project-agnostic machinery — task definitions, trial execution, grading,
+statistics, baselines, and human calibration — while consuming projects supply
+their own domain layer.
 
-## Architecture Decision
-
-**Hybrid Approach**: Common framework with project-specific layers.
-
-### Common (this package)
+### This package provides
 - Abstract interfaces (Task, Trial, Grader, Transcript, Outcome)
-- Statistical analysis (pass@k, pass^k)
-- Baseline management and regression detection
-- CI/CD integration patterns
-- Human evaluation workflow
+- Parallel trial execution with timeout, progress, and checkpoint/resume
+- Statistical analysis (pass@k, pass^k, bootstrap CI, significance tests)
+- Baseline management and regression detection (CANARY/CAPABILITY, infra-noise aware)
+- Reproducibility fingerprinting (DecisionSpec)
+- Human evaluation / grader calibration workflow
+- CLI: `run` / `report` / `sample` / `calibrate` (alias: `reconcile`)
 
-### Project-Specific (in each project)
+### Consuming projects supply
 - Task definitions (domain-specific schemas)
 - Grader implementations (LLM or code-based)
 - Agent adapters (how to invoke the agent)
-- Baseline values (project's own regression thresholds)
+- Baseline values (their own regression thresholds)
+
+See `examples/` for runnable end-to-end integrations (start with
+`examples/hello_world.py`) and `benchmarks/` for a complete suite.
 
 ## Key Files
 
@@ -31,20 +33,32 @@ src/tracelens/
 │   ├── task.py          # Task, TaskLoader, EvalSet - test case definitions
 │   ├── trial.py         # Trial, TrialBatch - execution tracking
 │   ├── grader.py        # Grader ABCs - CodeGrader, LLMGrader, CompositeGrader
-│   ├── transcript.py    # Transcript - execution record
+│   ├── transcript.py    # Transcript - execution record (steps, tokens, streaming)
 │   ├── decision_spec.py # DecisionSpec - reproducibility fingerprinting
-│   └── outcome.py       # Outcome - grading result
+│   └── outcome.py       # Outcome - grading result (incl. grader_error flag)
 ├── execution/
-│   ├── runner.py        # EvaluationRunner - parallel execution
+│   ├── runner.py        # EvaluationRunner - parallel execution, checkpoint/resume
 │   ├── agent_adapter.py # AgentAdapter ABC, SimpleAdapter
+│   ├── http_adapter.py  # HTTPAPIAdapter - evaluate agents behind an HTTP API
 │   └── registry.py      # Plugin loading via dotted import paths
+├── graders/
+│   └── event_chain.py   # EventChainGrader - verify behavioral side effects
+├── llm/
+│   ├── provider.py      # LLMProvider ABC, InMemoryProvider (for tests)
+│   └── factory.py       # create_provider() - provider lookup
+├── metrics/
+│   ├── budgets.py       # Token/latency budget grading
+│   └── validators.py    # Schema/constraint validation grading
+├── contracts/
+│   └── contract.py      # Declarative eval contracts
 ├── statistics/
 │   ├── pass_at_k.py     # pass@k - capability ceiling
 │   ├── consistency.py   # pass^k - reliability measurement
+│   ├── latency.py       # Latency distribution analysis
 │   └── inference.py     # Bootstrap CI, significance testing
 ├── baselines/
-│   ├── manager.py       # BaselineManager - store/retrieve baselines
-│   └── comparison.py    # RegressionDetector - detect regressions
+│   ├── manager.py       # BaselineManager - CANARY/CAPABILITY baselines, promotion
+│   └── comparison.py    # RegressionDetector - t-test based regression detection
 ├── reporting/
 │   └── generator.py     # ReportGenerator - markdown, CI summary, HTML
 ├── calibration/
@@ -56,22 +70,26 @@ src/tracelens/
 
 ## Grader Types
 
-### CodeGrader (for crypto-trading)
+### CodeGrader
 Deterministic, code-based grading. Produces the same result every time.
+Use for objective metrics (accuracy, latency, domain KPIs).
 
 ```python
-class FinancialGrader(CodeGrader):
+class AccuracyGrader(CodeGrader):
     def compute_metrics(self, transcript, task) -> dict[str, float]:
         # Compute metrics from agent output
-        return {"sharpe_ratio": 1.5, "max_drawdown": -0.12}
+        return {"accuracy": score_output(transcript.final_output, task)}
 
     def determine_pass(self, metrics, task) -> tuple[bool, float]:
         # Determine if task passed based on metrics
-        return metrics["sharpe_ratio"] >= 1.0, metrics["sharpe_ratio"] / 2.0
+        return metrics["accuracy"] >= 0.9, metrics["accuracy"]
 ```
 
-### LLMGrader (for StrideAI)
-LLM-as-judge grading. Non-deterministic, requires prompt engineering.
+### LLMGrader
+LLM-as-judge grading. Non-deterministic, requires prompt engineering and
+periodic human calibration. `GraderConfig` controls per-attempt timeout
+(`timeout_seconds`) and retry on transient/malformed responses
+(`retry_on_error`, `max_retries`, `retry_backoff_seconds`).
 
 ```python
 class QualityGrader(LLMGrader):
@@ -83,6 +101,12 @@ class QualityGrader(LLMGrader):
         # Parse LLM response into structured result
         return passed, score, metrics, feedback
 ```
+
+### CompositeGrader
+Combines graders with policy-aware aggregation (`EvalPolicy.GATE` /
+`WARN` / `TRACK`). A sub-grader crash is recorded as a `grader_error`
+outcome — surfaced separately from agent failures in batch stats and
+reports (`grader_error_count` / `grader_error_rate`).
 
 ## Statistical Analysis
 
@@ -112,39 +136,26 @@ pass_to_k(results=[T, T, F, T, T], k=3)  # Lower - must pass every time
 - **MODERATE**: 5-15% decline (blocks CI by default)
 - **SEVERE**: >15% decline
 
-### Threshold Configuration
-```python
-THRESHOLDS = {
-    "sharpe_ratio": {"absolute": -0.2, "relative": 0.10},
-    "max_drawdown": {"absolute": -0.05, "relative": 0.20},
-}
-```
+Regressions within the infra-noise band (default 3pp absolute) under a
+mismatched infra config don't block CI — see `RegressionDetector` and
+`DecisionSpec.infra`.
 
-## Integration with Projects
+### Reproducibility
+Pass a `DecisionSpec` to `EvaluationRunner` and it is stamped onto every
+transcript, so baselines carry a fingerprint of the exact configuration
+that produced them.
 
-### StrideAI Integration Path
-1. `StrideAI/eval/schemas/task_definition.py` - GoalDecompositionTask
-2. `StrideAI/eval/graders/*.py` - LLM-based quality graders
-3. `StrideAI/eval/data/scenarios/*.json` - 20+ test scenarios
-4. `StrideAI/.github/workflows/tracelens.yml` - CI integration
-
-### Crypto-Trading Integration Path
-1. `evaluation/framework/task.py` - TradingTask schema
-2. `evaluation/graders/*.py` - Wrap existing metrics
-3. `evaluation/baselines/baselines.json` - Regression baselines
-4. `evaluation/ci/runner.py` - CI runner
-
-## Testing
+## Testing & Verification
 
 ```bash
-# Run tests
-pytest tests/
+# Single-entry verification gate (lint -> typecheck -> tests + coverage)
+make verify
 
-# Type checking
-mypy src/tracelens/
-
-# Linting
-ruff check src/
+# Individual steps
+make test        # uv run --frozen pytest -q
+make lint        # ruff check
+make typecheck   # mypy src/tracelens/
+make coverage    # pytest with the 90% coverage floor CI enforces
 ```
 
 ## CI/CD Usage
@@ -153,13 +164,18 @@ ruff check src/
 # Run evaluation with baseline check
 tracelens run \
   --eval-set eval/suite.json \
-  --graders quality,personalization \
+  --adapter my_pkg.MyAdapter \
+  --graders my_pkg.QualityGrader \
   --num-runs 5 \
   --baseline-check \
+  --baselines-file baselines.json \
   --fail-on-regression moderate
 
+# Long runs: progress + crash-safe resume
+tracelens run ... --progress --checkpoint .tracelens/checkpoint.json
+
 # Generate report
-tracelens report --format json --output results.json
+tracelens report --results results.json --format markdown
 ```
 
 ## Human Evaluation Workflow
@@ -181,3 +197,6 @@ Periodic calibration to catch LLM-grader drift (see [docs/human-eval.md](docs/hu
 3. **Start with real failures** - Build suite from actual issues
 4. **Read transcripts** - Catch false signals and grader bugs
 5. **Calibrate regularly** - LLM graders drift without human calibration
+6. **Separate harness failures from agent failures** - Track infra_error and
+   grader_error rates alongside pass rates; a spike there means the eval is
+   broken, not the agent
