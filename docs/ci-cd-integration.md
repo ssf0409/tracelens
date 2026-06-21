@@ -78,7 +78,7 @@ class CIQualityGrader(CodeGrader):
 ## Pull Request Workflow
 
 A ready-to-copy version of the workflow below lives at
-[`examples/ci/eval.yml`](../examples/ci/eval.yml) — drop it at
+[`examples/ci/eval.yml`](https://github.com/ssf0409/tracelens/blob/main/examples/ci/eval.yml) — drop it at
 `.github/workflows/eval.yml` and edit the five marked placeholders.
 
 Create `.github/workflows/eval.yml` in the downstream project:

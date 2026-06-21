@@ -498,6 +498,8 @@ print(gen.render_markdown(report))
 
 ## Documentation
 
+📖 **Browsable docs site (search + nav):** <https://ssf0409.github.io/tracelens/>
+
 - **[Getting Started](docs/getting-started.md)** — Run your first eval in five minutes; the example ladder.
 - **[Quickstart](docs/quickstart.md)** — Build a custom grader, JSON task loader, and CLI workflow.
 - **[Supported Scenarios](docs/scenarios.md)** — Which agent-evaluation problems TraceLens is designed for.

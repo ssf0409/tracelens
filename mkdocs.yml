@@ -1,0 +1,88 @@
+site_name: TraceLens
+site_description: >-
+  Evaluation and regression-testing framework for AI agents: inspectable
+  traces, graded outcomes, baseline comparisons, and CI-ready reliability
+  signals.
+site_url: https://ssf0409.github.io/tracelens/
+repo_url: https://github.com/ssf0409/tracelens
+repo_name: ssf0409/tracelens
+edit_uri: edit/main/docs/
+copyright: MIT licensed
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            docstring_style: google
+
+nav:
+  - Home: index.md
+  - Get Started:
+      - Getting Started: getting-started.md
+      - Quickstart: quickstart.md
+      - Installation: installation.md
+      - Supported Scenarios: scenarios.md
+  - Concepts:
+      - Evaluation Levels: evaluation-levels.md
+      - pass@k vs pass^k: pass-at-k-vs-pass-hat-k.md
+      - Accuracy Best Practices: accuracy.md
+      - Evaluation Recipes: evaluation-recipes.md
+  - Guides:
+      - User Guide: user-guide.md
+      - Baseline Regression Tutorial: baseline-regression-tutorial.md
+      - Human-Eval Calibration: human-eval.md
+      - CI/CD Integration: ci-cd-integration.md
+  - Reference:
+      - API Reference: reference.md
+  - Contributing:
+      - Contributor Testing: contributor-testing.md
+      - Releasing: releasing.md

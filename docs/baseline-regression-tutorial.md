@@ -34,7 +34,7 @@ sample md  : examples/reports/hello_world_report.md
 ```
 
 The checked-in sample report is
-[`examples/reports/hello_world_report.md`](../examples/reports/hello_world_report.md).
+[`examples/reports/hello_world_report.md`](https://github.com/ssf0409/tracelens/blob/main/examples/reports/hello_world_report.md).
 It shows the pieces CI usually needs: pass rate, pass@k, pass^k, baseline
 comparison, regression result, and CI summary.
 
@@ -220,11 +220,11 @@ if report.should_block_ci(threshold=RegressionSeverity.MODERATE):
 ```
 
 Use the GitHub Actions template in
-[`docs/ci-cd-integration.md`](./ci-cd-integration.md#github-actions-workflow) for
+[`docs/ci-cd-integration.md`](./ci-cd-integration.md#pull-request-workflow) for
 checkout, Python setup, dependency installation, artifacts, and PR comments.
 
 Use the sample report at
-[`examples/reports/hello_world_report.md`](../examples/reports/hello_world_report.md)
+[`examples/reports/hello_world_report.md`](https://github.com/ssf0409/tracelens/blob/main/examples/reports/hello_world_report.md)
 as the shape to aim for when posting CI summaries: include the metric, baseline
 value, current value, delta, regression result, and blocking decision.
 
