@@ -81,6 +81,7 @@ nav:
       - Accuracy Best Practices: accuracy.md
       - Evaluation Recipes: evaluation-recipes.md
   - Guides:
+      - Evaluating a Real Agent: real-agent.md
       - User Guide: user-guide.md
       - Multi-Level Evaluation: evaluation-levels.md
       - Baseline Regression Tutorial: baseline-regression-tutorial.md
