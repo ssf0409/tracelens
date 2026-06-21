@@ -112,7 +112,7 @@ Use `MUST_PASS` sparingly — it creates binary signals. Use `SCORE_CONTRIBUTOR`
 TraceLens supports this loop directly: `tracelens sample` selects trials to
 review and `tracelens reconcile` measures grader-vs-human agreement. See the
 **[human-eval guide](human-eval.md)** for the full workflow and
-**[`examples/human_eval_calibration.py`](../examples/human_eval_calibration.py)**
+**[`examples/human_eval_calibration.py`](https://github.com/ssf0409/tracelens/blob/main/examples/human_eval_calibration.py)**
 for a runnable, API-key-free demonstration. The protocol below is the thinking
 behind it.
 

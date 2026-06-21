@@ -116,16 +116,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: mypy
-        run: mypy src/tracelens/
+      - uses: astral-sh/setup-uv@v4
+      - name: Set up Python
+        run: uv python install 3.13
+      # Pinned to the lockfile so the type-check is reproducible and matches the
+      # documented `make verify` gate. An unpinned `pip install` here silently
+      # drifts to whatever numpy/mypy released most recently, and a newer numpy
+      # stub using a PEP 695 `type` statement breaks mypy under python 3.11.
+      - name: mypy (pinned to lockfile)
+        run: uv run --frozen --extra dev mypy src/tracelens/
 
   # ------------------------------------------------------------------
   # build: prove that the source distribution and wheel are publishable

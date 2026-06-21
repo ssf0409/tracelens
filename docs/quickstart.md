@@ -186,4 +186,4 @@ tracelens report --results results.json --format html
 
 - **[User Guide](user-guide.md)** — Deep dive into all framework components
 - **[Accuracy Best Practices](accuracy.md)** — Improve evaluation reliability
-- **[Examples](../examples/)** — Working scripts you can run immediately
+- **[Examples](https://github.com/ssf0409/tracelens/tree/main/examples/)** — Working scripts you can run immediately

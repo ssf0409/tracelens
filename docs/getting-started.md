@@ -64,13 +64,13 @@ tracelens report --results examples/reports/hello_world_report.json --format mar
 ```
 
 Then read the checked-in sample:
-[`examples/reports/hello_world_report.md`](../examples/reports/hello_world_report.md).
+[`examples/reports/hello_world_report.md`](https://github.com/ssf0409/tracelens/blob/main/examples/reports/hello_world_report.md).
 It includes tasks, trials, pass@k, pass^k, graders, baseline comparison,
 regression result, and CI summary.
 
 That's the entire framework, end to end. One small file, sub-second
 runtime, no external services. Open
-[`examples/hello_world.py`](../examples/hello_world.py) in your editor
+[`examples/hello_world.py`](https://github.com/ssf0409/tracelens/blob/main/examples/hello_world.py) in your editor
 and read it top to bottom — the comments map every line to the
 four-piece skeleton.
 
@@ -99,10 +99,10 @@ each adding exactly one new concept. Read them in order:
 
 | Step | File | New concept |
 |------|------|-------------|
-| 1 | [`hello_world.py`](../examples/hello_world.py) | The four-piece skeleton, in 50 lines, no LLM. |
-| 2 | [`contract_eval.py`](../examples/contract_eval.py) | `BehaviorContract.to_graders()` — declare the contract once, get a full grader suite for free. |
-| 3 | [`http_agent_eval.py`](../examples/http_agent_eval.py) | `HTTPAPIAdapter` for evaluating a remote agent over HTTP, plus `JsonSchemaGrader` for output-shape gating. |
-| 4 | [`noise_aware_regression.py`](../examples/noise_aware_regression.py) | `DecisionSpec` fingerprinting, `RegressionDetector`, and the 3 percentage-point infra-noise band — the production CI gate. |
+| 1 | [`hello_world.py`](https://github.com/ssf0409/tracelens/blob/main/examples/hello_world.py) | The four-piece skeleton, in 50 lines, no LLM. |
+| 2 | [`contract_eval.py`](https://github.com/ssf0409/tracelens/blob/main/examples/contract_eval.py) | `BehaviorContract.to_graders()` — declare the contract once, get a full grader suite for free. |
+| 3 | [`http_agent_eval.py`](https://github.com/ssf0409/tracelens/blob/main/examples/http_agent_eval.py) | `HTTPAPIAdapter` for evaluating a remote agent over HTTP, plus `JsonSchemaGrader` for output-shape gating. |
+| 4 | [`noise_aware_regression.py`](https://github.com/ssf0409/tracelens/blob/main/examples/noise_aware_regression.py) | `DecisionSpec` fingerprinting, `RegressionDetector`, and the 3 percentage-point infra-noise band — the production CI gate. |
 
 Each example is self-contained — running it directly gives you working
 output. Copy the one that matches your problem and edit from there.
@@ -119,12 +119,14 @@ When your agent is real and your eval set has grown, move on to:
   problems TraceLens fits, and which first example to copy.
 - **[Evaluation Levels](./evaluation-levels.md)** — function vs task vs
   system-level evaluation; pass@k vs pass^k semantics.
+- **[pass@k vs pass^k](./pass-at-k-vs-pass-hat-k.md)** — capability vs
+  reliability, with a truth table and which metric belongs in a CI gate.
 - **[Accuracy Best Practices](./accuracy.md)** — how to keep LLM-judge
   graders calibrated to humans (the difference between "we ran an eval"
   and "we trust this eval").
 - **[CI/CD Integration](./ci-cd-integration.md)** — wiring TraceLens into
   GitHub Actions with regression gating.
-- **[High-Stakes Autonomous Benchmark](../benchmarks/high-stakes-autonomous/README.md)**
+- **[High-Stakes Autonomous Benchmark](https://github.com/ssf0409/tracelens/blob/main/benchmarks/high-stakes-autonomous/README.md)**
   — the flagship benchmark pack that demonstrates TraceLens's
   infra-noise-aware regression detection on safety-critical tasks.
 

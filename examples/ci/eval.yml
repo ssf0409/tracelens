@@ -1,0 +1,72 @@
+# Copy-paste GitHub Actions template for running TraceLens evals in CI.
+#
+# Place this at .github/workflows/eval.yml in YOUR project and edit the five
+# placeholders marked CHANGE-ME below. The walkthrough (severity tuning, job
+# summaries, artifact retention) lives in docs/ci-cd-integration.md.
+#
+# It installs your project, runs an eval suite, posts the Markdown report to the
+# job summary, uploads both Markdown and HTML reports as artifacts, and fails CI
+# on moderate-or-worse regressions against a stored baseline.
+
+name: TraceLens Evaluation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**" # CHANGE-ME: paths whose changes should trigger an eval
+      - "eval/**"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run TraceLens
+        run: |
+          uv run tracelens run \
+            --eval-set eval/tasks.json \
+            --adapter myproject.eval.adapters.CIAgentAdapter \
+            --graders myproject.eval.graders.CIQualityGrader \
+            --num-runs 5 \
+            --baseline-check \
+            --baselines-file eval/baselines.json \
+            --fail-on-regression moderate \
+            --output eval/results/results.json \
+            --report eval/results/report.md \
+            --html-report eval/results/report.html \
+            --save-trials eval/results/trials.json
+        # CHANGE-ME (5 placeholders):
+        #   --eval-set        path to your eval set (tasks)
+        #   --adapter         dotted import path to your AgentAdapter subclass
+        #   --graders         dotted import path(s) to your graders
+        #   --baselines-file  path to your stored baselines
+        #   --fail-on-regression  none | minor | moderate | severe
+        #                         (lower = stricter gate; see ci-cd-integration.md)
+
+      - name: Add report to job summary
+        if: always()
+        run: cat eval/results/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracelens-results
+          path: |
+            eval/results/results.json
+            eval/results/report.md
+            eval/results/report.html
+            eval/results/trials.json

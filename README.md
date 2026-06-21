@@ -58,7 +58,9 @@ sample md  : examples/reports/hello_world_report.md
 The checked-in sample report is here:
 [`examples/reports/hello_world_report.md`](examples/reports/hello_world_report.md).
 It shows the concrete pieces a real eval needs: tasks, trials, pass@k,
-pass^k, graders, baseline comparison, regression result, and CI summary.
+pass^k, graders, baseline comparison, regression result, and CI summary. For
+how to read the pass@k and pass^k columns, see
+[pass@k vs pass^k](docs/pass-at-k-vs-pass-hat-k.md).
 
 ## Overview
 
@@ -177,6 +179,9 @@ trial = Trial(
 **pass^k** - Probability of all k attempts succeeding:
 - Use for reliability evaluation (is the agent consistent?)
 - Higher k = lower pass^k (harder to pass every time)
+
+> When to read which, with a worked truth table:
+> [pass@k vs pass^k](docs/pass-at-k-vs-pass-hat-k.md).
 
 ```python
 from tracelens.statistics import pass_at_k, pass_to_k
@@ -493,11 +498,14 @@ print(gen.render_markdown(report))
 
 ## Documentation
 
+📖 **Browsable docs site (search + nav):** <https://ssf0409.github.io/tracelens/>
+
 - **[Getting Started](docs/getting-started.md)** — Run your first eval in five minutes; the example ladder.
 - **[Quickstart](docs/quickstart.md)** — Build a custom grader, JSON task loader, and CLI workflow.
 - **[Supported Scenarios](docs/scenarios.md)** — Which agent-evaluation problems TraceLens is designed for.
 - **[User Guide](docs/user-guide.md)** — Comprehensive framework guide.
 - **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
+- **[pass@k vs pass^k](docs/pass-at-k-vs-pass-hat-k.md)** — Capability vs reliability, with a truth table and which metric belongs in a CI gate.
 - **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
 - **[Human-Eval Calibration](docs/human-eval.md)** — Sample trials, hand-grade, and reconcile grader vs human to catch drift.
 - **[Baseline Regression Tutorial](docs/baseline-regression-tutorial.md)** — First passing eval to stored baseline, failing candidate, promotion, and CI gate.

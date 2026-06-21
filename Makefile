@@ -2,7 +2,7 @@
 # locally: lock check -> lint -> typecheck -> tests (with the coverage floor
 # CI enforces).
 
-.PHONY: test lint typecheck coverage format lockcheck verify
+.PHONY: test lint typecheck coverage format lockcheck verify docs docs-serve
 
 test:
 	uv run --frozen pytest -q
@@ -24,3 +24,11 @@ lockcheck:
 
 verify: lockcheck lint typecheck coverage
 	@echo "✓ verify passed"
+
+# Build the documentation site with the same strict link/reference checks CI runs.
+docs:
+	uv run --extra docs mkdocs build --strict
+
+# Live-reloading local preview at http://127.0.0.1:8000
+docs-serve:
+	uv run --extra docs mkdocs serve

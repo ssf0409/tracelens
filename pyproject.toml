@@ -73,6 +73,11 @@ dev = [
     "scipy-stubs>=1.10",
     "types-jsonschema>=4.0",
 ]
+# Documentation site (MkDocs Material). Build locally with `make docs-serve`.
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+]
 
 [project.scripts]
 tracelens = "tracelens.cli.main:main"
