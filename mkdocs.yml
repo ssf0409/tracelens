@@ -71,17 +71,18 @@ plugins:
 nav:
   - Home: index.md
   - Get Started:
-      - Getting Started: getting-started.md
-      - Quickstart: quickstart.md
+      - Is TraceLens For You?: scenarios.md
+      - Getting Started (5 min): getting-started.md
+      - Build Your First Eval: quickstart.md
       - Installation: installation.md
-      - Supported Scenarios: scenarios.md
   - Concepts:
-      - Evaluation Levels: evaluation-levels.md
+      - Core Concepts & Glossary: concepts.md
       - pass@k vs pass^k: pass-at-k-vs-pass-hat-k.md
       - Accuracy Best Practices: accuracy.md
       - Evaluation Recipes: evaluation-recipes.md
   - Guides:
       - User Guide: user-guide.md
+      - Multi-Level Evaluation: evaluation-levels.md
       - Baseline Regression Tutorial: baseline-regression-tutorial.md
       - Human-Eval Calibration: human-eval.md
       - CI/CD Integration: ci-cd-integration.md

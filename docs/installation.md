@@ -1,6 +1,7 @@
-# Installation & Usage Guide
+# Installation
 
-This guide explains how to install and use the `tracelens` framework in your projects.
+How to install `tracelens` and add it to your own project. Once it's installed,
+head to [Getting Started](./getting-started.md) to run your first eval.
 
 ## Installation Options
 
@@ -26,12 +27,12 @@ Add to your project's `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "tracelens>=0.2.0",
+    "tracelens>=0.3.0",
 ]
 
 # With LLM extras
 dependencies = [
-    "tracelens[llm]>=0.2.0",
+    "tracelens[llm]>=0.3.0",
 ]
 ```
 
@@ -53,6 +54,9 @@ uv venv
 uv pip install -e ".[dev,http,llm]"
 ```
 
+See [Contributor Testing](contributor-testing.md) for the local verification
+gate (`make verify`) and the full testing tiers.
+
 ## Optional Extras
 
 - `tracelens[http]` installs `httpx` for `HTTPAPIAdapter`.
@@ -70,7 +74,7 @@ uv pip install "tracelens[http,llm]"
 ## CI Installation
 
 For GitHub Actions, install your project dependencies normally. If your
-project depends on `tracelens>=0.2.0`, `uv sync` or `pip install -e .`
+project depends on `tracelens>=0.3.0`, `uv sync` or `pip install -e .`
 is enough; no extra repository checkout or authentication is required.
 
 ```yaml
@@ -95,6 +99,9 @@ jobs:
             --report eval/results/report.md
 ```
 
+The full PR-gating workflow (baselines, regression blocking, report artifacts)
+lives in [CI/CD Integration](ci-cd-integration.md).
+
 ## Verify the Install
 
 ```bash
@@ -107,163 +114,6 @@ From a repository checkout, verify the example/report path:
 ```bash
 python examples/hello_world.py
 tracelens report --results examples/reports/hello_world_report.json --format markdown
-```
-
-## Quick Start
-
-### 1. Define a Task
-
-```python
-from tracelens.core.task import Task, TaskExpectation
-
-task = Task(
-    task_id="goal-decomposition-001",
-    name="Learn Python Goal",
-    description="Decompose a goal to learn Python programming",
-    input_data={
-        "goal": "Learn Python programming in 3 months",
-        "user_context": {
-            "experience": "beginner",
-            "hours_per_week": 10,
-        },
-    },
-    expectation=TaskExpectation(
-        expected_metrics={"quality": 0.8, "specificity": 0.7},
-    ),
-    category="programming",
-    tags=["python", "beginner"],
-)
-```
-
-### 2. Create a Grader
-
-```python
-from tracelens.core.grader import CodeGrader
-from tracelens.core.transcript import Transcript
-from tracelens.core.task import Task
-
-class QualityGrader(CodeGrader):
-    """Grade based on output quality metrics."""
-
-    grader_id = "quality_grader"
-    grader_version = "1.0.0"
-
-    def compute_metrics(
-        self,
-        transcript: Transcript,
-        task: Task
-    ) -> dict[str, float]:
-        output = transcript.final_output
-
-        # Compute your quality metrics
-        return {
-            "num_phases": len(output.get("phases", [])),
-            "has_timeline": 1.0 if "timeline" in output else 0.0,
-            "has_resources": 1.0 if "resources" in output else 0.0,
-        }
-
-    def determine_pass(
-        self,
-        metrics: dict[str, float],
-        task: Task
-    ) -> tuple[bool, float]:
-        # Compute overall score and pass/fail
-        score = (
-            min(metrics["num_phases"] / 3, 1.0) * 0.5 +
-            metrics["has_timeline"] * 0.25 +
-            metrics["has_resources"] * 0.25
-        )
-        passed = score >= 0.7
-        return passed, score
-```
-
-### 3. Run Evaluation and Compute Statistics
-
-```python
-from tracelens.statistics.pass_at_k import PassAtKAnalyzer
-from tracelens.statistics.consistency import ConsistencyAnalyzer
-
-# Collect results from multiple runs
-pass_results = {
-    "task1": [True, True, False, True, True],
-    "task2": [True, False, True, True, True],
-}
-
-# Compute pass@k (capability)
-pak_analyzer = PassAtKAnalyzer(k_values=[1, 3, 5])
-capability = pak_analyzer.analyze(pass_results)
-print(capability)  # {"pass@1": 0.7, "pass@3": 0.95, "pass@5": 0.99}
-
-# Compute pass^k (reliability)
-consistency_analyzer = ConsistencyAnalyzer(k_values=[2, 3, 5])
-reliability = consistency_analyzer.analyze(pass_results)
-print(reliability)  # {"pass^2": 0.6, "pass^3": 0.4, "pass^5": 0.2}
-```
-
-### 4. Baseline Comparison
-
-```python
-from tracelens.baselines.manager import BaselineManager
-from tracelens.baselines.comparison import RegressionDetector
-
-# Load/create baseline manager
-manager = BaselineManager("baselines.json")
-
-# Update baseline from current results
-manager.update_baseline(
-    task_id="goal-decomposition",
-    metrics={"quality": 0.85, "specificity": 0.78},
-)
-manager.save()
-
-# Compare new results to baseline
-detector = RegressionDetector(min_delta_percent=5.0)
-baseline = manager.get_baseline("goal-decomposition")
-
-current_results = [
-    {"quality": 0.82, "specificity": 0.75},
-    {"quality": 0.80, "specificity": 0.73},
-]
-
-report = detector.compare(baseline, current_results)
-
-if report.should_block_ci():
-    print("REGRESSION DETECTED!")
-    print(report.to_ci_output())
-```
-
-## Development Commands
-
-Using uv (recommended):
-
-```bash
-# Install with dev dependencies
-uv pip install -e ".[dev]"
-
-# Run tests
-uv run pytest tests/ -v
-
-# Run tests with coverage
-uv run pytest tests/ -v --cov=tracelens --cov-report=html
-
-# Lint
-uv run ruff check src/ tests/
-
-# Type check
-uv run mypy src/tracelens/
-```
-
-Using Docker:
-
-```bash
-# Run tests in container
-docker compose run --rm test
-
-# Run with coverage
-docker compose run --rm test-coverage
-
-# Interactive shell
-docker compose run --rm dev
 ```
 
 ## Project Structure for Integration
@@ -296,7 +146,10 @@ your-project/
 
 ## Next Steps
 
-- [Getting Started](./getting-started.md) — Run your first eval in five minutes
-- [Quickstart](./quickstart.md) — Build a custom grader and CLI workflow
-- [User Guide](./user-guide.md) — Deep dive into the framework
-- [CI/CD Integration Guide](./ci-cd-integration.md) — Automated regression testing
+- [Getting Started (5 min)](./getting-started.md) — run your first eval and meet
+  the four-piece skeleton.
+- [Build Your First Eval](./quickstart.md) — write your own Task, grader, and
+  CLI workflow.
+- [Core Concepts & Glossary](./concepts.md) — the pipeline and every object in
+  one page.
+- [CI/CD Integration](./ci-cd-integration.md) — automated regression testing.

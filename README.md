@@ -430,7 +430,7 @@ uv pip install "tracelens[llm]"
 
 # Or add to pyproject.toml
 # dependencies = [
-#     "tracelens>=0.2.0",
+#     "tracelens>=0.3.0",
 # ]
 ```
 
@@ -500,11 +500,12 @@ print(gen.render_markdown(report))
 
 📖 **Browsable docs site (search + nav):** <https://ssf0409.github.io/tracelens/>
 
-- **[Getting Started](docs/getting-started.md)** — Run your first eval in five minutes; the example ladder.
-- **[Quickstart](docs/quickstart.md)** — Build a custom grader, JSON task loader, and CLI workflow.
-- **[Supported Scenarios](docs/scenarios.md)** — Which agent-evaluation problems TraceLens is designed for.
+- **[Is TraceLens For You?](docs/scenarios.md)** — Which agent-evaluation problems TraceLens is designed for.
+- **[Getting Started (5 min)](docs/getting-started.md)** — Run your first eval in five minutes; the example ladder.
+- **[Build Your First Eval](docs/quickstart.md)** — Build a custom grader, JSON task loader, and CLI workflow.
+- **[Core Concepts & Glossary](docs/concepts.md)** — The evaluation pipeline and every object on one page.
 - **[User Guide](docs/user-guide.md)** — Comprehensive framework guide.
-- **[Evaluation Levels](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
+- **[Multi-Level Evaluation](docs/evaluation-levels.md)** — Function, task, and system-level evaluation architecture.
 - **[pass@k vs pass^k](docs/pass-at-k-vs-pass-hat-k.md)** — Capability vs reliability, with a truth table and which metric belongs in a CI gate.
 - **[Accuracy Best Practices](docs/accuracy.md)** — LLM-judge calibration and grader drift.
 - **[Human-Eval Calibration](docs/human-eval.md)** — Sample trials, hand-grade, and reconcile grader vs human to catch drift.

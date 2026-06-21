@@ -18,6 +18,11 @@ project owns the task data, agent invocation, graders, and rollout policy.
     From a fresh checkout to your first eval run in five minutes — no LLM keys,
     no config files.
 
+- :material-cube-outline: **[Core Concepts & Glossary](concepts.md)**
+
+    The evaluation pipeline and every object — Task, Transcript, Outcome, Trial
+    — explained on one page.
+
 - :material-school: **[pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md)**
 
     Capability vs reliability, with a truth table and which metric belongs in a
@@ -38,6 +43,9 @@ project owns the task data, agent invocation, graders, and rollout policy.
 ---
 
 ## What TraceLens gives you
+
+New to the vocabulary below? The [Core Concepts & Glossary](concepts.md) page
+defines every object and shows how they connect.
 
 - **Inspectable traces** — every run becomes a `Transcript` you can read.
 - **Outcome grading** — deterministic `CodeGrader`, LLM-as-judge `LLMGrader`,

@@ -11,7 +11,7 @@ Add TraceLens to the project being evaluated:
 ```toml
 [project]
 dependencies = [
-    "tracelens>=0.2.0",
+    "tracelens>=0.3.0",
 ]
 ```
 
