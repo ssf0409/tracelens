@@ -119,6 +119,8 @@ When your agent is real and your eval set has grown, move on to:
   problems TraceLens fits, and which first example to copy.
 - **[Evaluation Levels](./evaluation-levels.md)** — function vs task vs
   system-level evaluation; pass@k vs pass^k semantics.
+- **[pass@k vs pass^k](./pass-at-k-vs-pass-hat-k.md)** — capability vs
+  reliability, with a truth table and which metric belongs in a CI gate.
 - **[Accuracy Best Practices](./accuracy.md)** — how to keep LLM-judge
   graders calibrated to humans (the difference between "we ran an eval"
   and "we trust this eval").
