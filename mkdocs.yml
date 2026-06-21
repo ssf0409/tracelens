@@ -42,9 +42,13 @@ theme:
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html # required for the `.grid.cards` blocks on the landing page
   - tables
   - toc:
       permalink: true
+  - pymdownx.emoji: # required for `:material-*:` icon shortcodes
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
