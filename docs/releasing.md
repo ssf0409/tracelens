@@ -85,7 +85,7 @@ Downstream projects should depend on TraceLens from PyPI:
 
 ```toml
 dependencies = [
-    "tracelens>=0.2.0",
+    "tracelens>=0.3.0",
 ]
 ```
 

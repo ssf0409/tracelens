@@ -94,7 +94,7 @@ ready to write your own eval.
 
 ## 4. The Example Ladder
 
-The four examples in `examples/` go from trivial to production-grade,
+The examples in `examples/` go from trivial to production-grade,
 each adding exactly one new concept. Read them in order:
 
 | Step | File | New concept |
@@ -103,6 +103,8 @@ each adding exactly one new concept. Read them in order:
 | 2 | [`contract_eval.py`](https://github.com/ssf0409/tracelens/blob/main/examples/contract_eval.py) | `BehaviorContract.to_graders()` — declare the contract once, get a full grader suite for free. |
 | 3 | [`http_agent_eval.py`](https://github.com/ssf0409/tracelens/blob/main/examples/http_agent_eval.py) | `HTTPAPIAdapter` for evaluating a remote agent over HTTP, plus `JsonSchemaGrader` for output-shape gating. |
 | 4 | [`noise_aware_regression.py`](https://github.com/ssf0409/tracelens/blob/main/examples/noise_aware_regression.py) | `DecisionSpec` fingerprinting, `RegressionDetector`, and the 3 percentage-point infra-noise band — the production CI gate. |
+| 5 | [`llm_provider_examples.py`](https://github.com/ssf0409/tracelens/blob/main/examples/llm_provider_examples.py) | LLM-as-judge: wire OpenAI/Anthropic SDKs into `LLMGrader` via `LLMProvider` (runs offline with a fake provider). |
+| 6 | [`human_eval_calibration.py`](https://github.com/ssf0409/tracelens/blob/main/examples/human_eval_calibration.py) | Reconcile an automated grader against human grades to detect LLM-judge drift (no API keys). |
 
 Each example is self-contained — running it directly gives you working
 output. Copy the one that matches your problem and edit from there.
@@ -111,8 +113,18 @@ output. Copy the one that matches your problem and edit from there.
 
 ## 5. Where to Go Next
 
+Your immediate next step is to write your own eval:
+
+- **[Build Your First Eval](./quickstart.md)** — author your own `Task`, custom
+  grader, and CLI workflow (the natural step 2 after this guide).
+- **[Core Concepts & Glossary](./concepts.md)** — the full pipeline and every
+  object (`Transcript`, `Outcome`, `Trial`, `TrialBatch`) on one page.
+
 When your agent is real and your eval set has grown, move on to:
 
+- **[Evaluating a Real Agent](./real-agent.md)** — the end-to-end walkthrough
+  for a realistic HTTP/LLM agent: schema gate + LLM judge, reading transcripts,
+  capability vs reliability, and a baseline.
 - **[User Guide](./user-guide.md)** — every public API explained, with
   decision trees for choosing graders, adapters, and analysis methods.
 - **[Supported Scenarios](./scenarios.md)** — which agent-evaluation
