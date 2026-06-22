@@ -396,199 +396,54 @@ for trial in batch.get_trials_for_task("task-1"):
 
 ## Statistical Analysis
 
-### pass@k — Capability
-
-"What's the probability of at least one success in k attempts?"
-
-```python
-from tracelens.statistics.pass_at_k import pass_at_k, PassAtKAnalyzer
-
-# Single task: 10 runs, 7 passed, what's pass@5?
-prob = pass_at_k(n=10, c=7, k=5)  # 0.99+
-
-# Multiple tasks with confidence intervals
-analyzer = PassAtKAnalyzer(k_values=[1, 3, 5])
-results = analyzer.analyze(pass_results_by_task)
-# {"pass@1": 0.7, "pass@3": 0.92, "pass@5": 0.98}
-
-results_with_ci = analyzer.analyze_with_ci(pass_results_by_task)
-# {"pass@5": {"value": 0.98, "lower": 0.92, "upper": 1.0}}
-```
-
-### pass^k — Reliability
-
-"What's the probability that ALL k attempts succeed?"
+Two questions, two metrics: **pass@k** (capability — "can it solve this at all in
+k tries?") and **pass^k** (reliability — "does it succeed every time?"). They move
+in opposite directions as k grows.
 
 ```python
-from tracelens.statistics.consistency import pass_to_k, ConsistencyAnalyzer
+from tracelens import pass_at_k, pass_to_k
 
-# Single task: [T, T, F, T, T], what's pass^3?
-prob = pass_to_k([True, True, False, True, True], k=3)  # 0.333
-
-# Multiple tasks
-analyzer = ConsistencyAnalyzer(k_values=[2, 3, 5])
-results = analyzer.analyze(pass_results_by_task)
-# {"pass^2": 0.85, "pass^3": 0.70, "pass^5": 0.40}
-
-# Stability metrics (includes reliability score, failure rate, streaks)
-stability = analyzer.compute_stability_metrics(pass_results_by_task)
+pass_at_k(n=10, c=7, k=5)                        # capability: >=1 of 5 passes
+pass_to_k([True, True, False, True, True], k=3)  # reliability: all 3 in a window
 ```
 
-### Bootstrap CI and Comparison
+`ReportGenerator(k_values=..., consistency_k_values=...)` computes both for a
+batch. To decide whether a difference between two runs is *real* (bootstrap CI,
+effect size, p-value), use `compare_metrics`. Where to go deep:
 
-```python
-from tracelens.statistics.inference import compare_metrics, estimate_metric
-
-# Compare current run against baseline
-result = compare_metrics(
-    baseline_values=[0.72, 0.75, 0.71, 0.74],
-    current_values=[0.78, 0.81, 0.79, 0.82],
-    confidence=0.95,
-    compute_p_value=True,
-)
-
-print(f"Difference: {result.difference:.3f}")
-print(f"95% CI: [{result.ci_lower:.3f}, {result.ci_upper:.3f}]")
-print(f"Effect size: {result.effect_size:.2f}")
-print(f"Significant: {result.significant_improvement}")
-```
-
-### Which Statistic to Use
-
-| Question | Statistic | When |
-|----------|-----------|------|
-| Can it solve this? | pass@k | Capability benchmarking |
-| Is it reliable? | pass^k | Production readiness |
-| Is it better than before? | compare_metrics | A/B testing, regression |
-| How confident are we? | bootstrap CI | Any comparison |
+- Intuition + truth table: [pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md).
+- CIs, effect size, significance, sample size: [Statistical Comparison](statistical-comparison.md).
+- Applied A/B across model/prompt versions: [Comparing Versions](comparing-versions.md).
 
 ## Reproducibility
 
-### DecisionSpec
-
-Captures all parameters affecting agent behavior:
+Every run can carry a `DecisionSpec` — a content fingerprint of the model,
+prompt, tools, agent, and infra that produced it. Pass it to the runner and it
+stamps every transcript, so a baseline records the exact config behind it and a
+regression becomes attributable to the agent vs. the environment.
 
 ```python
-from tracelens.core.decision_spec import (
-    DecisionSpec, ModelConfig, AgentSpec, PromptSpec, ToolSpec
-)
-
-spec = DecisionSpec(
-    model=ModelConfig(
-        model_id="gpt-4-turbo",
-        temperature=0.7,
-        max_tokens=4096,
-    ),
-    agent=AgentSpec(
-        agent_id="goal-decomposer",
-        version="1.2.3",
-        git_commit="abc123",
-    ),
-    prompts=[PromptSpec(name="system", version="v2", hash="...")],
-    tools=[ToolSpec(name="search", version="1.0")],
-    global_seed=42,
-)
-
-# SHA-256 fingerprint of entire configuration
-print(spec.fingerprint)       # Full hash
-print(spec.fingerprint_short) # First 12 chars
-
-# Attach to transcript
-transcript.decision_spec = spec
+runner = EvaluationRunner(adapter, graders, config, decision_spec=spec)
 ```
 
-### Fingerprint Comparison
-
-When comparing baselines, mismatched fingerprints indicate configuration changes. This helps distinguish "agent got worse" from "we changed the configuration."
+The full field reference (and the rule for what enters the fingerprint vs. what's
+left out) is in [Reproducibility & DecisionSpec](reproducibility.md).
 
 ## Baselines and Regression
 
-### BaselineManager
+Store a known-good result as a baseline, then compare future runs against it and
+gate CI on the severity of any decline (NONE < MINOR < MODERATE < SEVERE).
+Baseline types encode how cautious promotion should be:
 
-```python
-from tracelens.baselines import BaselineManager
-
-manager = BaselineManager("baselines.json")
-
-# Get existing baseline
-baseline = manager.get_baseline("task-1")
-
-# Update with new results
-manager.update_baseline(
-    "task-1",
-    metrics={"pass_rate": 0.85, "mean_score": 0.78},
-    metric_stds={"pass_rate": 0.03, "mean_score": 0.05},
-    sample_size=50,
-)
-
-# Save to disk
-manager.save()
-```
-
-### Baseline Types
-
-| Type | Auto-Update | Use For |
+| Type | Auto-update | Use for |
 |------|-------------|---------|
-| `CANARY` | Never | Safety-critical, business-critical metrics |
-| `CAPABILITY` | On improvement | Tracking progress, regression detection |
-| `EXPERIMENTAL` | Aggressively | Active development, prototyping |
+| `CANARY` | Never (manual only) | Safety/business-critical floors |
+| `CAPABILITY` | On significant improvement | Tracking progress, regression detection |
+| `EXPERIMENTAL` | Loosely | Active development, prototyping |
 
-```python
-# Canary — never auto-updates, requires fingerprint
-manager.create_canary_baseline(
-    task_id="safety",
-    metrics={"safety_score": 0.99},
-    fingerprint=spec.fingerprint,
-)
-
-# Capability — auto-promotes on improvement
-from tracelens.baselines.manager import PromotionPolicy
-manager.create_capability_baseline(
-    task_id="quality",
-    metrics={"quality_score": 0.75},
-    promotion_policy=PromotionPolicy(
-        min_improvement_relative=0.05,
-        min_samples=10,
-    ),
-)
-```
-
-### PromotionPolicy
-
-Controls when baselines can be auto-updated:
-
-```python
-policy = PromotionPolicy(
-    allow_auto_promotion=True,
-    min_improvement_relative=0.05,  # 5% improvement required
-    min_samples=10,                 # Minimum sample size
-    required_confidence=0.95,       # 95% confidence
-    max_age_days=30,                # Flag stale baselines
-    require_all_metrics_improve=False,
-    promotion_cooldown_days=7,      # 7-day cooldown between promotions
-)
-```
-
-### RegressionDetector
-
-```python
-from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
-
-detector = RegressionDetector(significance_level=0.05)
-report = detector.compare(baseline, current_results)
-
-# Severity levels: NONE < MINOR < MODERATE < SEVERE
-if report.should_block_ci(threshold=RegressionSeverity.MODERATE):
-    print(report.to_ci_output())
-    sys.exit(1)
-```
-
-| Severity | Change | Default CI Action |
-|----------|--------|-------------------|
-| NONE | No regression | Pass |
-| MINOR | < 5% decline | Pass |
-| MODERATE | 5-15% decline | Block |
-| SEVERE | > 15% decline | Block |
+The complete store → promote → compare → gate workflow, with the real
+`BaselineManager` and `RegressionDetector` APIs, is the
+[Baseline Regression Tutorial](baseline-regression-tutorial.md).
 
 ## Reporting
 

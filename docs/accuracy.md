@@ -1,63 +1,63 @@
 # Evaluation Accuracy Best Practices
 
-How to build evaluations that produce reliable, actionable signals.
+You ran an eval and got a number. **Can you trust it?** This page is about the
+difference between "we ran an eval" and "we trust this eval" — sample sizes,
+grader calibration, and the pitfalls that produce confident-but-wrong signals.
 
 ## The Accuracy Problem
 
 Agent evaluations suffer from three failure modes:
 
-1. **False positives** — agent passes but shouldn't (grader too lenient)
-2. **False negatives** — agent fails but should pass (grader too strict or flaky)
-3. **Non-determinism noise** — same input produces different results across runs
+1. **False positives** — agent passes but shouldn't (grader too lenient).
+2. **False negatives** — agent fails but should pass (grader too strict or flaky).
+3. **Non-determinism noise** — same input produces different results across runs.
 
-A bad evaluation is worse than no evaluation — it builds false confidence or blocks valid work.
+A bad evaluation is worse than no evaluation — it builds false confidence or
+blocks valid work.
 
 ## Sample Size Guidelines
+
+The single most common accuracy mistake is too few samples. How many runs and
+tasks you need depends on the scenario:
 
 ### Runs Per Task
 
 | Scenario | Minimum Runs | Recommended |
 |----------|-------------|-------------|
 | Deterministic agent + CodeGrader | 1 | 1 |
-| Non-deterministic agent | 3 | 5-10 |
+| Non-deterministic agent | 3 | 5–10 |
 | LLMGrader (any agent) | 3 | 5 |
 | High-stakes decision | 10 | 20+ |
 
-**Rule of thumb**: If your confidence interval width is > 0.1, you need more runs.
+**Rule of thumb:** if your confidence-interval width is `> 0.1`, you need more
+runs. Put a CI on every metric with `estimate_metric` and watch `ci_width` — the
+mechanics are in [Statistical Comparison](statistical-comparison.md).
 
 ### Tasks in Eval Set
 
 | Eval Set Maturity | Minimum Tasks |
 |-------------------|---------------|
 | Initial (prototype) | 10 |
-| Development | 20-50 |
+| Development | 20–50 |
 | Production CI | 50+ |
 
 Start with real failure cases from your agent's history, not synthetic tasks.
 
-### Bootstrap CI as Signal
-
-Use `PassAtKAnalyzer.analyze_with_ci()` to get confidence intervals:
-
-```python
-analyzer = PassAtKAnalyzer(k_values=[1, 5])
-results = analyzer.analyze_with_ci(pass_results, confidence=0.95)
-# {"pass@5": {"value": 0.92, "lower": 0.85, "upper": 0.97}}
-
-ci_width = results["pass@5"]["upper"] - results["pass@5"]["lower"]
-if ci_width > 0.1:
-    print("Warning: wide CI — add more tasks or runs")
-```
-
 ## Grader Calibration
 
-### CodeGrader Best Practices
+A grader is only as trustworthy as its agreement with reality. Deterministic and
+LLM graders fail differently.
+
+### CodeGrader best practices
 
 CodeGraders are deterministic and reproducible. Key design considerations:
 
-1. **Metric design**: Choose metrics that capture what matters, not what's easy to measure
-2. **Threshold selection**: Set pass thresholds based on observed performance, not guesses
-3. **Boundary testing**: Test grader behavior at edge cases (empty output, None values, extreme numbers)
+1. **Metric design** — choose metrics that capture what matters, not what's easy
+   to measure.
+2. **Threshold selection** — set pass thresholds from observed performance, not
+   guesses.
+3. **Boundary testing** — test grader behavior at edge cases (empty output,
+   `None`, extreme numbers). Grade defensively:
 
 ```python
 class FinancialGrader(CodeGrader):
@@ -69,15 +69,16 @@ class FinancialGrader(CodeGrader):
         ...
 ```
 
-### LLMGrader Best Practices
+### LLMGrader best practices
 
-LLMGraders are non-deterministic and prone to drift. Mitigate with:
+LLM judges are non-deterministic and prone to drift. Mitigate with:
 
-1. **temperature=0**: Reduce variability (set in `GraderConfig`)
-2. **Structured output**: Request JSON with specific fields, not free-form text
-3. **Rubric anchoring**: Define what each score level means concretely
-4. **Boundary examples**: Include 1-2 examples of "definitely pass" and "definitely fail" in the prompt
-5. **Score normalization**: Map LLM scores (1-10) to 0-1 consistently
+1. **Deterministic decoding** — judge at temperature 0 to reduce variability.
+2. **Structured output** — request JSON with specific fields, not free-form text.
+3. **Rubric anchoring** — define what each score level means concretely.
+4. **Boundary examples** — include 1–2 "definitely pass" and "definitely fail"
+   examples in the prompt.
+5. **Score normalization** — map LLM scores (1–10) to 0–1 consistently.
 
 ```python
 def build_grading_prompt(self, transcript, task):
@@ -96,170 +97,103 @@ def build_grading_prompt(self, transcript, task):
     Return ONLY: {"score": N, "feedback": "brief explanation"}"""
 ```
 
-### CompositeGrader Role Selection
+### Gate vs. score in a CompositeGrader
 
-| Grader purpose | Role | Behavior |
-|---------------|------|----------|
-| Safety checks | `MUST_PASS` | Any failure = trial fails |
-| Format validation | `MUST_PASS` | Any failure = trial fails |
-| Quality scoring | `SCORE_CONTRIBUTOR` | Contributes to weighted average |
-| Style preferences | `SCORE_CONTRIBUTOR` | Contributes to weighted average |
+When you combine graders, decide which ones are hard gates and which contribute
+to the score (set via `GraderConfig`'s `EvalPolicy`):
 
-Use `MUST_PASS` sparingly — it creates binary signals. Use `SCORE_CONTRIBUTOR` for nuanced quality measurement.
+| Grader purpose | Policy | Behavior |
+|---------------|--------|----------|
+| Safety / format validation | `GATE` | Any violation fails the trial |
+| Quality / style scoring | `TRACK` (or `WARN`) | Contributes to the weighted score |
 
-## Human Calibration
+Use `GATE` sparingly — it creates binary signals. See the
+[Grader Library](grader-library.md) for the built-in graders and their default
+policies, and [Evaluating a Real Agent §4](real-agent.md) for the gate-plus-judge
+pattern.
 
-TraceLens supports this loop directly: `tracelens sample` selects trials to
-review and `tracelens reconcile` measures grader-vs-human agreement. See the
-**[human-eval guide](human-eval.md)** for the full workflow and
-**[`examples/human_eval_calibration.py`](https://github.com/ssf0409/tracelens/blob/main/examples/human_eval_calibration.py)**
-for a runnable, API-key-free demonstration. The protocol below is the thinking
-behind it.
+### Calibrating an LLM judge against humans
 
-### Weekly 20-Sample Protocol
-
-1. **Sample selection**: Choose 20 trials that span the score range (not just edge cases)
-   - 5 from top quartile (high scores)
-   - 5 from bottom quartile (low scores)
-   - 10 from the middle (where grader decisions matter most)
-
-2. **Human rating**: Rate each sample on the same rubric the LLM grader uses (1-10 per dimension)
-
-3. **Correlation analysis**: Compute Pearson correlation between human and LLM scores
-   - **> 0.8**: Excellent — grader is well-calibrated
-   - **0.7-0.8**: Good — minor prompt adjustments may help
-   - **< 0.7**: Action needed — review prompt, add examples, or reconsider rubric
-
-4. **Systematic bias check**: Plot human vs LLM scores. If the LLM consistently scores higher or lower, adjust the prompt or pass threshold.
-
-### Sampling Strategy
-
-Avoid sampling only failures — this biases your calibration. Sample proportionally across the score distribution with slight oversampling of the boundary region (scores near the pass threshold).
+LLM graders drift; the only way to know is to compare them against human grades
+on a periodic sample. TraceLens owns the selection and the agreement math
+(`tracelens sample` / `reconcile`); you bring the human grades. The full
+workflow, strategies, and the correlation thresholds to watch are in the
+**[Human-Eval Calibration](human-eval.md)** guide, with a runnable, API-key-free
+demo in
+[`examples/human_eval_calibration.py`](https://github.com/ssf0409/tracelens/blob/main/examples/human_eval_calibration.py).
 
 ## Handling Non-Determinism
 
-### Run Count Recommendations
-
-```python
-# Minimum for any non-deterministic evaluation
-config = RunnerConfig(num_runs=3)
-
-# Recommended for production CI
-config = RunnerConfig(num_runs=5)
-
-# For benchmarking / paper results
-config = RunnerConfig(num_runs=10)
-```
-
-### Report Both Statistics
-
-Always report both pass@k (capability) and pass^k (reliability):
+Set run counts to the scenario (3 minimum for non-deterministic, 5 for CI, 10
+for benchmarking), and **always report both statistics**:
 
 ```python
 gen = ReportGenerator(k_values=[1, 3, 5], consistency_k_values=[2, 3, 5])
 report = gen.build_report(batch)
 ```
 
-A high pass@k with low pass^k means the agent is capable but inconsistent — this is a different problem than an agent that simply can't solve the task.
+A high pass@k with a low pass^k means the agent is *capable but inconsistent* —
+a different problem than an agent that simply can't solve the task. See
+[pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md).
 
-### DecisionSpec Fingerprinting
+To make sure you're comparing like with like across runs, stamp each run with a
+`DecisionSpec` so a difference is attributable to the agent/prompt/model rather
+than the environment — see [Reproducibility & DecisionSpec](reproducibility.md).
 
-Use `DecisionSpec` to ensure you're comparing apples to apples:
+## Baselines: setting thresholds from variance
 
-```python
-from tracelens.core.decision_spec import DecisionSpec, ModelConfig, AgentSpec
+Set regression thresholds from observed variance, not arbitrary numbers:
 
-spec = DecisionSpec(
-    model=ModelConfig(model_id="gpt-4-turbo", temperature=0.7),
-    agent=AgentSpec(agent_id="v2", version="1.2.3", git_commit="abc123"),
-)
-
-# Attach to transcript for reproducibility
-transcript.decision_spec = spec
-```
-
-When comparing baselines, mismatched fingerprints warn you that configurations differ.
-
-## Baseline Management
-
-### Threshold Selection
-
-Set regression thresholds based on observed variance, not arbitrary numbers:
-
-1. Run your eval suite 5-10 times on the same agent version
-2. Compute standard deviation for each metric
-3. Set threshold at **2x standard deviation** — this catches real regressions while tolerating natural variance
+1. Run your eval suite 5–10 times on the same agent version.
+2. Compute the standard deviation for each metric.
+3. Set the threshold at **2× standard deviation** — this catches real
+   regressions while tolerating natural variance.
 
 ```python
-# If observed std of pass_rate is 0.03:
-baseline.add_metric(
-    metric_name="pass_rate",
-    value=0.85,
-    std=0.03,
-    regression_threshold_relative=0.06,  # 2x std ≈ 6%
-)
+# If observed std of pass_rate is 0.03, ~2x std ≈ 6%:
+baseline.add_metric(metric_name="pass_rate", value=0.85, std=0.03, relative_threshold=0.06)
 ```
 
-### Bootstrap CI for Comparisons
-
-Use `BaselineManager.compare_to_baseline_with_ci()` for statistical rigor:
-
-```python
-comparison = manager.compare_to_baseline_with_ci(
-    task_id="quality_benchmark",
-    current_values={"pass_rate": [0.82, 0.85, 0.80, 0.83, 0.81]},
-    confidence=0.95,
-)
-# Returns CI bounds, p-values, effect sizes
-```
-
-### Canary Baselines for Safety
-
-Use `CANARY` baselines for safety-critical metrics that must never regress:
-
-```python
-manager.create_canary_baseline(
-    task_id="safety_check",
-    metrics={"safety_score": 0.99},
-    fingerprint=spec.fingerprint,  # Tied to specific config
-)
-```
-
-Canary baselines never auto-promote — they require explicit manual approval to change.
+Storing, promoting, and comparing baselines (including canary baselines for
+safety-critical metrics that must never regress) is covered end to end in the
+[Baseline Regression Tutorial](baseline-regression-tutorial.md).
 
 ## Common Pitfalls
 
-### 1. Grading Paths, Not Outcomes
+### 1. Grading paths, not outcomes
 
-**Wrong**: Check that the agent used specific tools in a specific order.
-**Right**: Check that the final output meets requirements, regardless of how it got there.
+**Wrong:** check that the agent used specific tools in a specific order.
+**Right:** check that the final output meets requirements, regardless of how it
+got there.
 
-### 2. Too Few Samples
+### 2. Too few samples
 
-Running 1 trial per task gives a binary signal with no statistical power. Run at least 3.
+Running 1 trial per task gives a binary signal with no statistical power. Run at
+least 3.
 
-### 3. Stale Baselines
+### 3. Stale baselines
 
-Baselines established months ago may not reflect current expectations. Set `max_age_days` in `PromotionPolicy` and review stale baselines regularly:
+Baselines established months ago may not reflect current expectations. Review
+stale baselines regularly rather than trusting them indefinitely.
 
-```python
-stale = manager.list_stale_baselines()
-```
+### 4. LLM grader drift
 
-### 4. LLM Grader Drift
-
-LLM grader behavior changes when the underlying model is updated. After any model upgrade:
-- Re-run calibration with human scores
-- Compare old vs new model grading on the same transcripts
-- Update prompts if correlation drops below 0.7
+LLM grader behavior changes when the underlying model is updated. After any model
+upgrade: re-run calibration with human scores, compare old vs new grading on the
+same transcripts, and update prompts if correlation drops below `0.7`.
 
 ### 5. Ignoring pass^k
 
-High pass@k can mask reliability problems. A task with pass@5 = 0.99 but pass^5 = 0.20 means the agent almost always succeeds eventually but fails 80% of the time when you need 5 consecutive successes. For production use, pass^k often matters more.
+High pass@k can mask reliability problems. A task with pass@5 = 0.99 but
+pass^5 = 0.20 means the agent almost always succeeds *eventually* but fails 80%
+of the time when you need 5 consecutive successes. For production use, pass^k
+often matters more.
 
-### 6. Overfitting the Eval Suite
+### 6. Overfitting the eval suite
 
-If you only add tasks where the agent fails, the suite becomes a regression test, not a capability test. Regularly add new tasks from fresh failure cases and remove tasks that have been passing consistently for months.
+If you only add tasks where the agent fails, the suite becomes a regression test,
+not a capability test. Regularly add new tasks from fresh failure cases and
+retire tasks that have passed consistently for months.
 
 ## Evaluation Maturity Model
 
@@ -267,8 +201,9 @@ If you only add tasks where the agent fails, the suite becomes a regression test
 |-------|-------------|-----------------|
 | **1 — Manual** | Ad-hoc spot checking | No automation, no baselines |
 | **2 — Basic** | Automated eval suite | CodeGrader, num_runs=1, CI output |
-| **3 — Statistical** | Non-determinism handled | num_runs >= 3, pass@k + pass^k, baselines |
+| **3 — Statistical** | Non-determinism handled | num_runs ≥ 3, pass@k + pass^k, baselines |
 | **4 — Calibrated** | Human-validated grading | Weekly calibration, LLMGrader correlation > 0.7 |
 | **5 — Production** | Full pipeline with dashboard | HTML dashboard, regression gating, DecisionSpec tracking, canary baselines |
 
-Most teams should aim for Level 3 initially and progress to Level 4-5 as their agent matures.
+Most teams should aim for Level 3 initially and progress to Level 4–5 as their
+agent matures.
