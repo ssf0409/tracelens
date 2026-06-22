@@ -62,6 +62,8 @@ gate (`make verify`) and the full testing tiers.
 - `tracelens[http]` installs `httpx` for `HTTPAPIAdapter`.
 - `tracelens[llm]` installs the OpenAI and Anthropic SDKs for custom
   `LLMProvider` subclasses.
+- `tracelens[datasets]` installs the HuggingFace `datasets` library for
+  `HFDatasetLoader` — load any Hub dataset as eval tasks with no conversion.
 - `tracelens[dev]` installs pytest, ruff, mypy, and type stubs for
   contributors.
 
