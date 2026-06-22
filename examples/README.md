@@ -16,6 +16,7 @@ uv pip install -e ".[dev]"
 | 4 | `noise_aware_regression.py` | Compare runs with different infrastructure fingerprints. |
 | 5 | `llm_provider_examples.py` | Wire OpenAI and Anthropic SDK clients into `LLMGrader` through `LLMProvider`. |
 | 6 | `human_eval_calibration.py` | Reconcile an automated grader against human grades; detect drift (no API keys). |
+| 7 | `version_compare.py` | Compare two versions (model/prompt) with bootstrap significance + `DecisionSpec` fingerprints (no API keys). |
 
 ## Hello World
 

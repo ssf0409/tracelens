@@ -105,6 +105,7 @@ each adding exactly one new concept. Read them in order:
 | 4 | [`noise_aware_regression.py`](https://github.com/ssf0409/tracelens/blob/main/examples/noise_aware_regression.py) | `DecisionSpec` fingerprinting, `RegressionDetector`, and the 3 percentage-point infra-noise band — the production CI gate. |
 | 5 | [`llm_provider_examples.py`](https://github.com/ssf0409/tracelens/blob/main/examples/llm_provider_examples.py) | LLM-as-judge: wire OpenAI/Anthropic SDKs into `LLMGrader` via `LLMProvider` (runs offline with a fake provider). |
 | 6 | [`human_eval_calibration.py`](https://github.com/ssf0409/tracelens/blob/main/examples/human_eval_calibration.py) | Reconcile an automated grader against human grades to detect LLM-judge drift (no API keys). |
+| 7 | [`version_compare.py`](https://github.com/ssf0409/tracelens/blob/main/examples/version_compare.py) | Compare two versions (model/prompt) with bootstrap significance + `DecisionSpec` fingerprints (no API keys). |
 
 Each example is self-contained — running it directly gives you working
 output. Copy the one that matches your problem and edit from there.
@@ -125,8 +126,8 @@ When your agent is real and your eval set has grown, move on to:
 - **[Evaluating a Real Agent](./real-agent.md)** — the end-to-end walkthrough
   for a realistic HTTP/LLM agent: schema gate + LLM judge, reading transcripts,
   capability vs reliability, and a baseline.
-- **[User Guide](./user-guide.md)** — every public API explained, with
-  decision trees for choosing graders, adapters, and analysis methods.
+- **[User Guide](./user-guide.md)** — the decision guide: choosing the right
+  task scope, adapter, grader, and statistics for your situation.
 - **[Supported Scenarios](./scenarios.md)** — which agent-evaluation
   problems TraceLens fits, and which first example to copy.
 - **[Evaluation Levels](./evaluation-levels.md)** — function vs task vs

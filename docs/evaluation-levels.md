@@ -10,7 +10,8 @@ than an end-to-end planning agent. tracelens operates at the **Task** level —
 one Task, one adapter call, one Transcript — but what you put *inside* that
 Task determines the evaluation granularity.
 
-This document defines three evaluation levels, shows how to implement each using the existing framework, and identifies gaps for future first-class support.
+This document defines three evaluation levels and shows how to implement each —
+pick the level that matches the question you're asking, or mix them in one suite.
 
 ### The Three Levels
 
@@ -171,22 +172,18 @@ adapter = SimpleAdapter(invoke_planning_agent)
 
 ### Grader
 
-Task-level grading often combines objective checks (MUST_PASS) with subjective quality (SCORE_CONTRIBUTOR):
+Task-level grading often combines an objective gate (`EvalPolicy.GATE`) with
+subjective quality contributors (`EvalPolicy.TRACK`):
 
 ```python
-from tracelens.core.grader import CompositeGrader, GraderConfig, GraderRole
+from tracelens import CompositeGrader, GraderConfig, EvalPolicy
 
-# Format validation — must pass or trial fails
-format_config = GraderConfig(role=GraderRole.MUST_PASS)
-format_grader = FormatValidationGrader("format", config=format_config)
+# Format validation — a hard gate: any violation fails the trial
+format_grader = FormatValidationGrader("format", config=GraderConfig(policy=EvalPolicy.GATE))
 
-# Quality assessment — contributes to score
-quality_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR, weight=0.6)
-quality_grader = DecompositionQualityGrader("quality", config=quality_config)
-
-# Personalization — contributes to score
-personalization_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR, weight=0.4)
-personalization_grader = PersonalizationGrader("personalization", config=personalization_config)
+# Quality + personalization — contribute to the weighted score
+quality_grader = DecompositionQualityGrader("quality", config=GraderConfig(policy=EvalPolicy.TRACK))
+personalization_grader = PersonalizationGrader("personalization", config=GraderConfig(policy=EvalPolicy.TRACK))
 
 composite = CompositeGrader(
     grader_id="task_composite",
@@ -198,7 +195,9 @@ composite = CompositeGrader(
 )
 ```
 
-The `CompositeGrader` enforces the role semantics: if `format_grader` (MUST_PASS) fails, the trial fails regardless of quality scores.
+If the `GATE` grader fails, the trial fails regardless of the quality scores.
+(The older `GraderRole.MUST_PASS` / `SCORE_CONTRIBUTOR` vocabulary still works for
+back-compat, but `EvalPolicy` is the current API.)
 
 ### Statistics
 
@@ -325,11 +324,11 @@ class RequestPipelineAdapter(AgentAdapter):
 
 ### Grader
 
-Use `CompositeGrader` with MUST_PASS gates for pipeline completion and safety, plus SCORE_CONTRIBUTOR for end-to-end quality:
+Use `CompositeGrader` with `EvalPolicy.GATE` for pipeline completion and safety, plus `EvalPolicy.TRACK` for end-to-end quality:
 
 ```python
 class PipelineCompletionGrader(CodeGrader):
-    """MUST_PASS: Did the pipeline complete all expected stages?"""
+    """GATE: Did the pipeline complete all expected stages?"""
 
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
         expected = task.metadata.get("expected_stages", 0)
@@ -346,7 +345,7 @@ class PipelineCompletionGrader(CodeGrader):
 
 
 class PolicyGateGrader(CodeGrader):
-    """MUST_PASS: Were project policy constraints respected throughout the pipeline?"""
+    """GATE: Were project policy constraints respected throughout the pipeline?"""
 
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
         # Check policy_checker stage output
@@ -372,15 +371,17 @@ class PolicyGateGrader(CodeGrader):
 Assemble them:
 
 ```python
+from tracelens import EvalPolicy, GraderConfig
+
 composite = CompositeGrader(
     grader_id="system_composite",
     graders=[
-        # Gates — must pass
-        (PipelineCompletionGrader("completion", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
-        (PolicyGateGrader("policy", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
+        # Gates — any failure fails the trial
+        (PipelineCompletionGrader("completion", config=GraderConfig(policy=EvalPolicy.GATE)), 0.1),
+        (PolicyGateGrader("policy", config=GraderConfig(policy=EvalPolicy.GATE)), 0.1),
         # Quality — score contributors
-        (EndToEndQualityGrader("quality", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.5),
-        (ExecutionQualityGrader("exec_quality", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.3),
+        (EndToEndQualityGrader("quality", config=GraderConfig(policy=EvalPolicy.TRACK)), 0.5),
+        (ExecutionQualityGrader("exec_quality", config=GraderConfig(policy=EvalPolicy.TRACK)), 0.3),
     ],
 )
 ```
@@ -638,73 +639,15 @@ manager.create_capability_baseline(
 | Task | CAPABILITY | 5–10% | Moderate (with confidence) |
 | System (safety) | CANARY | 0% (must match) | Manual only |
 | System (performance) | CAPABILITY | 10–15% | Slow (high sample count) |
+## Where to go deeper
 
----
+The mechanics referenced above each have a focused home:
 
-## Current Gaps and Future Work
-
-The following would add first-class support for multi-level evaluation. These are **not currently implemented** — they document where the framework could evolve.
-
-### Hierarchical Tasks
-
-**Gap**: Tasks are flat. There's no parent/child relationship between a system-level task and the function-level tasks for its components.
-
-**What it would enable**: Define a system-level task that automatically decomposes into function-level sub-tasks. A failure in the system-level eval could automatically identify which component failed.
-
-### Sub-Transcripts
-
-**Gap**: `Transcript.intermediate_outputs` is a `list[Any]` — unstructured. There's no way to nest a full Transcript inside another Transcript.
-
-**What it would enable**: Each pipeline stage gets its own Transcript with steps, timing, and token counts. The parent Transcript aggregates them. Graders could inspect individual stage transcripts.
-
-### Level-Aware Reporting
-
-**Gap**: Reports don't group results by evaluation level. A markdown report mixes function, task, and system results together.
-
-**What it would enable**: Reports with separate sections per level, level-specific summary statistics, and drill-down from system to task to function failures.
-
-### Pipeline Grading (Intermediate Steps)
-
-**Gap**: Graders operate on the final `Transcript` — there's no built-in way to grade intermediate pipeline outputs independently.
-
-**What it would enable**: Grade each pipeline stage with its own grader. A system-level CompositeGrader could include stage-specific graders alongside end-to-end graders.
-
-### CLI-Level Filtering
-
-**Gap**: The `tracelens run` CLI does not accept `--categories` or `--tags` flags. Level-based filtering must be done in code.
-
-**What it would enable**: `tracelens run --eval-set suite.json --categories function` for pre-commit hooks, `--categories system` for nightly runs.
-
-### Cross-Level Baselines
-
-**Gap**: Baselines are per-task. There's no suite-level regression detection that considers the relationship between levels.
-
-**What it would enable**: "Function-level pass rate dropped 5% AND system-level reliability dropped 20% → likely the same root cause." Cross-level correlation analysis for faster debugging.
-
----
-
-## Framework API Reference
-
-Features referenced in this document and where to find them:
-
-| Feature | File | Line | How It's Used |
-|---|---|---|---|
-| `Task.category` | `src/tracelens/core/task.py` | 70 | Encode evaluation level |
-| `Task.metadata` | `src/tracelens/core/task.py` | 65 | Store component/pipeline info |
-| `Task.tags` | `src/tracelens/core/task.py` | 66 | Multi-dimensional filtering |
-| `Task.matches_filter()` | `src/tracelens/core/task.py` | 76–89 | Filter predicate |
-| `EvalSet.filter_tasks()` | `src/tracelens/core/task.py` | 195–209 | Get filtered task list |
-| `EvalSet.filtered_eval_set()` | `src/tracelens/core/task.py` | 211–230 | Get filtered EvalSet |
-| `Transcript.intermediate_outputs` | `src/tracelens/core/transcript.py` | 104 | Record pipeline stages |
-| `CompositeGrader` | `src/tracelens/core/grader.py` | 321–447 | Multi-grader aggregation |
-| `GraderRole` (MUST_PASS / SCORE_CONTRIBUTOR) | `src/tracelens/core/grader.py` | 30–43 | Gate vs. quality grading |
-| `AgentAdapter` ABC | `src/tracelens/execution/agent_adapter.py` | 15–50 | Custom adapters per level |
-| `SimpleAdapter` | `src/tracelens/execution/agent_adapter.py` | 53–84 | Wrap callables |
-| `RunnerConfig.num_runs` | `src/tracelens/execution/runner.py` | 27 | Level-appropriate run counts |
-| `BaselineType` (CANARY / CAPABILITY / EXPERIMENTAL) | `src/tracelens/baselines/manager.py` | 21–44 | Level-specific baseline strategy |
-| `PromotionPolicy` | `src/tracelens/baselines/manager.py` | 47–76 | Auto-promotion criteria |
-| `RegressionSeverity` | `src/tracelens/baselines/comparison.py` | 18–24 | Regression blocking thresholds |
-| `pass_at_k()` | `src/tracelens/statistics/pass_at_k.py` | 15–46 | Capability estimation |
-| `pass_to_k()` | `src/tracelens/statistics/consistency.py` | 13–43 | Reliability estimation |
-| `ConsistencyAnalyzer` | `src/tracelens/statistics/consistency.py` | 82–191 | Stability metrics |
-| `bootstrap_ci()` | `src/tracelens/statistics/inference.py` | 136–194 | Confidence intervals |
+- **Every symbol used here** — the [API Reference](reference.md) has full,
+  always-current signatures (no line numbers to go stale).
+- **Choosing statistics per level** — [pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md)
+  for the intuition, [Statistical Comparison](statistical-comparison.md) for CIs
+  and significance.
+- **Baselines per level** — [Baseline Regression Tutorial](baseline-regression-tutorial.md).
+- **Attributing a result to a config** — [Reproducibility & DecisionSpec](reproducibility.md).
+- **The built-in graders** each level reaches for — [Grader Library](grader-library.md).

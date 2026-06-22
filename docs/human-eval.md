@@ -151,6 +151,32 @@ tracelens reconcile \
 `--transcripts` expects a `{task_id: transcript}` JSON map. You can also pass a
 precomputed `--results {task_id: outcome}` map if you have one.
 
+## Programmatic API (beyond the CLI)
+
+The CLI (`sample` / `reconcile`) wraps two functions you can call directly when
+you want to build calibration into your own harness. Both live in
+`tracelens.calibration` (they are not re-exported from the package root):
+
+```python
+from tracelens.calibration import sample_for_review, CalibrationAnalyzer
+
+# 1. Pick trials for a human to grade. Strategies: "diverse", "boundary",
+#    "failures", "random". Returns a ReviewWorksheet.
+worksheet = sample_for_review(batch, size=20, strategy="boundary", seed=0)
+
+# 2. Compare the grader against human annotations.
+grader_outcomes = {t.task_id: t.outcomes[0] for t in batch.trials}
+result = CalibrationAnalyzer(threshold=0.7).analyze(grader_outcomes, annotations)
+```
+
+`sample_for_review(batch, size, strategy="diverse", seed=0)` returns a
+`ReviewWorksheet` (the same fill-in structure the CLI writes). `analyze` takes a
+mapping of `task_id -> outcome` (anything with `.score` and `.passed`) plus a
+human `AnnotationSet`, and returns a `CalibrationResult` carrying the correlation,
+pass/fail agreement, and Cohen's kappa — the same numbers `reconcile` prints. The
+full runnable version is
+[`examples/human_eval_calibration.py`](https://github.com/ssf0409/tracelens/blob/main/examples/human_eval_calibration.py).
+
 ## When to recalibrate
 
 Calibrate when any input to the judge changes, and on a slow cadence otherwise:
