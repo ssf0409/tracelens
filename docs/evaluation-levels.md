@@ -172,22 +172,18 @@ adapter = SimpleAdapter(invoke_planning_agent)
 
 ### Grader
 
-Task-level grading often combines objective checks (MUST_PASS) with subjective quality (SCORE_CONTRIBUTOR):
+Task-level grading often combines an objective gate (`EvalPolicy.GATE`) with
+subjective quality contributors (`EvalPolicy.TRACK`):
 
 ```python
-from tracelens.core.grader import CompositeGrader, GraderConfig, GraderRole
+from tracelens import CompositeGrader, GraderConfig, EvalPolicy
 
-# Format validation — must pass or trial fails
-format_config = GraderConfig(role=GraderRole.MUST_PASS)
-format_grader = FormatValidationGrader("format", config=format_config)
+# Format validation — a hard gate: any violation fails the trial
+format_grader = FormatValidationGrader("format", config=GraderConfig(policy=EvalPolicy.GATE))
 
-# Quality assessment — contributes to score
-quality_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR, weight=0.6)
-quality_grader = DecompositionQualityGrader("quality", config=quality_config)
-
-# Personalization — contributes to score
-personalization_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR, weight=0.4)
-personalization_grader = PersonalizationGrader("personalization", config=personalization_config)
+# Quality + personalization — contribute to the weighted score
+quality_grader = DecompositionQualityGrader("quality", config=GraderConfig(policy=EvalPolicy.TRACK))
+personalization_grader = PersonalizationGrader("personalization", config=GraderConfig(policy=EvalPolicy.TRACK))
 
 composite = CompositeGrader(
     grader_id="task_composite",
@@ -199,7 +195,9 @@ composite = CompositeGrader(
 )
 ```
 
-The `CompositeGrader` enforces the role semantics: if `format_grader` (MUST_PASS) fails, the trial fails regardless of quality scores.
+If the `GATE` grader fails, the trial fails regardless of the quality scores.
+(The older `GraderRole.MUST_PASS` / `SCORE_CONTRIBUTOR` vocabulary still works for
+back-compat, but `EvalPolicy` is the current API.)
 
 ### Statistics
 
@@ -326,11 +324,11 @@ class RequestPipelineAdapter(AgentAdapter):
 
 ### Grader
 
-Use `CompositeGrader` with MUST_PASS gates for pipeline completion and safety, plus SCORE_CONTRIBUTOR for end-to-end quality:
+Use `CompositeGrader` with `EvalPolicy.GATE` for pipeline completion and safety, plus `EvalPolicy.TRACK` for end-to-end quality:
 
 ```python
 class PipelineCompletionGrader(CodeGrader):
-    """MUST_PASS: Did the pipeline complete all expected stages?"""
+    """GATE: Did the pipeline complete all expected stages?"""
 
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
         expected = task.metadata.get("expected_stages", 0)
@@ -347,7 +345,7 @@ class PipelineCompletionGrader(CodeGrader):
 
 
 class PolicyGateGrader(CodeGrader):
-    """MUST_PASS: Were project policy constraints respected throughout the pipeline?"""
+    """GATE: Were project policy constraints respected throughout the pipeline?"""
 
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
         # Check policy_checker stage output
@@ -373,15 +371,17 @@ class PolicyGateGrader(CodeGrader):
 Assemble them:
 
 ```python
+from tracelens import EvalPolicy, GraderConfig
+
 composite = CompositeGrader(
     grader_id="system_composite",
     graders=[
-        # Gates — must pass
-        (PipelineCompletionGrader("completion", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
-        (PolicyGateGrader("policy", config=GraderConfig(role=GraderRole.MUST_PASS)), 0.1),
+        # Gates — any failure fails the trial
+        (PipelineCompletionGrader("completion", config=GraderConfig(policy=EvalPolicy.GATE)), 0.1),
+        (PolicyGateGrader("policy", config=GraderConfig(policy=EvalPolicy.GATE)), 0.1),
         # Quality — score contributors
-        (EndToEndQualityGrader("quality", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.5),
-        (ExecutionQualityGrader("exec_quality", config=GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)), 0.3),
+        (EndToEndQualityGrader("quality", config=GraderConfig(policy=EvalPolicy.TRACK)), 0.5),
+        (ExecutionQualityGrader("exec_quality", config=GraderConfig(policy=EvalPolicy.TRACK)), 0.3),
     ],
 )
 ```
