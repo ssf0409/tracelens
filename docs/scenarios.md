@@ -4,6 +4,10 @@ TraceLens is built for agent evaluation workflows where you need to inspect
 what happened, score the outcome, compare it against a baseline, and gate CI
 when reliability regresses.
 
+If you are comparing TraceLens to hosted tracing, prompt-management, benchmark,
+or RAG-eval tools, read [TraceLens vs Adjacent Tools](comparison.md) after this
+page.
+
 ## Good Fits
 
 ### Task-Level Agent Evaluation

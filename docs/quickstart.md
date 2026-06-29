@@ -78,7 +78,7 @@ from tracelens import SimpleAdapter
 adapter = SimpleAdapter(math_agent)
 ```
 
-For complex agents, subclass `AgentAdapter` directly — see the [User Guide](user-guide.md#agent-adapters).
+For complex agents, subclass `AgentAdapter` directly — see the [User Guide](user-guide.md).
 
 ## 4. Write a Grader
 
