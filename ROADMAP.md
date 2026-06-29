@@ -28,52 +28,51 @@ TraceLens should not become:
 When a request could be solved by either a core feature or a recipe, prefer the
 recipe until at least two downstream projects need the same abstraction.
 
-## Near-Term Priorities
+## Strategic Focus Areas
 
-### P0: Make Direction Legible
+The issue tracker is the source of truth for current priority, ownership, and
+acceptance criteria. This roadmap keeps the longer-lived direction stable.
 
-- Publish this roadmap and keep it linked from README and contributing docs.
-- Add a positioning page that explains when to choose TraceLens versus adjacent
-  tools.
-- Keep GitHub Releases, PyPI, docs, and changelog in sync for every release.
-- Give contributors a small set of well-scoped first issues.
+### Direction And Positioning
 
-### P1: Reduce Time To First Useful Eval
+TraceLens should make its scope obvious before users install it. The docs should
+explain when to use TraceLens, when to choose adjacent tools, and how the project
+decides whether a feature belongs in core or in a recipe.
 
-- `tracelens init`: scaffold a runnable eval directory with tasks, adapter,
-  grader, README, and CI template.
-- CSV and JSONL task loaders: let users bring existing eval data without
-  converting it by hand. Keep optional HuggingFace support as a separate,
-  optional-dependency follow-up.
-- `tracelens compare`: compare two saved runs with bootstrap significance from
-  the CLI.
+### Fast First Evaluation
 
-### P2: Recipes, Not Core Dependencies
+New users should get from an empty repo to a useful local eval quickly. The
+project should continue improving scaffolding, CLI affordances, examples, and
+CI templates until a first eval feels routine.
 
-- Integration cookbook for LangChain, LangGraph, and OpenAI SDK agents as
-  examples, with lazy imports and no new core dependencies.
-- OpenTelemetry trace import example that turns spans into TraceLens
-  transcripts for regression reporting.
-- More public benchmark packs that demonstrate specific evaluation patterns
-  without making those domains part of the framework.
+### Data Portability
 
-## Current Good First Issues
+TraceLens should accept common local eval data formats without pulling heavy
+optional dependencies into core. JSON stays the native format; CSV and JSONL are
+good core candidates; hosted datasets and framework-specific loaders should
+start as optional integrations or recipes.
 
-These are scoped so a new contributor can make a useful change without owning a
-large redesign:
+### Comparison And Regression Workflows
 
-| Issue | Why it matters | Expected scope |
-|---|---|---|
-| [#25 `tracelens init`](https://github.com/ssf0409/tracelens/issues/25) | Fast first success for new users. | Add one CLI command, template files, and CLI tests. |
-| [#28 `tracelens compare`](https://github.com/ssf0409/tracelens/issues/28) | Exposes existing statistics as a daily workflow. | Wrap existing comparison helpers; no new statistical model. |
-| [#29 positioning page](https://github.com/ssf0409/tracelens/issues/29) | Helps users self-select before investing time. | Docs-only, fair comparison by capability. |
+The statistical value in TraceLens should be visible from the CLI and CI, not
+only from Python APIs. Baseline comparison, bootstrap significance, and
+pass@k/pass^k reporting should be easy to run and hard to misread.
 
-If you are new to the project, start with [CONTRIBUTING.md](CONTRIBUTING.md) and
-run `make verify` before opening a PR.
+### Recipe Ecosystem
 
-[#27 CSV/JSONL task loaders](https://github.com/ssf0409/tracelens/issues/27)
-is also open, but it is already in review through PR #31 and needs a narrower
-CSV/JSONL-first slice before it becomes a good first PR again.
+Integrations with LangChain, LangGraph, OpenAI SDK agents, OpenTelemetry traces,
+RAG workflows, and public benchmark packs should live as examples first. Promote
+shared code into core only after multiple downstream users prove the shape.
+
+## Contributor On-Ramp
+
+New contributors should start with scoped issues that have clear acceptance
+criteria and a small review surface. Use the GitHub `good first issue` label for
+the current queue; keep priority labels, milestones, and project-board fields in
+GitHub rather than baking them into this file.
+
+Before opening a PR, read [CONTRIBUTING.md](CONTRIBUTING.md), comment on the
+issue with your intended approach, and run `make verify`.
 
 ## Release Hygiene
 

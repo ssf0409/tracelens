@@ -18,8 +18,7 @@ proposing a broad new abstraction.
 ## First PR Path
 
 1. Pick a scoped issue from the
-   [roadmap good-first-issue table](ROADMAP.md#current-good-first-issues) or
-   the GitHub `good first issue` label.
+   GitHub `good first issue` label.
 2. Comment on the issue with the approach you plan to take.
 3. Keep the PR to one behavior change. If you discover a larger architecture
    cleanup, call it out in the PR body instead of expanding silently.
