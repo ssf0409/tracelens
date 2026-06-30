@@ -82,7 +82,8 @@ Every release should leave these channels agreeing with each other:
 - The git tag exists on GitHub.
 - PyPI shows the same latest version.
 - GitHub Releases has a release for the tag.
-- The docs build without warnings.
+- `mkdocs build --strict` exits cleanly with no project link or rendering
+  warnings.
 
 If any channel drifts, fix that before starting more feature work. Trust is a
 feature.
