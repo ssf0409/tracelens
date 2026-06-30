@@ -2,12 +2,28 @@
 
 Thanks for your interest in improving TraceLens. This project aims to be a *trustworthy* evaluation framework for autonomous AI agents, so contributions that improve reproducibility, reliability, or noise-awareness are especially welcome.
 
+TraceLens follows a **thin core, rich recipes** direction. The framework owns
+evaluation primitives, statistics, baselines, reports, and calibration. Domain
+truth, provider-specific integrations, hosted dashboards, and rollout policy
+belong in downstream projects or examples. Read [ROADMAP.md](ROADMAP.md) before
+proposing a broad new abstraction.
+
 ## Ways to contribute
 
 - **Bug reports** — open an issue with a minimal repro (the smaller, the better).
 - **Feature requests** — describe the agent/eval scenario you're trying to support before proposing an API.
 - **Pull requests** — see below.
 - **Benchmark contributions** — new task packs for public benchmarks under `benchmarks/` are very welcome.
+
+## First PR Path
+
+1. Pick a scoped issue from the
+   GitHub `good first issue` label.
+2. Comment on the issue with the approach you plan to take.
+3. Keep the PR to one behavior change. If you discover a larger architecture
+   cleanup, call it out in the PR body instead of expanding silently.
+4. Add or update tests for every behavior change.
+5. Run `make verify` before requesting review.
 
 ## Development setup
 
@@ -56,6 +72,9 @@ checkout.
 4. **Update public API exports deliberately.** Adding something to `src/tracelens/__init__.py` is a stability promise. If you're unsure whether a symbol belongs in the public surface, leave it at the submodule path.
 5. **Document "why" in the PR body.** Commit messages should explain the user-visible behavior change; PR bodies should explain the motivation (what problem does this solve? what alternatives were considered?).
 6. **If you modify regression / baseline logic, add a backwards-compat note** to `CHANGELOG.md`. Baselines are a stability boundary.
+7. **Prefer recipes before core abstractions.** If only one downstream project
+   needs the behavior, start with docs or examples. Promote it into core only
+   after the shape is proven.
 
 ## Commit style
 

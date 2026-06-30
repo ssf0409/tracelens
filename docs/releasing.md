@@ -71,7 +71,22 @@ No PyPI API token is required when trusted publishing is configured correctly.
 
 6. Watch the GitHub Actions release workflow.
 
-7. After PyPI publish completes, smoke test from a clean environment:
+7. Create the matching GitHub Release for the tag. Use the changelog section as
+   the release notes so GitHub and PyPI tell the same story:
+
+   ```bash
+   gh release create vX.Y.Z --title "vX.Y.Z" --notes-file /tmp/tracelens-vX.Y.Z.md
+   ```
+
+8. Verify all public release channels agree:
+
+   ```bash
+   python -m pip index versions tracelens
+   gh release list --limit 5
+   git ls-remote --tags origin "vX.Y.Z"
+   ```
+
+9. After PyPI publish completes, smoke test from a clean environment:
 
    ```bash
    python -m venv /tmp/tracelens-release-smoke
