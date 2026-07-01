@@ -2,6 +2,9 @@
 
 Get a working evaluation pipeline running from scratch.
 
+Want the files generated for you first? Run `tracelens init .`, then come back
+to this page when you want to understand or replace each piece by hand.
+
 ## Prerequisites
 
 - Python 3.11+

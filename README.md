@@ -59,6 +59,18 @@ sample md  : examples/reports/hello_world_report.md
 
 The checked-in [sample report](examples/reports/hello_world_report.md) shows the concrete pieces a real eval needs: tasks, trials, pass@k, pass^k, graders, baseline comparison, regression result, and CI summary.
 
+To start inside your own project:
+
+```bash
+tracelens init .
+tracelens run \
+  --eval-set eval/tasks.json \
+  --adapter eval.adapter.StarterAdapter \
+  --graders eval.grader.StarterGrader
+```
+
+`tracelens init` writes user-owned starter files under `eval/` plus a GitHub Actions workflow. It refuses to overwrite generated files unless you pass `--force`.
+
 ## What an eval looks like
 
 Four pieces — Task, Adapter, Grader, Runner — and a report:
