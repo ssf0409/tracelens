@@ -15,6 +15,7 @@ from pathlib import Path
 from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
 from tracelens.baselines.manager import BaselineManager
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
+from tracelens.cli.init import add_init_parser, cmd_init
 from tracelens.cli.sample import add_sample_parser, cmd_sample
 from tracelens.core.task import EvalSet, JSONTaskLoader
 from tracelens.core.trial import TrialBatch
@@ -118,6 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
     # -- tracelens sample --
     add_sample_parser(subparsers)
 
+    # -- tracelens init --
+    add_init_parser(subparsers)
+
     # -- tracelens calibrate (and its 'reconcile' alias) --
     add_calibrate_parser(subparsers)
     add_calibrate_parser(subparsers, name="reconcile")
@@ -151,6 +155,10 @@ def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute the 'run' subcommand."""
+    cwd = str(Path.cwd())
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
     # Load eval set
     try:
         loader = JSONTaskLoader()
@@ -287,6 +295,8 @@ def main() -> None:
         sys.exit(cmd_report(args))
     elif args.command == "sample":
         sys.exit(cmd_sample(args))
+    elif args.command == "init":
+        sys.exit(cmd_init(args))
     elif args.command in ("calibrate", "reconcile"):
         sys.exit(cmd_calibrate(args))
     else:

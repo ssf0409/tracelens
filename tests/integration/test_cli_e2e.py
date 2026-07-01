@@ -7,12 +7,13 @@ mocking any internals.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 from tracelens.baselines.manager import BaselineManager, TaskBaseline
-from tracelens.cli.main import build_parser, cmd_report, cmd_run
+from tracelens.cli.main import build_parser, cmd_report, cmd_run, main
 from tracelens.core.grader import CodeGrader
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, Transcript, TranscriptStep
@@ -80,6 +81,14 @@ def tasks_file(tmp_path: Path) -> Path:
 def _run_cli(*argv: str) -> int:
     args = build_parser().parse_args(list(argv))
     return cmd_run(args)
+
+
+def _run_main(monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
+    monkeypatch.setattr(sys, "argv", ["tracelens", *argv])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    code = exc_info.value.code
+    return 0 if code is None else int(code)
 
 
 def test_run_produces_output_report_and_trials(
@@ -219,3 +228,62 @@ def test_progress_flag_prints_to_stderr(
 
     err = capsys.readouterr().err
     assert "2/2 trials complete" in err
+
+
+def test_init_scaffolds_a_runnable_eval_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "starter"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    assert _run_main(monkeypatch, "init", ".") == 0
+
+    expected_files = {
+        "eval/__init__.py",
+        "eval/tasks.json",
+        "eval/adapter.py",
+        "eval/grader.py",
+        "eval/README.md",
+        ".github/workflows/eval.yml",
+    }
+    assert expected_files == {
+        str(path.relative_to(project))
+        for path in project.rglob("*")
+        if path.is_file()
+    }
+
+    args = build_parser().parse_args([
+        "run",
+        "--eval-set", "eval/tasks.json",
+        "--adapter", "eval.adapter.StarterAdapter",
+        "--graders", "eval.grader.StarterGrader",
+        "--output", "eval/results/results.json",
+        "--report", "eval/results/report.md",
+        "--save-trials", "eval/results/trials.json",
+    ])
+
+    assert cmd_run(args) == 0
+    assert json.loads((project / "eval/results/results.json").read_text())[
+        "overall_pass_rate"
+    ] == 1.0
+
+
+def test_init_refuses_to_overwrite_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "starter"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    assert _run_main(monkeypatch, "init", ".") == 0
+    adapter = project / "eval/adapter.py"
+    adapter.write_text("# user edit\n")
+
+    assert _run_main(monkeypatch, "init", ".") == 1
+    assert adapter.read_text() == "# user edit\n"
+
+    assert _run_main(monkeypatch, "init", ".", "--force") == 0
+    assert "class StarterAdapter" in adapter.read_text()

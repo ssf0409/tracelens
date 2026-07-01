@@ -76,7 +76,31 @@ four-piece skeleton.
 
 ---
 
-## 3. The Four-Piece Skeleton
+## 3. Scaffold Your Own Eval
+
+When you are ready to start in your own repo, generate a runnable starter suite:
+
+```bash
+tracelens init .
+tracelens run \
+  --eval-set eval/tasks.json \
+  --adapter eval.adapter.StarterAdapter \
+  --graders eval.grader.StarterGrader \
+  --output eval/results/results.json \
+  --report eval/results/report.md \
+  --save-trials eval/results/trials.json
+```
+
+This writes `eval/tasks.json`, `eval/adapter.py`, `eval/grader.py`, an
+`eval/README.md`, and `.github/workflows/eval.yml`. The generated adapter and
+grader pass immediately so you can replace one piece at a time.
+
+Run `tracelens init . --force` only when you want to overwrite the generated
+files.
+
+---
+
+## 4. The Four-Piece Skeleton
 
 Every TraceLens run combines four pieces:
 
@@ -92,7 +116,7 @@ ready to write your own eval.
 
 ---
 
-## 4. The Example Ladder
+## 5. The Example Ladder
 
 The examples in `examples/` go from trivial to production-grade,
 each adding exactly one new concept. Read them in order:
@@ -112,12 +136,13 @@ output. Copy the one that matches your problem and edit from there.
 
 ---
 
-## 5. Where to Go Next
+## 6. Where to Go Next
 
 Your immediate next step is to write your own eval:
 
+- **`tracelens init .`** — create a runnable starter suite in your repo.
 - **[Build Your First Eval](./quickstart.md)** — author your own `Task`, custom
-  grader, and CLI workflow (the natural step 2 after this guide).
+  grader, and CLI workflow when you want to understand each file by hand.
 - **[Core Concepts & Glossary](./concepts.md)** — the full pipeline and every
   object (`Transcript`, `Outcome`, `Trial`, `TrialBatch`) on one page.
 
@@ -145,7 +170,7 @@ When your agent is real and your eval set has grown, move on to:
 
 ---
 
-## 6. The 60-Second Mental Model
+## 7. The 60-Second Mental Model
 
 TraceLens is opinionated about two things, and ergonomic about
 everything else:

@@ -8,6 +8,13 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **`tracelens init`.** New CLI command that scaffolds a runnable starter
+  `eval/` suite, including tasks, adapter, grader, README, and a GitHub Actions
+  workflow. The command refuses to overwrite generated files unless `--force`
+  is provided.
+
 ## [0.3.0] - 2026-06-10
 
 Hardening release: the grading path now honors its own configuration, harness
