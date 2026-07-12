@@ -29,24 +29,24 @@ from tracelens.execution.agent_adapter import AgentAdapter
 logger = logging.getLogger(__name__)
 
 
-# Exceptions that the runner treats as infrastructure failures (as opposed
-# to task-level failures). Adapters can also raise ``InfraError`` explicitly
-# for cases the runner can't infer from the exception type.
+# Default exceptions that the runner treats as infrastructure failures (as
+# opposed to task-level failures). Adapters can also raise ``InfraError``
+# explicitly for cases the runner can't infer from the exception type.
 #
-# The list is intentionally conservative: we only include errors that are
-# almost always caused by the runtime (OOM, network, OS-level resource
-# issues). Arbitrary exceptions stay classified as FAILED so a buggy agent
-# doesn't silently inflate the infra-error rate and mask real regressions.
-_INFRA_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
+# The default is intentionally conservative: only errors that are almost
+# always caused by the runtime (OOM, network). Broad classes like OSError
+# are excluded because their subclasses (FileNotFoundError, PermissionError)
+# are usually agent bugs — counting those as infra would silently inflate
+# the infra-error rate and mask real regressions. Which types count as
+# infra is downstream policy: extend the set per project via
+# ``RunnerConfig.infra_exception_types`` (or ``--infra-exceptions`` on the
+# CLI), e.g. ``DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)`` for evals on
+# shared runners where disk-full is an environment problem.
+DEFAULT_INFRA_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
     InfraError,
     MemoryError,
     ConnectionError,
 )
-
-
-def _is_infra_exception(exc: BaseException) -> bool:
-    """Return True if the exception should classify the trial as INFRA_ERROR."""
-    return isinstance(exc, _INFRA_EXCEPTION_TYPES)
 
 
 @dataclass
@@ -57,6 +57,15 @@ class RunnerConfig:
     max_concurrency: int = 5
     timeout_seconds: float = 300.0
     fail_fast: bool = False
+
+    # Exception types classified as INFRA_ERROR instead of FAILED. The
+    # conservative default is DEFAULT_INFRA_EXCEPTION_TYPES; extend it when
+    # your environment makes broader classes unambiguous infra, e.g.
+    # ``DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)``. The runner's own
+    # budget timeout is classified TIMEOUT before this set is consulted.
+    infra_exception_types: tuple[type[BaseException], ...] = (
+        DEFAULT_INFRA_EXCEPTION_TYPES
+    )
 
     # Called as (completed_trials, total_trials) after each trial finishes.
     progress_callback: Callable[[int, int], None] | None = None
@@ -190,7 +199,7 @@ class EvaluationRunner:
                 await self.adapter.setup(task)
             except Exception as exc:
                 setup_failed = True
-                is_infra = _is_infra_exception(exc)
+                is_infra = isinstance(exc, self.config.infra_exception_types)
                 trial.status = (
                     TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                 )
@@ -227,7 +236,7 @@ class EvaluationRunner:
                         self.config.timeout_seconds,
                     )
                 except Exception as exc:
-                    is_infra = _is_infra_exception(exc)
+                    is_infra = isinstance(exc, self.config.infra_exception_types)
                     trial.status = (
                         TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                     )

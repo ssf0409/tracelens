@@ -8,7 +8,11 @@ from tracelens.core.task import EvalSet, Task
 from tracelens.core.transcript import Transcript
 from tracelens.core.trial import InfraError, TrialStatus
 from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
-from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.execution.runner import (
+    DEFAULT_INFRA_EXCEPTION_TYPES,
+    EvaluationRunner,
+    RunnerConfig,
+)
 
 
 class _PassGrader(CodeGrader):
@@ -419,3 +423,73 @@ class TestInfraErrorClassification:
         assert batch.infra_error_rate == 0.5
         # The successful ones still pass-through to grading.
         assert batch.passed_count == 2
+
+
+class TestConfigurableInfraClassification:
+    """Which exception types count as infra is downstream policy — one
+    team's OSError (disk full on a shared runner) is another team's agent
+    bug. RunnerConfig.infra_exception_types makes the set explicit and
+    extensible instead of a hard-coded module constant."""
+
+    async def test_oserror_is_task_failure_by_default(self):
+        """The default set stays conservative: OSError subclasses like
+        FileNotFoundError are usually agent bugs, so they must not
+        silently inflate the infra-error rate."""
+        async def disk_full(input_data: dict) -> dict:
+            raise OSError(28, "No space left on device")
+
+        runner = EvaluationRunner(SimpleAdapter(disk_full), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.FAILED
+        assert batch.infra_error_count == 0
+
+    async def test_extended_types_classify_oserror_as_infra(self):
+        async def disk_full(input_data: dict) -> dict:
+            raise OSError(28, "No space left on device")
+
+        config = RunnerConfig(
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)
+        )
+        runner = EvaluationRunner(SimpleAdapter(disk_full), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
+        assert batch.infra_error_rate == 1.0
+
+    async def test_extended_types_apply_to_setup_failures(self):
+        class _OSErrorSetup(AgentAdapter):
+            async def setup(self, task: Task) -> None:
+                raise OSError("sandbox mount failed")
+
+            async def run(self, task: Task) -> Transcript:
+                return Transcript(task_id=task.task_id, final_output={})
+
+        config = RunnerConfig(
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)
+        )
+        runner = EvaluationRunner(_OSErrorSetup(), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
+
+    async def test_runner_timeout_still_wins_over_extended_types(self):
+        """TimeoutError is a subclass of OSError on Python >= 3.10; the
+        runner's own budget timeout must stay classified TIMEOUT even
+        when OSError is configured as infra."""
+        async def too_slow(input_data: dict) -> dict:
+            await asyncio.sleep(1.0)
+            return {}
+
+        config = RunnerConfig(
+            timeout_seconds=0.05,
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,),
+        )
+        runner = EvaluationRunner(SimpleAdapter(too_slow), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.TIMEOUT
+
+    async def test_default_constant_is_conservative_and_public(self):
+        assert DEFAULT_INFRA_EXCEPTION_TYPES == (InfraError, MemoryError, ConnectionError)
+        assert RunnerConfig().infra_exception_types == DEFAULT_INFRA_EXCEPTION_TYPES

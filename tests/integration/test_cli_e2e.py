@@ -439,3 +439,61 @@ def test_baselines_file_without_baseline_check_warns(
 
     assert exit_code == 0
     assert "no effect without --baseline-check" in capsys.readouterr().err
+
+
+class DiskFullAdapter(AgentAdapter):
+    """Raises OSError; loadable by dotted path from the CLI."""
+
+    async def run(self, task: Task) -> Transcript:
+        raise OSError(28, "No space left on device")
+
+
+def test_infra_exceptions_flag_extends_classification(
+    tasks_file: Path, tmp_path: Path
+) -> None:
+    """--infra-exceptions lets CI declare which exception types are infra
+    (downstream policy), so those failures land in infra_error_rate
+    instead of masquerading as agent failures."""
+    out = tmp_path / "out.json"
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", "tests.integration.test_cli_e2e.DiskFullAdapter",
+        "--graders", GRADER,
+        "--infra-exceptions", "builtins.OSError",
+        "--output", str(out),
+    )
+
+    assert exit_code == 0
+    assert json.loads(out.read_text())["infra_error_rate"] == 1.0
+
+
+def test_infra_exceptions_flag_rejects_non_exception_types(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--infra-exceptions", "builtins.str",
+    )
+
+    assert exit_code == 2
+    assert "not an exception type" in capsys.readouterr().err
+
+
+def test_infra_exceptions_flag_rejects_unimportable_path(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--infra-exceptions", "no.such.Error",
+    )
+
+    assert exit_code == 2
+    assert "no.such.Error" in capsys.readouterr().err

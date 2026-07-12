@@ -40,12 +40,15 @@ class InfraError(Exception):
     which measured infra error rates dropping from 5.8% at strict enforcement
     to 0.5% uncapped).
 
-    When the runner catches this exception (or other known-infra exception
-    types like ``MemoryError``, ``ConnectionError``, ``TimeoutError`` from
-    the network stack, or ``OSError``), the trial's status is set to
-    ``TrialStatus.INFRA_ERROR`` rather than ``FAILED``, and the infra error
-    rate is surfaced separately in reports so you can decide whether a
-    regression is real or a noise artefact.
+    When the runner catches this exception — or ``MemoryError`` /
+    ``ConnectionError``, the conservative default set — the trial's status
+    is set to ``TrialStatus.INFRA_ERROR`` rather than ``FAILED``, and the
+    infra error rate is surfaced separately in reports so you can decide
+    whether a regression is real or a noise artefact. Broader classes
+    (``OSError``, custom rate-limit errors, ...) are downstream policy:
+    add them via ``RunnerConfig.infra_exception_types`` or the CLI's
+    ``--infra-exceptions``. The runner's own budget timeout is always
+    classified ``TrialStatus.TIMEOUT``, not infra.
 
     Example:
         class MyAdapter(AgentAdapter):

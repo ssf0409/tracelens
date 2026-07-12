@@ -21,7 +21,11 @@ from tracelens.core.task import EvalSet, JSONTaskLoader
 from tracelens.core.trial import TrialBatch
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
-from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.execution.runner import (
+    DEFAULT_INFRA_EXCEPTION_TYPES,
+    EvaluationRunner,
+    RunnerConfig,
+)
 from tracelens.reporting.generator import ReportData, ReportGenerator
 
 logger = logging.getLogger(__name__)
@@ -112,6 +116,15 @@ def build_parser() -> argparse.ArgumentParser:
             "already-completed trials"
         ),
     )
+    run_parser.add_argument(
+        "--infra-exceptions", default=None, nargs="+",
+        help=(
+            "Dotted paths of extra exception types to classify as "
+            "INFRA_ERROR instead of FAILED (e.g. builtins.OSError "
+            "myproject.errors.RateLimitError). Extends the conservative "
+            "default set (InfraError, MemoryError, ConnectionError)"
+        ),
+    )
 
     # -- tracelens report --
     report_parser = subparsers.add_parser(
@@ -141,6 +154,34 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _severity_from_str(s: str) -> RegressionSeverity:
     return RegressionSeverity(s)
+
+
+def _load_infra_exceptions(
+    paths: list[str],
+) -> tuple[type[BaseException], ...] | None:
+    """Load --infra-exceptions dotted paths into exception types.
+
+    Returns None (with a message on stderr) if any path fails to import
+    or names something that isn't an exception type.
+    """
+    types: list[type[BaseException]] = []
+    for path in paths:
+        try:
+            cls = load_class(path)
+        except (ImportError, AttributeError) as exc:
+            print(
+                f"Error: could not load infra exception '{path}': {exc}",
+                file=sys.stderr,
+            )
+            return None
+        if not (isinstance(cls, type) and issubclass(cls, BaseException)):
+            print(
+                f"Error: '{path}' is not an exception type",
+                file=sys.stderr,
+            )
+            return None
+        types.append(cls)
+    return tuple(types)
 
 
 def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]]:
@@ -192,6 +233,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
 
+    # Resolve --infra-exceptions before running (usage error -> exit 2)
+    infra_exception_types = DEFAULT_INFRA_EXCEPTION_TYPES
+    if args.infra_exceptions:
+        extra_types = _load_infra_exceptions(args.infra_exceptions)
+        if extra_types is None:
+            return 2
+        infra_exception_types = infra_exception_types + extra_types
+
     # Load eval set
     try:
         loader = JSONTaskLoader()
@@ -238,6 +287,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         num_runs=args.num_runs,
         max_concurrency=args.max_concurrency,
         timeout_seconds=args.timeout,
+        infra_exception_types=infra_exception_types,
         progress_callback=_print_progress if args.progress else None,
         checkpoint_path=args.checkpoint,
     )
