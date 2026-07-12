@@ -43,9 +43,13 @@ class MetricRegression(BaseModel):
     delta: float
     delta_percent: float
 
-    # Statistical significance
-    p_value: float
+    # Statistical significance. p_value is None when no valid test exists
+    # (zero variance on both sides of the comparison) — never a fabricated
+    # 0.0. Such regressions carry insufficient_data=True and their severity
+    # rests on the delta thresholds alone.
+    p_value: float | None
     is_significant: bool
+    insufficient_data: bool = False
 
     severity: RegressionSeverity
 
@@ -149,9 +153,14 @@ class RegressionReport(BaseModel):
             lines.append("")
 
             for reg in self.regressions:
+                notes = ""
+                if reg.insufficient_data:
+                    notes += " [insufficient samples for significance; severity from thresholds]"
+                if reg.within_noise_band:
+                    notes += " [within infra-noise band; not blocking]"
                 lines.append(
                     f"  {reg.metric_name}: {reg.baseline_mean:.4f} -> "
-                    f"{reg.current_mean:.4f} ({reg.delta_percent:+.1f}%)"
+                    f"{reg.current_mean:.4f} ({reg.delta_percent:+.1f}%){notes}"
                 )
         else:
             lines.append("No regressions detected")
@@ -257,9 +266,14 @@ class RegressionDetector:
                 else:
                     is_regression = regression.delta > 0
 
-                if is_regression and regression.is_significant:
+                # Threshold downgrade for degenerate samples: when no valid
+                # significance test exists, the delta thresholds alone decide
+                # — dropping the regression entirely would let a 1.0 -> 0.0
+                # pass-rate flip sail through the gate unreported.
+                reportable = regression.is_significant or regression.insufficient_data
+                if is_regression and reportable:
                     regressions.append(regression)
-                elif not is_regression and regression.is_significant:
+                elif not is_regression and reportable:
                     improvements.append(regression)
 
         # Determine overall severity
@@ -303,14 +317,19 @@ class RegressionDetector:
         if abs(delta_percent) < self.min_delta_percent:
             return None
 
-        # Statistical test
+        # Statistical test. p_value stays None when no valid test exists —
+        # zero variance on both sides leaves nothing to test against. The
+        # regression is then reported on its delta thresholds alone and
+        # flagged insufficient_data, never given a fabricated p=0.0.
+        p_value: float | None
         if len(current_values) >= 2 and baseline_std > 0:
-            # One-sample t-tests are undefined for zero-variance samples.
-            # Return the same significance outcome directly and avoid
-            # scipy's precision-loss RuntimeWarning.
+            # One-sample t-tests are undefined for zero-variance samples;
+            # fall back to a z-test against the known baseline spread and
+            # avoid scipy's precision-loss RuntimeWarning.
             current_std = float(np.std(current_values, ddof=1))
             if np.isclose(current_std, 0.0, atol=1e-12):
-                p_value = 0.0 if delta != 0 else 1.0
+                z = abs(delta) / (baseline_std / np.sqrt(len(current_values)))
+                p_value = float(2 * (1 - stats.norm.cdf(z)))
             else:
                 _t_stat, p_value_result = stats.ttest_1samp(current_values, baseline_value)
                 p_value = float(p_value_result)
@@ -319,18 +338,18 @@ class RegressionDetector:
             current_std = float(np.std(current_values))
             if current_std > 0:
                 z = abs(delta) / current_std
-                p_value = 2 * (1 - stats.norm.cdf(z))
+                p_value = float(2 * (1 - stats.norm.cdf(z)))
             else:
-                p_value = 0.0 if delta != 0 else 1.0
-        else:
+                p_value = None
+        elif baseline_std > 0:
             # Single sample, use z-test with baseline std
-            if baseline_std > 0:
-                z = abs(delta) / baseline_std
-                p_value = 2 * (1 - stats.norm.cdf(z))
-            else:
-                p_value = 0.0 if delta != 0 else 1.0
+            z = abs(delta) / baseline_std
+            p_value = float(2 * (1 - stats.norm.cdf(z)))
+        else:
+            p_value = None
 
-        is_significant = p_value < self.significance_level
+        insufficient_data = p_value is None
+        is_significant = p_value is not None and p_value < self.significance_level
 
         # Determine severity based on percentage change
         abs_pct = abs(delta_percent)
@@ -351,6 +370,7 @@ class RegressionDetector:
             delta_percent=delta_percent,
             p_value=p_value,
             is_significant=is_significant,
+            insufficient_data=insufficient_data,
             severity=severity,
         )
 
@@ -365,9 +385,14 @@ class RegressionDetector:
         if regressions:
             lines.append(f"REGRESSIONS DETECTED ({len(regressions)} metrics):")
             for r in regressions:
+                p_str = (
+                    f"p={r.p_value:.4f}"
+                    if r.p_value is not None
+                    else "p=n/a, insufficient samples"
+                )
                 lines.append(
                     f"  - {r.metric_name}: {r.baseline_mean:.4f} -> {r.current_mean:.4f} "
-                    f"({r.delta_percent:+.1f}%, p={r.p_value:.4f}) [{r.severity.value}]"
+                    f"({r.delta_percent:+.1f}%, {p_str}) [{r.severity.value}]"
                 )
         else:
             lines.append("No significant regressions detected.")

@@ -63,11 +63,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--baseline-check", action="store_true",
-        help="Check results against baselines",
+        help=(
+            "Check results against baselines. Requires --baselines-file; "
+            "a missing flag or file is a usage error (exit 2)"
+        ),
     )
     run_parser.add_argument(
         "--baselines-file", default=None,
         help="Path to baselines JSON file",
+    )
+    run_parser.add_argument(
+        "--require-baselines", action="store_true",
+        help=(
+            "Fail (exit 1) if any task in the eval set has no stored "
+            "baseline, instead of warning and skipping it"
+        ),
     )
     run_parser.add_argument(
         "--fail-on-regression", default="moderate",
@@ -155,6 +165,29 @@ def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute the 'run' subcommand."""
+    # Gate preflight — a misconfigured baseline check must fail before any
+    # eval time is spent, never silently skip (exit 2 = usage error, so CI
+    # can tell "misconfigured gate" apart from "gate blocked" exit 1).
+    if args.baseline_check and not args.baselines_file:
+        print(
+            "Error: --baseline-check requires --baselines-file; "
+            "refusing to run with a vacuously-passing gate",
+            file=sys.stderr,
+        )
+        return 2
+    if args.baseline_check and not Path(args.baselines_file).exists():
+        print(
+            f"Error: baselines file not found: {args.baselines_file}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.baselines_file and not args.baseline_check:
+        print(
+            "[tracelens] warning: --baselines-file has "
+            "no effect without --baseline-check",
+            file=sys.stderr,
+        )
+
     cwd = str(Path.cwd())
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
@@ -243,24 +276,49 @@ def cmd_run(args: argparse.Namespace) -> int:
     # CI summary to stdout
     print(gen.render_ci_summary(report))
 
-    # Baseline check
-    if args.baseline_check and args.baselines_file:
+    # Baseline check (--baselines-file presence already validated up top)
+    if args.baseline_check:
         manager = BaselineManager(args.baselines_file)
         detector = RegressionDetector()
 
         threshold = _severity_from_str(args.fail_on_regression)
 
-        has_blocking = False
+        checked = 0
+        skipped: list[str] = []
+        blocking = 0
         for task_summary in report.task_summaries:
             baseline = manager.get_baseline(task_summary.task_id)
-            if baseline:
-                current_results = _per_trial_results(batch, task_summary.task_id)
-                reg_report = detector.compare(baseline, current_results)
-                if reg_report.should_block_ci(threshold):
-                    print(reg_report.to_ci_output())
-                    has_blocking = True
+            if baseline is None:
+                skipped.append(task_summary.task_id)
+                print(
+                    f"[tracelens] warning: no baseline for task "
+                    f"'{task_summary.task_id}' — skipped in baseline check",
+                    file=sys.stderr,
+                )
+                continue
+            checked += 1
+            current_results = _per_trial_results(batch, task_summary.task_id)
+            reg_report = detector.compare(baseline, current_results)
+            if reg_report.should_block_ci(threshold):
+                print(reg_report.to_ci_output())
+                blocking += 1
 
-        if has_blocking:
+        # A gate that prints nothing on success is indistinguishable from
+        # a gate that never ran — always say what was checked.
+        print(
+            f"[tracelens] Baseline check: {checked} checked, "
+            f"{len(skipped)} skipped (no baseline), "
+            f"{blocking} blocking regression(s)"
+        )
+
+        if skipped and args.require_baselines:
+            print(
+                f"Error: --require-baselines set but {len(skipped)} task(s) "
+                f"have no baseline: {', '.join(skipped)}",
+                file=sys.stderr,
+            )
+            return 1
+        if blocking:
             return 1
 
     return 0

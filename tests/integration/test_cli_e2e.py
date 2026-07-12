@@ -287,3 +287,155 @@ def test_init_refuses_to_overwrite_without_force(
 
     assert _run_main(monkeypatch, "init", ".", "--force") == 0
     assert "class StarterAdapter" in adapter.read_text()
+
+
+# --- Gate integrity: the baseline check must fail loudly, never silently ---
+
+
+def test_baseline_check_without_baselines_file_errors_before_running(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--baseline-check with no --baselines-file is a usage error (exit 2),
+    caught before any eval time is spent — not a silent skip."""
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+    )
+
+    assert exit_code == 2
+    assert EchoAdapter.run_count == 0
+    assert "--baselines-file" in capsys.readouterr().err
+
+
+def test_baseline_check_with_missing_baselines_file_errors_before_running(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "nope" / "baselines.json"
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(missing),
+    )
+
+    assert exit_code == 2
+    assert EchoAdapter.run_count == 0
+    err = capsys.readouterr().err
+    assert "baselines file not found" in err
+    assert str(missing) in err
+
+
+def test_baseline_check_warns_and_counts_tasks_without_baseline(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A task with no stored baseline is skipped with a visible warning and
+    shows up in the gate summary — never a silent skip."""
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    baseline = TaskBaseline(task_id="t-pass")
+    baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=10)
+    baseline.add_metric(metric_name="mean_score", value=0.9, std=0.05, sample_size=10)
+    manager.set_baseline(baseline)
+    manager.save()
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "t-fail" in captured.err
+    assert "no baseline" in captured.err
+    assert "1 checked" in captured.out
+    assert "1 skipped (no baseline)" in captured.out
+
+
+def test_require_baselines_fails_when_any_task_has_no_baseline(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    baseline = TaskBaseline(task_id="t-pass")
+    baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=10)
+    baseline.add_metric(metric_name="mean_score", value=0.9, std=0.05, sample_size=10)
+    manager.set_baseline(baseline)
+    manager.save()
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+        "--require-baselines",
+    )
+
+    assert exit_code == 1
+    err = capsys.readouterr().err
+    assert "--require-baselines" in err
+    assert "t-fail" in err
+
+
+def test_gate_summary_printed_when_all_tasks_checked(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Even a fully-green gate says what it checked — a passing gate that
+    prints nothing is indistinguishable from a gate that never ran."""
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    for task_id, score in (("t-pass", 0.9), ("t-fail", 0.1)):
+        baseline = TaskBaseline(task_id=task_id)
+        baseline.add_metric(
+            metric_name="pass_rate",
+            value=1.0 if score >= 0.5 else 0.0,
+            std=0.05,
+            sample_size=10,
+        )
+        baseline.add_metric(
+            metric_name="mean_score", value=score, std=0.05, sample_size=10
+        )
+        manager.set_baseline(baseline)
+    manager.save()
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    assert exit_code == 0
+    assert "2 checked, 0 skipped (no baseline)" in capsys.readouterr().out
+
+
+def test_baselines_file_without_baseline_check_warns(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--baselines-file alone does nothing today; that must be visible."""
+    baselines = tmp_path / "baselines.json"
+    baselines.write_text("{}")
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baselines-file", str(baselines),
+    )
+
+    assert exit_code == 0
+    assert "no effect without --baseline-check" in capsys.readouterr().err
