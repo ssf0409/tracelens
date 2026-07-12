@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from tracelens.core._time import utc_now
+from tracelens.core.decision_spec import DecisionSpec
 from tracelens.statistics.inference import (
     compare_to_baseline_summary,
     estimate_metric,
@@ -143,6 +144,12 @@ class TaskBaseline(BaseModel):
     # For CANARY baselines, this is required and enforced
     fingerprint: str | None = None
     fingerprint_short: str | None = None
+
+    # Full DecisionSpec captured when the baseline was recorded. A
+    # fingerprint alone can detect a config mismatch but cannot diff the
+    # infra sections — storing the spec is what lets
+    # RegressionDetector.compare_with_specs() apply the infra-noise band.
+    decision_spec: DecisionSpec | None = None
 
     # Metric baselines
     metrics: dict[str, MetricBaseline] = Field(default_factory=dict)
@@ -424,6 +431,11 @@ class BaselineManager:
             promotion_policy=promotion_policy,
             fingerprint=data.get("fingerprint"),
             fingerprint_short=data.get("fingerprint_short"),
+            decision_spec=(
+                DecisionSpec.model_validate(data["decision_spec"])
+                if data.get("decision_spec")
+                else None
+            ),
             metrics=metrics,
             created_at=datetime.fromisoformat(data["created_at"])
             if "created_at" in data else utc_now(),

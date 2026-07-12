@@ -12,11 +12,14 @@ import logging
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
 from tracelens.baselines.manager import BaselineManager
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
 from tracelens.cli.init import add_init_parser, cmd_init
 from tracelens.cli.sample import add_sample_parser, cmd_sample
+from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.task import EvalSet, JSONTaskLoader
 from tracelens.core.trial import TrialBatch
 from tracelens.execution.agent_adapter import AgentAdapter
@@ -125,6 +128,23 @@ def build_parser() -> argparse.ArgumentParser:
             "default set (InfraError, MemoryError, ConnectionError)"
         ),
     )
+    run_parser.add_argument(
+        "--decision-spec", default=None,
+        help=(
+            "Path to a DecisionSpec JSON file describing this run's "
+            "configuration. Stamped onto transcripts and, together with a "
+            "baseline that carries its own spec, enables infra-noise-aware "
+            "regression comparison in --baseline-check"
+        ),
+    )
+    run_parser.add_argument(
+        "--noise-band", type=float, default=None,
+        help=(
+            "Absolute metric delta treated as within infra noise when "
+            "baseline and current infra configs differ (default: 0.03, "
+            "i.e. 3 percentage points on a 0-1 metric)"
+        ),
+    )
 
     # -- tracelens report --
     report_parser = subparsers.add_parser(
@@ -184,6 +204,18 @@ def _load_infra_exceptions(
     return tuple(types)
 
 
+def _spec_from_batch(batch: TrialBatch, task_id: str) -> DecisionSpec | None:
+    """Recover the current run's DecisionSpec from adapter-stamped transcripts.
+
+    Lets noise-aware comparison work without --decision-spec when the
+    adapter records its own runtime configuration.
+    """
+    for trial in batch.get_trials_for_task(task_id):
+        if trial.transcript is not None and trial.transcript.decision_spec is not None:
+            return trial.transcript.decision_spec
+    return None
+
+
 def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]]:
     """One metric sample per trial for regression detection.
 
@@ -241,6 +273,27 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 2
         infra_exception_types = infra_exception_types + extra_types
 
+    # Resolve --decision-spec before running (usage error -> exit 2)
+    decision_spec: DecisionSpec | None = None
+    if args.decision_spec:
+        spec_path = Path(args.decision_spec)
+        if not spec_path.exists():
+            print(
+                f"Error: --decision-spec file not found: {args.decision_spec}",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            decision_spec = DecisionSpec.model_validate(
+                json.loads(spec_path.read_text())
+            )
+        except (json.JSONDecodeError, ValidationError) as exc:
+            print(
+                f"Error: invalid --decision-spec file {args.decision_spec}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+
     # Load eval set
     try:
         loader = JSONTaskLoader()
@@ -293,7 +346,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     # Run evaluation
-    runner = EvaluationRunner(adapter, graders, config)
+    runner = EvaluationRunner(adapter, graders, config, decision_spec=decision_spec)
     batch = asyncio.run(runner.run(eval_set))
 
     # Generate report
@@ -329,7 +382,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Baseline check (--baselines-file presence already validated up top)
     if args.baseline_check:
         manager = BaselineManager(args.baselines_file)
-        detector = RegressionDetector()
+        detector = (
+            RegressionDetector(noise_band_absolute=args.noise_band)
+            if args.noise_band is not None
+            else RegressionDetector()
+        )
 
         threshold = _severity_from_str(args.fail_on_regression)
 
@@ -348,7 +405,26 @@ def cmd_run(args: argparse.Namespace) -> int:
                 continue
             checked += 1
             current_results = _per_trial_results(batch, task_summary.task_id)
-            reg_report = detector.compare(baseline, current_results)
+            current_spec = decision_spec or _spec_from_batch(
+                batch, task_summary.task_id
+            )
+            reg_report = detector.compare_with_specs(
+                baseline,
+                current_results,
+                baseline_spec=baseline.decision_spec,
+                current_spec=current_spec,
+            )
+            if reg_report.infra_config_mismatch:
+                diff = ", ".join(
+                    f"{key}: {b} -> {c}"
+                    for key, (b, c) in sorted(reg_report.infra_config_diff.items())
+                )
+                print(
+                    f"[tracelens] note: infra config mismatch vs baseline for "
+                    f"task '{task_summary.task_id}' ({diff}); regressions "
+                    f"within the {detector.noise_band_absolute} noise band "
+                    f"are flagged but not blocking"
+                )
             if reg_report.should_block_ci(threshold):
                 print(reg_report.to_ci_output())
                 blocking += 1

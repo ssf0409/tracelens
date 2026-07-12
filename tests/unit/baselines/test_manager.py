@@ -184,3 +184,35 @@ class TestBaselineManager:
 
         tasks = manager.list_tasks()
         assert "btc_backtest" in tasks
+
+
+class TestBaselineDecisionSpecRoundTrip:
+    """TaskBaseline must carry the DecisionSpec that produced it, so the
+    CLI gate can hand both specs to compare_with_specs() and apply the
+    infra-noise band. A fingerprint string alone can detect a mismatch
+    but cannot diff the infra sections."""
+
+    def test_decision_spec_survives_save_and_load(self, tmp_path):
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+        path = tmp_path / "baselines.json"
+        manager = BaselineManager(path)
+        baseline = TaskBaseline(
+            task_id="t1",
+            decision_spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)),
+        )
+        baseline.add_metric(
+            metric_name="mean_score", value=0.2, std=0.001, sample_size=10
+        )
+        manager.set_baseline(baseline)
+        manager.save()
+
+        reloaded = BaselineManager(path).get_baseline("t1")
+        assert reloaded is not None
+        assert reloaded.decision_spec is not None
+        assert reloaded.decision_spec.infra is not None
+        assert reloaded.decision_spec.infra.memory_hard_limit_mb == 2048
+
+    def test_decision_spec_defaults_to_none(self):
+        baseline = TaskBaseline(task_id="t1")
+        assert baseline.decision_spec is None

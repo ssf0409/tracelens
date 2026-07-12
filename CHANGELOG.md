@@ -14,6 +14,46 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   `eval/` suite, including tasks, adapter, grader, README, and a GitHub Actions
   workflow. The command refuses to overwrite generated files unless `--force`
   is provided.
+- **Loud CI gate.** The baseline check now always prints a gate summary
+  (`N checked, M skipped (no baseline), K blocking regression(s)`), warns
+  per task when a baseline is missing, and `--require-baselines` turns
+  missing baselines into a hard failure.
+- **Configurable infra classification.** `RunnerConfig.infra_exception_types`
+  (CLI: `--infra-exceptions`) extends which exception types are classified
+  `INFRA_ERROR` instead of `FAILED`. The default set
+  (`DEFAULT_INFRA_EXCEPTION_TYPES`) stays conservative: `InfraError`,
+  `MemoryError`, `ConnectionError`.
+- **Noise-aware gating from the CLI.** `TaskBaseline.decision_spec` stores
+  the full spec alongside the fingerprint, `--decision-spec` loads the
+  current run's spec (adapter-stamped transcripts work too), and the
+  baseline check now runs `compare_with_specs()` — so sub-noise-band
+  regressions under a mismatched infra config are flagged but not
+  blocking, with the infra diff printed. `--noise-band` tunes the band.
+
+### Changed
+
+- **Gate misconfiguration is now an error.** `tracelens run
+  --baseline-check` without `--baselines-file`, or with a nonexistent
+  baselines file, exits 2 before the eval runs instead of silently
+  skipping the entire regression check. `--baselines-file` without
+  `--baseline-check` warns that it has no effect.
+- **No fabricated significance on degenerate samples.**
+  `MetricRegression.p_value` is `None` (not `0.0`) when no valid test
+  exists — n=1 with `baseline_std=0`, or zero variance on both sides. Such
+  regressions are still reported and can still block CI, with severity
+  from the delta thresholds and an explicit `insufficient_data` flag.
+  Zero-variance samples against a known baseline spread now get a real
+  z-test.
+
+### Fixed
+
+- **`InfraError` docstring matched to behavior.** It previously claimed
+  `OSError` and network `TimeoutError` were classified as infra; they never
+  were. The docstring now describes the real (configurable) set and that
+  the runner's own budget timeout is always `TIMEOUT`.
+- **`compare_to_baseline_summary` no longer crashes at n=1.** The
+  Welch-Satterthwaite degrees of freedom fell back to a division by zero
+  when either side had a single sample.
 
 ## [0.3.0] - 2026-06-10
 

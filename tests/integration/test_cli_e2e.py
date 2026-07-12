@@ -497,3 +497,182 @@ def test_infra_exceptions_flag_rejects_unimportable_path(
 
     assert exit_code == 2
     assert "no.such.Error" in capsys.readouterr().err
+
+
+# --- Noise-aware gating from the CLI (DecisionSpec wiring) ---
+
+
+_NOISE_SPEC = None  # set per-test via _SpecStampingAdapter.spec
+
+
+class SpecStampingAdapter(AgentAdapter):
+    """Echoes input and stamps a DecisionSpec on the transcript, the way
+    a real adapter that knows its runtime config would."""
+
+    async def run(self, task: Task) -> Transcript:
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+        transcript = Transcript(
+            task_id=task.task_id, final_output=dict(task.input_data)
+        )
+        transcript.decision_spec = DecisionSpec(
+            infra=InfraConfig(memory_hard_limit_mb=512)
+        )
+        return transcript
+
+
+@pytest.fixture
+def noise_tasks_file(tmp_path: Path) -> Path:
+    """One task whose mean_score lands 2pp (absolute) below baseline —
+    inside the 3pp infra-noise band but a 10% relative drop, so it
+    blocks unless noise-awareness kicks in."""
+    path = tmp_path / "noise_tasks.json"
+    path.write_text(json.dumps({
+        "tasks": [
+            {
+                "task_id": "t-noise",
+                "name": "noise task",
+                "description": "echoes a value 2pp under baseline",
+                "input_data": {"value": 0.18},
+            },
+        ]
+    }))
+    return path
+
+
+def _noise_baseline(
+    tmp_path: Path, with_spec: bool
+) -> Path:
+    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    baseline = TaskBaseline(
+        task_id="t-noise",
+        decision_spec=(
+            DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048))
+            if with_spec
+            else None
+        ),
+    )
+    baseline.add_metric(
+        metric_name="mean_score", value=0.2, std=0.001, sample_size=10
+    )
+    manager.set_baseline(baseline)
+    manager.save()
+    return baselines
+
+
+def test_gate_blocks_small_delta_without_specs(
+    noise_tasks_file: Path, tmp_path: Path
+) -> None:
+    """Control: with no DecisionSpec on either side, the 10%-relative
+    regression blocks as before."""
+    baselines = _noise_baseline(tmp_path, with_spec=False)
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(noise_tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    assert exit_code == 1
+
+
+def test_decision_spec_file_enables_noise_aware_gate(
+    noise_tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--decision-spec + a baseline that carries its spec: a sub-noise-band
+    delta under mismatched infra no longer blocks, and the mismatch is
+    called out in the output."""
+    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+    baselines = _noise_baseline(tmp_path, with_spec=True)
+    spec_path = tmp_path / "current_spec.json"
+    spec_path.write_text(json.dumps(
+        DecisionSpec(
+            infra=InfraConfig(memory_hard_limit_mb=512)
+        ).model_dump(mode="json")
+    ))
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(noise_tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+        "--decision-spec", str(spec_path),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "infra config mismatch" in captured.out.lower()
+
+
+def test_adapter_stamped_spec_enables_noise_aware_gate(
+    noise_tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No flag needed when the adapter stamps DecisionSpecs on its
+    transcripts — the gate picks the current spec up from the batch."""
+    baselines = _noise_baseline(tmp_path, with_spec=True)
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(noise_tasks_file),
+        "--adapter", "tests.integration.test_cli_e2e.SpecStampingAdapter",
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "infra config mismatch" in captured.out.lower()
+
+
+def test_noise_band_flag_tightens_the_band(
+    noise_tasks_file: Path, tmp_path: Path
+) -> None:
+    """--noise-band 0.01 shrinks the band below the 2pp delta, so the
+    same mismatched-infra regression blocks again."""
+    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+    baselines = _noise_baseline(tmp_path, with_spec=True)
+    spec_path = tmp_path / "current_spec.json"
+    spec_path.write_text(json.dumps(
+        DecisionSpec(
+            infra=InfraConfig(memory_hard_limit_mb=512)
+        ).model_dump(mode="json")
+    ))
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(noise_tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+        "--decision-spec", str(spec_path),
+        "--noise-band", "0.01",
+    )
+
+    assert exit_code == 1
+
+
+def test_decision_spec_flag_rejects_missing_file(
+    noise_tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(noise_tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--decision-spec", str(tmp_path / "nope.json"),
+    )
+
+    assert exit_code == 2
+    assert "decision-spec" in capsys.readouterr().err
