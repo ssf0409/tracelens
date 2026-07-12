@@ -462,6 +462,10 @@ class RegressionDetector:
            show up in the report but are excluded from
            ``blocking_regressions`` so a default ``should_block_ci()``
            call won't gate a merge on ambiguous noise.
+        3. Recomputes ``overall_severity`` from the remaining blocking
+           regressions — a report whose regressions are all noise-flagged
+           reads ``NONE`` while ``has_regression`` stays True — and
+           appends a note about the noise-flagged count to ``summary``.
 
         When either spec is omitted, this degrades to ordinary
         ``compare()`` behavior with ``infra_config_mismatch=False``.
@@ -477,7 +481,8 @@ class RegressionDetector:
         Returns:
             RegressionReport with ``infra_config_mismatch``,
             ``infra_config_diff``, and per-regression
-            ``within_noise_band`` annotations populated.
+            ``within_noise_band`` annotations populated, and
+            ``overall_severity`` recomputed from the blocking regressions.
         """
         report = self.compare(baseline, current_results)
 

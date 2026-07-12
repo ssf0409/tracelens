@@ -817,6 +817,9 @@ class BaselineManager:
             metric_stds: Optional standard deviations
             sample_size: Number of samples
             fingerprint: New fingerprint for the promoted baseline
+            decision_spec: DecisionSpec of the promoted run; stored on
+                the baseline and used to derive the fingerprint when one
+                isn't passed (see TaskBaseline.promote)
 
         Returns:
             Tuple of (was_promoted, reason)
@@ -866,6 +869,9 @@ class BaselineManager:
             sample_size: Number of samples
             reason: Reason for the forced promotion
             fingerprint: New fingerprint for the promoted baseline
+            decision_spec: DecisionSpec of the promoted run; stored on
+                the baseline and used to derive the fingerprint when one
+                isn't passed (see TaskBaseline.promote)
 
         Returns:
             The promoted baseline

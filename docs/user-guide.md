@@ -224,7 +224,13 @@ tracelens run \
 ```
 
 Add `--baseline-check --baselines-file eval/baselines.json --fail-on-regression
-moderate` to gate CI, and `--progress` / `--checkpoint path.json` for long runs.
+moderate` to gate CI. The gate exits 1 when it blocks on a regression and 2 when
+it is misconfigured (`--baseline-check` without a readable `--baselines-file`
+refuses to run rather than passing vacuously), and always prints a summary of
+what it checked. Tasks with no stored baseline are skipped with a warning — add
+`--require-baselines` to fail instead. Use `--progress` / `--checkpoint
+path.json` for long runs. See [CI/CD Integration](ci-cd-integration.md) for the
+noise-aware flags (`--decision-spec`, `--noise-band`, `--infra-exceptions`).
 `tracelens report --results results.json --format markdown` re-renders a saved
 run.
 

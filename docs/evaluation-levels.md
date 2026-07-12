@@ -614,6 +614,9 @@ manager.create_canary_baseline(
     metrics={"policy_compliance": 1.0, "action_limit_respected": 1.0},
     fingerprint="abc123...",  # Tied to specific config
 )
+# fingerprint is optional when decision_spec= is passed: it is derived from
+# the spec, which ties the canary to the actual recording configuration and
+# enables noise-aware regression comparison.
 
 # Performance baseline — can auto-update with wide tolerance
 manager.create_capability_baseline(

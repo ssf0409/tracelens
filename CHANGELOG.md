@@ -69,7 +69,7 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   ignore_noise_band=False)` still counts every regression.
 - **No more fabricated blocking on underpowered zero-variance samples.**
   A consistent drop that a valid z-test cannot call significant (e.g.
-  five identical scores within one baseline standard deviation of the
+  five identical scores half a baseline standard deviation below the
   mean) no longer blocks CI — previously it always blocked via the
   fabricated p=0.0. Decisive drops still block; degenerate cases with no
   valid test still block on thresholds with `insufficient_data=True`.

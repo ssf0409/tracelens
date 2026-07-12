@@ -25,7 +25,7 @@ class TrialStatus(str, Enum):
     COMPLETED = "completed"        # Finished successfully
     FAILED = "failed"              # Task-level failure (agent couldn't solve it)
     INFRA_ERROR = "infra_error"    # Infrastructure failure (OOM, network, sandbox)
-    TIMEOUT = "timeout"             # Exceeded timeout
+    TIMEOUT = "timeout"             # Runner budget timeout (adapter-raised timeouts classify as FAILED/INFRA_ERROR)
     SKIPPED = "skipped"             # Skipped (e.g., due to filter)
 
 

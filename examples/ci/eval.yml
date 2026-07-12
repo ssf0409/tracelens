@@ -7,6 +7,12 @@
 # It installs your project, runs an eval suite, posts the Markdown report to the
 # job summary, uploads both Markdown and HTML reports as artifacts, and fails CI
 # on moderate-or-worse regressions against a stored baseline.
+#
+# The baselines file must exist and parse: a missing --baselines-file, absent
+# file, or corrupt JSON exits 2 BEFORE the eval runs (exit 1 = the gate
+# blocked on a regression). Create eval/baselines.json before enabling this
+# workflow, and add --require-baselines to also fail when a task has no
+# stored baseline instead of warning and skipping it.
 
 name: TraceLens Evaluation
 
@@ -53,7 +59,7 @@ jobs:
         #   --adapter         dotted import path to your AgentAdapter subclass
         #   --graders         dotted import path(s) to your graders
         #   --baselines-file  path to your stored baselines
-        #   --fail-on-regression  none | minor | moderate | severe
+        #   --fail-on-regression  minor | moderate | severe
         #                         (lower = stricter gate; see ci-cd-integration.md)
 
       - name: Add report to job summary
