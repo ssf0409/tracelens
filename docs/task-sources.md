@@ -18,7 +18,7 @@ All loaders implement the same [`TaskLoader`][tracelens.core.task.TaskLoader] AB
 they are interchangeable in your code:
 
 ```python
-loader = CSVTaskLoader(input_col="prompt")   # or any other loader
+loader = CSVTaskLoader(input_field="prompt")   # or any other loader
 tasks  = loader.load("eval_data.csv")
 eval_set = EvalSet(name="My Suite", tasks=tasks)
 ```
@@ -114,19 +114,23 @@ input,name,difficulty
 
 ### Custom column names
 
-Map a different column to `Task.input_data` with `input_col`, and select
-which columns become `Task.metadata` with `metadata_cols`:
+Map a different column to `Task.input_data` with `input_field`, and select
+which columns become `Task.metadata` with `metadata_fields`:
 
 ```python
 tasks = CSVTaskLoader(
-    input_col="prompt",
-    metadata_cols=["category", "source"],
+    input_field="prompt",
+    metadata_fields=["category", "source"],
 ).load("my_data.csv")
 ```
 
-When `metadata_cols` is omitted, **all** columns that are not `input_col` and
+When `metadata_fields` is omitted, **all** columns that are not `input_field` and
 not one of the reserved Task fields (`name`, `difficulty`, `category`, …) are
 collected into `Task.metadata` automatically.
+
+The configured input field is required. A missing JSONL field or CSV column is
+reported as an error instead of producing an empty task. It must not reuse a
+native `Task` field name such as `name` or `metadata`.
 
 ### JSON-encoded cells
 
@@ -151,6 +155,12 @@ loader = CSVTaskLoader()
 loader.save(tasks, "output.csv")
 tasks2 = loader.load("output.csv")
 ```
+
+TraceLens writes structured Task fields and metadata cells as JSON, preserving
+JSON-compatible values such as booleans, nulls, numbers, lists, objects, and
+strings that look like JSON. Because CSV metadata is flattened into columns,
+`save()` rejects metadata keys that collide with native Task fields or the
+configured input field rather than silently overwriting data.
 
 ---
 

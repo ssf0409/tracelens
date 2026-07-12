@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from tracelens.core.task import Task
-from tracelens.loaders import CSVTaskLoader, JSONLTaskLoader
+from tracelens.loaders import TASK_FIELDS, CSVTaskLoader, JSONLTaskLoader
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -167,6 +167,19 @@ class TestJSONLTaskLoader:
         with pytest.raises(ValueError, match="not a file or directory"):
             JSONLTaskLoader().load(tmp_path / "ghost.jsonl")
 
+    def test_load_missing_input_field_raises(self, tmp_path: Path) -> None:
+        """A row without the configured input field must not become an empty task."""
+        jsonl_file = tmp_path / "missing-input.jsonl"
+        _write_jsonl(jsonl_file, [{"name": "Missing input"}])
+
+        with pytest.raises(ValueError, match="missing required input field 'input'"):
+            JSONLTaskLoader().load(jsonl_file)
+
+    def test_input_field_cannot_shadow_task_field(self) -> None:
+        """The external input field cannot overwrite a native Task field on save."""
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            JSONLTaskLoader(input_field="name")
+
     # -----------------------------------------------------------------------
     # save() — and round-trip
     # -----------------------------------------------------------------------
@@ -281,8 +294,8 @@ class TestCSVTaskLoader:
 
         assert tasks[0].input_data == {"goal": "Build an API"}
 
-    def test_load_custom_input_col(self, tmp_path: Path) -> None:
-        """Custom *input_col* maps that column to Task.input_data."""
+    def test_load_custom_input_field(self, tmp_path: Path) -> None:
+        """Custom *input_field* maps that column to Task.input_data."""
         csv_file = tmp_path / "custom_col.csv"
         _write_csv(
             csv_file,
@@ -290,12 +303,12 @@ class TestCSVTaskLoader:
             fieldnames=["prompt", "name"],
         )
 
-        tasks = CSVTaskLoader(input_col="prompt").load(csv_file)
+        tasks = CSVTaskLoader(input_field="prompt").load(csv_file)
 
         assert tasks[0].input_data == {"value": "Summarise this doc"}
 
-    def test_load_metadata_cols_selected(self, tmp_path: Path) -> None:
-        """Only *metadata_cols* columns land in Task.metadata."""
+    def test_load_metadata_fields_selected(self, tmp_path: Path) -> None:
+        """Only *metadata_fields* columns land in Task.metadata."""
         csv_file = tmp_path / "selective_meta.csv"
         _write_csv(
             csv_file,
@@ -311,13 +324,13 @@ class TestCSVTaskLoader:
             fieldnames=["input", "name", "lang", "source", "internal_id"],
         )
 
-        tasks = CSVTaskLoader(metadata_cols=["lang", "source"]).load(csv_file)
+        tasks = CSVTaskLoader(metadata_fields=["lang", "source"]).load(csv_file)
 
         assert tasks[0].metadata == {"lang": "en", "source": "twitter"}
         assert "internal_id" not in tasks[0].metadata
 
     def test_load_metadata_all_by_default(self, tmp_path: Path) -> None:
-        """When *metadata_cols* is None, non-reserved columns go to metadata."""
+        """When *metadata_fields* is None, non-reserved columns go to metadata."""
         csv_file = tmp_path / "default_meta.csv"
         _write_csv(
             csv_file,
@@ -367,6 +380,19 @@ class TestCSVTaskLoader:
         with pytest.raises(ValueError, match="not a file or directory"):
             CSVTaskLoader().load(tmp_path / "ghost.csv")
 
+    def test_load_missing_input_column_raises(self, tmp_path: Path) -> None:
+        """A CSV without the configured input column must fail before loading rows."""
+        csv_file = tmp_path / "missing-input.csv"
+        _write_csv(csv_file, [{"name": "Missing input"}], fieldnames=["name"])
+
+        with pytest.raises(ValueError, match="missing required input field 'input'"):
+            CSVTaskLoader().load(csv_file)
+
+    def test_input_field_cannot_shadow_task_field(self) -> None:
+        """The external input field cannot duplicate a native Task field column."""
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            CSVTaskLoader(input_field="name")
+
     # -----------------------------------------------------------------------
     # save() — and round-trip
     # -----------------------------------------------------------------------
@@ -414,11 +440,11 @@ class TestCSVTaskLoader:
 
         assert loaded[0].metadata.get("region") == "eu"
 
-    def test_roundtrip_custom_input_col(self, tmp_path: Path) -> None:
-        """Custom input_col name is written and re-read consistently."""
+    def test_roundtrip_custom_input_field(self, tmp_path: Path) -> None:
+        """Custom input_field name is written and re-read consistently."""
         original = [Task(name="T", input_data={"goal": "custom"})]
         dest = tmp_path / "custom_col_rt.csv"
-        loader = CSVTaskLoader(input_col="prompt")
+        loader = CSVTaskLoader(input_field="prompt")
 
         loader.save(original, dest)
 
@@ -441,7 +467,7 @@ class TestCSVTaskLoader:
 
         assert loaded[0].task_id == "csv-id-99"
 
-    def test_roundtrip_multiple_metadata_cols(self, tmp_path: Path) -> None:
+    def test_roundtrip_multiple_metadata_fields(self, tmp_path: Path) -> None:
         """Multiple metadata columns all survive the round-trip."""
         original = [
             Task(
@@ -459,6 +485,65 @@ class TestCSVTaskLoader:
         assert loaded[0].metadata.get("lang") == "en"
         assert loaded[0].metadata.get("domain") == "science"
 
+    def test_roundtrip_preserves_metadata_json_scalars_and_sparse_keys(
+        self, tmp_path: Path
+    ) -> None:
+        """Generated CSV distinguishes JSON values, strings, and missing cells."""
+        original = [
+            Task(
+                name="first",
+                input_data={"q": "x"},
+                metadata={
+                    "truth": True,
+                    "nothing": None,
+                    "json_text": "true",
+                    "empty_text": "",
+                },
+            ),
+            Task(
+                name="second",
+                input_data={"q": "y"},
+                metadata={"only_second": 2},
+            ),
+        ]
+        dest = tmp_path / "metadata-types.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].metadata == original[0].metadata
+        assert loaded[1].metadata == original[1].metadata
+
+    def test_roundtrip_distinguishes_empty_text_from_none(self, tmp_path: Path) -> None:
+        """Empty optional text remains empty while None remains absent."""
+        original = [
+            Task(name="empty", description="", input_data={"q": "x"}),
+            Task(name="none", description=None, input_data={"q": "y"}),
+        ]
+        dest = tmp_path / "empty-text.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].description == ""
+        assert loaded[1].description is None
+
+    @pytest.mark.parametrize("metadata_key", ["name", "input"])
+    def test_save_rejects_metadata_column_collisions(
+        self, tmp_path: Path, metadata_key: str
+    ) -> None:
+        """Flattened metadata cannot overwrite Task or input columns."""
+        task = Task(
+            name="real name",
+            input_data={"q": "real input"},
+            metadata={metadata_key: "conflicting value"},
+        )
+
+        with pytest.raises(ValueError, match="metadata key .* conflicts"):
+            CSVTaskLoader().save([task], tmp_path / "collision.csv")
+
 
 class TestCSVReservedColumnFidelity:
     """Free-text reserved columns must survive verbatim: a name or
@@ -469,13 +554,15 @@ class TestCSVReservedColumnFidelity:
     def test_json_looking_text_columns_stay_strings(self, tmp_path: Path) -> None:
         _write_csv(
             tmp_path / "t.csv",
-            [{
-                "task_id": "001",
-                "name": "123",
-                "description": "true",
-                "category": "null",
-                "input": '{"q": "x"}',
-            }],
+            [
+                {
+                    "task_id": "001",
+                    "name": "123",
+                    "description": "true",
+                    "category": "null",
+                    "input": '{"q": "x"}',
+                }
+            ],
             ["task_id", "name", "description", "category", "input"],
         )
 
@@ -489,12 +576,14 @@ class TestCSVReservedColumnFidelity:
     def test_structured_columns_are_parsed(self, tmp_path: Path) -> None:
         _write_csv(
             tmp_path / "t.csv",
-            [{
-                "name": "n",
-                "tags": '["smoke", "regression"]',
-                "timeout_seconds": "42.5",
-                "input": '{"q": "x"}',
-            }],
+            [
+                {
+                    "name": "n",
+                    "tags": '["smoke", "regression"]',
+                    "timeout_seconds": "42.5",
+                    "input": '{"q": "x"}',
+                }
+            ],
             ["name", "tags", "timeout_seconds", "input"],
         )
 
@@ -503,9 +592,7 @@ class TestCSVReservedColumnFidelity:
         assert task.tags == ["smoke", "regression"]
         assert task.timeout_seconds == 42.5
 
-    def test_save_load_round_trip_preserves_tags_and_expectation(
-        self, tmp_path: Path
-    ) -> None:
+    def test_save_load_round_trip_preserves_tags_and_expectation(self, tmp_path: Path) -> None:
         from tracelens.core.task import TaskExpectation
 
         original = Task(
@@ -526,23 +613,11 @@ class TestCSVReservedColumnFidelity:
         assert loaded.expectation.expected_output == {"answer": "42"}
 
 
-class TestReservedFieldsDeriveFromModel:
-    """Reserved field sets must derive from Task.model_fields — a
-    hand-maintained list already drifted once (it referenced the deleted
-    Task.max_retries). If Task gains or loses a field, the loaders must
-    pick it up without edits."""
+class TestTaskFieldsDeriveFromModel:
+    """The shared Task field source must track the Pydantic model."""
 
-    def test_reserved_sets_match_the_model(self) -> None:
-        expected = frozenset(Task.model_fields) - {"input_data", "metadata"}
-        assert CSVTaskLoader._RESERVED == expected
-        assert JSONLTaskLoader._RESERVED == expected
-
-    def test_text_vs_parsed_split_derives_from_annotations(self) -> None:
-        # str / str|None fields stay verbatim; everything else is parsed.
-        assert CSVTaskLoader._PARSED_RESERVED == frozenset(
-            {"tags", "timeout_seconds", "expectation"}
-        )
-        assert "description" not in CSVTaskLoader._PARSED_RESERVED
+    def test_task_fields_match_the_model(self) -> None:
+        assert TASK_FIELDS == frozenset(Task.model_fields)
 
     def test_csv_header_covers_every_reserved_field(self, tmp_path: Path) -> None:
         import csv as _csv
@@ -555,4 +630,5 @@ class TestReservedFieldsDeriveFromModel:
         with open(tmp_path / "o.csv", newline="", encoding="utf-8") as fh:
             header = set(next(_csv.reader(fh)))
 
-        assert CSVTaskLoader._RESERVED <= header
+        expected = TASK_FIELDS - {"input_data", "metadata"}
+        assert expected <= header
