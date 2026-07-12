@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 
 from tracelens.core.grader import CodeGrader
 from tracelens.core.task import EvalSet, Task
@@ -419,3 +420,121 @@ class TestInfraErrorClassification:
         assert batch.infra_error_rate == 0.5
         # The successful ones still pass-through to grading.
         assert batch.passed_count == 2
+
+
+# --- Fail-fast semantics ---
+
+
+class TestFailFast:
+    """RunnerConfig.fail_fast stops scheduling new trials after the first
+    execution failure (FAILED or INFRA_ERROR); queued trials are recorded
+    as SKIPPED rather than silently dropped."""
+
+    async def test_fail_fast_skips_pending_trials_after_failure(self):
+        """After the first FAILED trial, queued trials are not executed;
+        they are recorded as SKIPPED so the batch stays accountable."""
+        calls: list[int] = []
+
+        async def fail_first(input_data: dict) -> dict:
+            calls.append(input_data["n"])
+            if input_data["n"] == 0:
+                raise RuntimeError("boom")
+            return {"ok": True}
+
+        config = RunnerConfig(fail_fast=True, max_concurrency=1)
+        runner = EvaluationRunner(SimpleAdapter(fail_first), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(4))
+
+        # Only the failing trial actually ran.
+        assert calls == [0]
+        # Every work item is still accounted for in the batch.
+        assert batch.total_count == 4
+        statuses = [t.status for t in batch.trials]
+        assert statuses.count(TrialStatus.FAILED) == 1
+        assert statuses.count(TrialStatus.SKIPPED) == 3
+        assert batch.all_complete
+
+        skipped = [t for t in batch.trials if t.status == TrialStatus.SKIPPED]
+        for trial in skipped:
+            assert "fail_fast" in trial.error_message
+            assert trial.outcomes == []  # never ran, never graded
+            assert trial.transcript is None
+
+    async def test_fail_fast_triggers_on_infra_error(self):
+        """INFRA_ERROR trials trigger fail-fast just like FAILED ones."""
+        calls: list[int] = []
+
+        async def infra_fail_first(input_data: dict) -> dict:
+            calls.append(input_data["n"])
+            if input_data["n"] == 0:
+                raise InfraError("sandbox died")
+            return {"ok": True}
+
+        config = RunnerConfig(fail_fast=True, max_concurrency=1)
+        runner = EvaluationRunner(
+            SimpleAdapter(infra_fail_first), [_PassGrader()], config
+        )
+        batch = await runner.run(_make_eval_set(3))
+
+        assert calls == [0]
+        statuses = [t.status for t in batch.trials]
+        assert statuses.count(TrialStatus.INFRA_ERROR) == 1
+        assert statuses.count(TrialStatus.SKIPPED) == 2
+
+    async def test_fail_fast_disabled_runs_everything(self):
+        """Default (fail_fast=False): failures never stop the batch."""
+        calls: list[int] = []
+
+        async def always_fail(input_data: dict) -> dict:
+            calls.append(input_data["n"])
+            raise RuntimeError("boom")
+
+        config = RunnerConfig(max_concurrency=1)
+        runner = EvaluationRunner(SimpleAdapter(always_fail), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(3))
+
+        assert len(calls) == 3
+        assert all(t.status == TrialStatus.FAILED for t in batch.trials)
+
+    async def test_fail_fast_ignores_graded_failures(self):
+        """A trial that executes fine but fails grading is COMPLETED, not
+        FAILED — it must not trip fail-fast, which targets execution errors."""
+        config = RunnerConfig(fail_fast=True, max_concurrency=1)
+        runner = EvaluationRunner(SimpleAdapter(_echo_fn), [_FailGrader()], config)
+        batch = await runner.run(_make_eval_set(3))
+
+        assert all(t.status == TrialStatus.COMPLETED for t in batch.trials)
+        assert batch.pass_rate == 0.0
+
+    async def test_resume_reruns_skipped_trials(self, tmp_path: Path):
+        """SKIPPED trials in a checkpoint are not real results: resuming a
+        fail-fast run must execute them instead of loading them as done."""
+        ckpt = str(tmp_path / "checkpoint.json")
+
+        async def fail_first(input_data: dict) -> dict:
+            if input_data["n"] == 0:
+                raise RuntimeError("boom")
+            return {"ok": True}
+
+        config = RunnerConfig(
+            fail_fast=True, max_concurrency=1, checkpoint_path=ckpt
+        )
+        runner = EvaluationRunner(SimpleAdapter(fail_first), [_PassGrader()], config)
+        first = await runner.run(_make_eval_set(3))
+        assert sum(t.status == TrialStatus.SKIPPED for t in first.trials) == 2
+
+        async def now_ok(input_data: dict) -> dict:
+            return {"ok": True}
+
+        config2 = RunnerConfig(
+            fail_fast=True, max_concurrency=1, checkpoint_path=ckpt
+        )
+        runner2 = EvaluationRunner(SimpleAdapter(now_ok), [_PassGrader()], config2)
+        second = await runner2.run(_make_eval_set(3))
+
+        statuses = [t.status for t in second.trials]
+        # The FAILED trial is a real result and stays loaded from checkpoint;
+        # the two previously-skipped trials were re-run and completed.
+        assert statuses.count(TrialStatus.FAILED) == 1
+        assert statuses.count(TrialStatus.COMPLETED) == 2
+        assert statuses.count(TrialStatus.SKIPPED) == 0

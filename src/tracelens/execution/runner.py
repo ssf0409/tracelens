@@ -56,6 +56,11 @@ class RunnerConfig:
     num_runs: int = 1
     max_concurrency: int = 5
     timeout_seconds: float = 300.0
+
+    # Stop scheduling new trials after the first FAILED or INFRA_ERROR
+    # trial; queued trials are recorded as SKIPPED. In-flight trials run
+    # to completion. Timeouts and trials that execute fine but fail
+    # grading (COMPLETED, not passed) do not trigger it.
     fail_fast: bool = False
 
     # Called as (completed_trials, total_trials) after each trial finishes.
@@ -111,9 +116,13 @@ class EvaluationRunner:
 
         total = len(work_items) + len(completed_keys)
 
+        # Set on the first FAILED/INFRA_ERROR trial when fail_fast is
+        # enabled; queued trials observe it and record themselves SKIPPED.
+        stop_event = asyncio.Event()
+
         # Run all concurrently with semaphore
         tasks = [
-            self._run_one(task, run_index, semaphore, batch, total)
+            self._run_one(task, run_index, semaphore, batch, total, stop_event)
             for task, run_index in work_items
         ]
         await asyncio.gather(*tasks)
@@ -138,7 +147,9 @@ class EvaluationRunner:
 
         loaded = TrialBatch.from_dict(json.loads(path.read_text()))
         for trial in loaded.trials:
-            if trial.is_complete:
+            # SKIPPED trials (fail_fast) are placeholders, not results:
+            # leave them out so the resumed run executes them.
+            if trial.is_complete and trial.status != TrialStatus.SKIPPED:
                 batch.add_trial(trial)
                 completed.add((trial.task_id, trial.run_index))
         logger.info(
@@ -165,12 +176,13 @@ class EvaluationRunner:
         semaphore: asyncio.Semaphore,
         batch: TrialBatch,
         total: int,
+        stop_event: asyncio.Event,
     ) -> None:
         """Execute a single trial with lifecycle hooks, timeout, and error handling.
 
-        Lifecycle: setup → run → teardown (always called).
-        If setup fails, run is skipped but teardown still runs.
-        If teardown fails on an otherwise-successful trial, the trial is marked FAILED.
+        When ``fail_fast`` has tripped ``stop_event``, the trial is recorded
+        as SKIPPED instead of executing — every task × run work item stays
+        accounted for in the batch.
         """
         trial = Trial(
             task_id=task.task_id,
@@ -180,88 +192,21 @@ class EvaluationRunner:
             started_at=utc_now(),
         )
 
-        transcript: Transcript | None = None
-
         async with semaphore:
-            setup_failed = False
-
-            # --- setup ---
-            try:
-                await self.adapter.setup(task)
-            except Exception as exc:
-                setup_failed = True
-                is_infra = _is_infra_exception(exc)
-                trial.status = (
-                    TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
+            if stop_event.is_set():
+                trial.status = TrialStatus.SKIPPED
+                trial.error_message = (
+                    "Skipped: fail_fast is enabled and an earlier trial failed"
                 )
-                trial.error_message = f"Setup failed: {exc}"
-                trial.error_traceback = traceback.format_exc()
-                logger.error(
-                    "Setup %s for task %s run %d: %s",
-                    "hit an infra error" if is_infra else "failed",
-                    task.task_id,
-                    run_index,
-                    exc,
-                )
-
-            # --- run (skipped if setup failed) ---
-            if not setup_failed:
-                try:
-                    transcript = await asyncio.wait_for(
-                        self.adapter.run(task),
-                        timeout=self.config.timeout_seconds,
-                    )
-                    if transcript.decision_spec is None and self.decision_spec is not None:
-                        transcript.decision_spec = self.decision_spec
-                    trial.transcript = transcript
-                    trial.status = TrialStatus.COMPLETED
-                except TimeoutError:
-                    trial.status = TrialStatus.TIMEOUT
-                    trial.error_message = (
-                        f"Trial timed out after {self.config.timeout_seconds}s"
-                    )
-                    logger.warning(
-                        "Trial timed out for task %s run %d after %.1fs",
-                        task.task_id,
-                        run_index,
-                        self.config.timeout_seconds,
-                    )
-                except Exception as exc:
-                    is_infra = _is_infra_exception(exc)
-                    trial.status = (
-                        TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
-                    )
-                    trial.error_message = str(exc)
-                    trial.error_traceback = traceback.format_exc()
-                    logger.error(
-                        "Agent execution %s for task %s run %d: %s",
-                        "hit an infra error" if is_infra else "failed",
-                        task.task_id,
-                        run_index,
-                        exc,
-                    )
-
-            # --- teardown (always called) ---
-            try:
-                await self.adapter.teardown(task, transcript)
-            except Exception as teardown_exc:
-                if trial.status == TrialStatus.COMPLETED:
-                    trial.status = TrialStatus.FAILED
-                    trial.error_message = (
-                        f"Teardown failed: {teardown_exc}"
-                    )
-                    trial.error_traceback = traceback.format_exc()
-                else:
-                    trial.error_message = (
-                        f"{trial.error_message}; "
-                        f"Teardown also failed: {teardown_exc}"
-                    )
-                logger.error(
-                    "Teardown failed for task %s run %d: %s",
-                    task.task_id,
-                    run_index,
-                    teardown_exc,
-                )
+            else:
+                await self._run_lifecycle(trial, task, run_index)
+                if self.config.fail_fast and trial.status in (
+                    TrialStatus.FAILED,
+                    TrialStatus.INFRA_ERROR,
+                ):
+                    # Set while still holding the semaphore so no queued
+                    # trial can start between the failure and the signal.
+                    stop_event.set()
 
         trial.completed_at = utc_now()
 
@@ -280,6 +225,94 @@ class EvaluationRunner:
             and len(batch.trials) % self.config.checkpoint_interval == 0
         ):
             self._save_checkpoint(batch)
+
+    async def _run_lifecycle(self, trial: Trial, task: Task, run_index: int) -> None:
+        """Drive setup → run → teardown for one trial, mutating it in place.
+
+        Lifecycle: setup → run → teardown (always called).
+        If setup fails, run is skipped but teardown still runs.
+        If teardown fails on an otherwise-successful trial, the trial is marked FAILED.
+        """
+        transcript: Transcript | None = None
+        setup_failed = False
+
+        # --- setup ---
+        try:
+            await self.adapter.setup(task)
+        except Exception as exc:
+            setup_failed = True
+            is_infra = _is_infra_exception(exc)
+            trial.status = (
+                TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
+            )
+            trial.error_message = f"Setup failed: {exc}"
+            trial.error_traceback = traceback.format_exc()
+            logger.error(
+                "Setup %s for task %s run %d: %s",
+                "hit an infra error" if is_infra else "failed",
+                task.task_id,
+                run_index,
+                exc,
+            )
+
+        # --- run (skipped if setup failed) ---
+        if not setup_failed:
+            try:
+                transcript = await asyncio.wait_for(
+                    self.adapter.run(task),
+                    timeout=self.config.timeout_seconds,
+                )
+                if transcript.decision_spec is None and self.decision_spec is not None:
+                    transcript.decision_spec = self.decision_spec
+                trial.transcript = transcript
+                trial.status = TrialStatus.COMPLETED
+            except TimeoutError:
+                trial.status = TrialStatus.TIMEOUT
+                trial.error_message = (
+                    f"Trial timed out after {self.config.timeout_seconds}s"
+                )
+                logger.warning(
+                    "Trial timed out for task %s run %d after %.1fs",
+                    task.task_id,
+                    run_index,
+                    self.config.timeout_seconds,
+                )
+            except Exception as exc:
+                is_infra = _is_infra_exception(exc)
+                trial.status = (
+                    TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
+                )
+                trial.error_message = str(exc)
+                trial.error_traceback = traceback.format_exc()
+                logger.error(
+                    "Agent execution %s for task %s run %d: %s",
+                    "hit an infra error" if is_infra else "failed",
+                    task.task_id,
+                    run_index,
+                    exc,
+                )
+
+        # --- teardown (always called) ---
+        try:
+            await self.adapter.teardown(task, transcript)
+        except Exception as teardown_exc:
+            if trial.status == TrialStatus.COMPLETED:
+                trial.status = TrialStatus.FAILED
+                trial.error_message = (
+                    f"Teardown failed: {teardown_exc}"
+                )
+                trial.error_traceback = traceback.format_exc()
+            else:
+                trial.error_message = (
+                    f"{trial.error_message}; "
+                    f"Teardown also failed: {teardown_exc}"
+                )
+            logger.error(
+                "Teardown failed for task %s run %d: %s",
+                task.task_id,
+                run_index,
+                teardown_exc,
+            )
 
     async def _grade_trial(self, trial: Trial, task: Task) -> None:
         """Run all graders on a trial's transcript."""

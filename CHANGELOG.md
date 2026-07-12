@@ -15,6 +15,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   workflow. The command refuses to overwrite generated files unless `--force`
   is provided.
 
+### Fixed
+
+- **`RunnerConfig.fail_fast` is honored.** The field was previously accepted
+  and silently ignored. When enabled, the first `FAILED` or `INFRA_ERROR`
+  trial stops new trials from being scheduled: queued trials are recorded as
+  `SKIPPED` (in-flight trials still run to completion), so every task × run
+  work item stays accounted for in the batch. Timeouts and trials that
+  execute but fail grading do not trigger it. Checkpoint resume treats
+  `SKIPPED` trials as placeholders, not results, and re-runs them.
+
 ## [0.3.0] - 2026-06-10
 
 Hardening release: the grading path now honors its own configuration, harness

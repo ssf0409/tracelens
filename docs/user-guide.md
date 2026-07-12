@@ -166,7 +166,10 @@ batch = await EvaluationRunner(adapter, [composite], config).run(eval_set)
 
 `run` is async — call it from `asyncio.run(...)`. For long suites, `RunnerConfig`
 also takes a progress callback and a `checkpoint_path` so a rerun resumes
-(`--progress` / `--checkpoint` on the CLI).
+(`--progress` / `--checkpoint` on the CLI). `fail_fast=True` stops scheduling
+new trials after the first `FAILED` or `INFRA_ERROR` trial — the rest are
+recorded as `SKIPPED` — useful for smoke runs where one execution failure
+means the harness is broken.
 
 **Reading the `TrialBatch`.** Three things matter, in order:
 
