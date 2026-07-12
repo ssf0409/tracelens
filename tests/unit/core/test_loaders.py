@@ -524,3 +524,35 @@ class TestCSVReservedColumnFidelity:
         assert loaded.tags == ["a", "b"]
         assert loaded.expectation is not None
         assert loaded.expectation.expected_output == {"answer": "42"}
+
+
+class TestReservedFieldsDeriveFromModel:
+    """Reserved field sets must derive from Task.model_fields — a
+    hand-maintained list already drifted once (it referenced the deleted
+    Task.max_retries). If Task gains or loses a field, the loaders must
+    pick it up without edits."""
+
+    def test_reserved_sets_match_the_model(self) -> None:
+        expected = frozenset(Task.model_fields) - {"input_data", "metadata"}
+        assert CSVTaskLoader._RESERVED == expected
+        assert JSONLTaskLoader._RESERVED == expected
+
+    def test_text_vs_parsed_split_derives_from_annotations(self) -> None:
+        # str / str|None fields stay verbatim; everything else is parsed.
+        assert CSVTaskLoader._PARSED_RESERVED == frozenset(
+            {"tags", "timeout_seconds", "expectation"}
+        )
+        assert "description" not in CSVTaskLoader._PARSED_RESERVED
+
+    def test_csv_header_covers_every_reserved_field(self, tmp_path: Path) -> None:
+        import csv as _csv
+
+        loader = CSVTaskLoader()
+        loader.save(
+            [Task(name="n", description="d", input_data={"q": 1})],
+            tmp_path / "o.csv",
+        )
+        with open(tmp_path / "o.csv", newline="", encoding="utf-8") as fh:
+            header = set(next(_csv.reader(fh)))
+
+        assert CSVTaskLoader._RESERVED <= header

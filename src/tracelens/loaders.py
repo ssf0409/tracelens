@@ -31,10 +31,45 @@ Example::
 
 import csv
 import json
+import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, get_args, get_origin
+
+from pydantic import BaseModel
 
 from tracelens.core.task import Task, TaskLoader
+
+# Task fields every loader handles specially: input comes from the
+# configured input column/field, metadata is collected from the remaining
+# columns. Everything else is a reserved Task field, derived from the model
+# so the loaders cannot drift when Task gains or loses fields.
+_SPECIAL_FIELDS: frozenset[str] = frozenset({"input_data", "metadata"})
+
+_RESERVED_TASK_FIELDS: frozenset[str] = (
+    frozenset(Task.model_fields) - _SPECIAL_FIELDS
+)
+
+
+def _is_text_field(name: str) -> bool:
+    """True when the Task field is plain text (``str`` / ``str | None``).
+
+    Only unions are unwrapped — ``get_args`` on a generic like
+    ``list[str]`` returns its type parameters, which must not be mistaken
+    for union members.
+    """
+    annotation = Task.model_fields[name].annotation
+    if annotation is str:
+        return True
+    if get_origin(annotation) in (Union, types.UnionType):
+        args = [a for a in get_args(annotation) if a is not type(None)]
+        return len(args) == 1 and args[0] is str
+    return False
+
+
+# Reserved fields whose CSV cells are JSON/numeric rather than free text.
+_PARSED_TASK_FIELDS: frozenset[str] = frozenset(
+    name for name in _RESERVED_TASK_FIELDS if not _is_text_field(name)
+)
 
 
 class JSONLTaskLoader(TaskLoader):
@@ -61,19 +96,7 @@ class JSONLTaskLoader(TaskLoader):
     """
 
     # Task constructor kwargs that should be forwarded verbatim, not stashed in metadata.
-    _RESERVED: frozenset[str] = frozenset(
-        {
-            "task_id",
-            "name",
-            "description",
-            "tags",
-            "difficulty",
-            "category",
-            "timeout_seconds",
-            "expectation",
-            "metadata",
-        }
-    )
+    _RESERVED: frozenset[str] = _RESERVED_TASK_FIELDS
 
     def __init__(
         self,
@@ -207,29 +230,17 @@ class CSVTaskLoader(TaskLoader):
             ``Task.metadata``.  When *None* (default), **all** columns except
             *input_col* and the Task reserved column names are included.
 
-    Reserved column names that are forwarded to :class:`~tracelens.core.task.Task`
-    fields verbatim:
-    ``task_id``, ``name``, ``description``, ``tags``, ``difficulty``,
-    ``category``, ``timeout_seconds``.
+    Reserved column names — every :class:`~tracelens.core.task.Task` model
+    field except ``input_data``/``metadata``, derived from the model — are
+    forwarded to Task fields. Plain-text fields are taken verbatim;
+    structured/numeric fields are JSON-parsed.
     """
 
-    _RESERVED: frozenset[str] = frozenset(
-        {
-            "task_id",
-            "name",
-            "description",
-            "tags",
-            "difficulty",
-            "category",
-            "timeout_seconds",
-            "expectation",
-        }
-    )
+    _RESERVED: frozenset[str] = _RESERVED_TASK_FIELDS
 
-    # Columns whose cells are JSON/numeric rather than free text.
-    _PARSED_RESERVED: frozenset[str] = frozenset(
-        {"tags", "timeout_seconds", "expectation"}
-    )
+    # Columns whose cells are JSON/numeric rather than free text,
+    # derived from the Task field annotations.
+    _PARSED_RESERVED: frozenset[str] = _PARSED_TASK_FIELDS
 
     def __init__(
         self,
@@ -348,16 +359,10 @@ class CSVTaskLoader(TaskLoader):
         path = Path(destination)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Build header: reserved scalar fields + input_col + metadata keys.
+        # Build header: reserved Task fields (model declaration order) +
+        # input_col + metadata keys.
         reserved_cols = [
-            "task_id",
-            "name",
-            "description",
-            "difficulty",
-            "category",
-            "timeout_seconds",
-            "tags",
-            "expectation",
+            name for name in Task.model_fields if name not in _SPECIAL_FIELDS
         ]
         # Collect all metadata keys across all tasks (preserving insertion order).
         meta_keys: list[str] = []
@@ -369,6 +374,8 @@ class CSVTaskLoader(TaskLoader):
         fieldnames = reserved_cols + [self.input_col] + meta_keys
 
         def _serialise(value: Any) -> str:
+            if isinstance(value, BaseModel):
+                return json.dumps(value.model_dump(exclude_none=True), default=str)
             if isinstance(value, (dict, list)):
                 return json.dumps(value, default=str)
             if value is None:
@@ -380,20 +387,9 @@ class CSVTaskLoader(TaskLoader):
             writer.writeheader()
             for task in tasks:
                 record: dict[str, str] = {
-                    "task_id": _serialise(task.task_id),
-                    "name": _serialise(task.name),
-                    "description": _serialise(task.description),
-                    "difficulty": _serialise(task.difficulty),
-                    "category": _serialise(task.category),
-                    "timeout_seconds": _serialise(task.timeout_seconds),
-                    "tags": _serialise(task.tags),
-                    "expectation": (
-                        _serialise(task.expectation.model_dump(exclude_none=True))
-                        if task.expectation is not None
-                        else ""
-                    ),
-                    self.input_col: _serialise(task.input_data),
+                    col: _serialise(getattr(task, col)) for col in reserved_cols
                 }
+                record[self.input_col] = _serialise(task.input_data)
                 for k in meta_keys:
                     record[k] = _serialise(task.metadata.get(k))
                 writer.writerow(record)
