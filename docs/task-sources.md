@@ -61,9 +61,13 @@ Limit which extra keys end up in `Task.metadata` with `metadata_fields`:
 ```python
 tasks = JSONLTaskLoader(
     input_field="prompt",
-    metadata_fields=["subject", "difficulty"],
+    metadata_fields=["subject", "source"],
 ).load("benchmarks.jsonl")
 ```
+
+`metadata_fields` may select only foreign keys. Native `Task` fields such as
+`difficulty` and `category` always map to their corresponding Task attributes,
+so a field never has two meanings.
 
 ### Directory loading
 
@@ -120,7 +124,7 @@ which columns become `Task.metadata` with `metadata_fields`:
 ```python
 tasks = CSVTaskLoader(
     input_field="prompt",
-    metadata_fields=["category", "source"],
+    metadata_fields=["subject", "source"],
 ).load("my_data.csv")
 ```
 
@@ -156,11 +160,12 @@ loader.save(tasks, "output.csv")
 tasks2 = loader.load("output.csv")
 ```
 
-TraceLens writes structured Task fields and metadata cells as JSON, preserving
-JSON-compatible values such as booleans, nulls, numbers, lists, objects, and
-strings that look like JSON. Because CSV metadata is flattened into columns,
-`save()` rejects metadata keys that collide with native Task fields or the
-configured input field rather than silently overwriting data.
+TraceLens writes structured Task fields as JSON and uses one canonical JSON
+`metadata` column. This preserves arbitrary JSON-compatible metadata,
+including keys such as `name` or `input` that would collide with ordinary CSV
+columns. External CSV files may instead use flat extra columns as metadata,
+but a row cannot combine a `metadata` column with flat metadata columns: that
+ambiguous representation is rejected.
 
 ---
 

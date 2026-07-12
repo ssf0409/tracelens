@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from tracelens.core.task import Task
-from tracelens.loaders import TASK_FIELDS, CSVTaskLoader, JSONLTaskLoader
+from tracelens.loaders import CSVTaskLoader, JSONLTaskLoader, map_record
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,6 +27,101 @@ def _write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+# ===========================================================================
+# Shared record mapping
+# ===========================================================================
+
+
+class TestMapRecord:
+    """Behavioral contract shared by every foreign record source."""
+
+    def test_maps_native_fields_and_foreign_metadata(self) -> None:
+        task = map_record(
+            {
+                "input": {"goal": "review"},
+                "name": "Review",
+                "category": "engineering",
+                "source": "incident-42",
+            }
+        )
+
+        assert task.input_data == {"goal": "review"}
+        assert task.name == "Review"
+        assert task.category == "engineering"
+        assert task.metadata == {"source": "incident-42"}
+
+    def test_selects_only_requested_foreign_metadata_fields(self) -> None:
+        task = map_record(
+            {"input": "prompt", "source": "docs", "owner": "evals"},
+            metadata_fields=["source"],
+        )
+
+        assert task.metadata == {"source": "docs"}
+
+    def test_wraps_scalar_input_and_derives_a_default_name(self) -> None:
+        task = map_record({"input": "summarise this document"})
+
+        assert task.input_data == {"value": "summarise this document"}
+        assert task.name == "summarise this document"
+        assert task.metadata == {}
+
+    def test_ignores_missing_selected_foreign_metadata_fields(self) -> None:
+        task = map_record(
+            {"input": "prompt", "source": "docs"},
+            metadata_fields=["source", "owner"],
+        )
+
+        assert task.metadata == {"source": "docs"}
+
+    def test_rejects_native_metadata_field_selection(self) -> None:
+        with pytest.raises(ValueError, match="metadata_fields.*Task field"):
+            map_record(
+                {"input": "prompt", "category": "engineering"},
+                metadata_fields=["category"],
+            )
+
+    def test_rejects_input_field_metadata_selection(self) -> None:
+        with pytest.raises(ValueError, match="metadata_fields.*input field"):
+            map_record({"input": "prompt", "source": "docs"}, metadata_fields=["input"])
+
+    def test_uses_embedded_metadata_as_the_canonical_representation(self) -> None:
+        task = map_record(
+            {
+                "input": "prompt",
+                "metadata": {"source": "canonical", "priority": True},
+            },
+            metadata_fields=["source"],
+        )
+
+        assert task.metadata == {"source": "canonical", "priority": True}
+
+    def test_rejects_mixed_embedded_and_flat_metadata(self) -> None:
+        with pytest.raises(ValueError, match="embedded metadata.*flat metadata"):
+            map_record(
+                {
+                    "input": "prompt",
+                    "metadata": {"source": "canonical"},
+                    "owner": "evals",
+                }
+            )
+
+    def test_rejects_non_mapping_embedded_metadata(self) -> None:
+        with pytest.raises(ValueError, match="metadata field must be an object"):
+            map_record({"input": "prompt", "metadata": "not-an-object"})
+
+    def test_accepts_an_empty_embedded_metadata_object(self) -> None:
+        task = map_record({"input": "prompt", "metadata": {}})
+
+        assert task.metadata == {}
+
+    def test_rejects_missing_input_and_task_field_input_names(self) -> None:
+        with pytest.raises(ValueError, match="missing required input field 'input'"):
+            map_record({"name": "Missing input"})
+
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            map_record({"name": "prompt"}, input_field="name")
 
 
 # ===========================================================================
@@ -84,15 +179,17 @@ class TestJSONLTaskLoader:
                     "name": "Travel planner",
                     "category": "travel",
                     "difficulty": "easy",
+                    "source": "handwritten",
                     "secret": "should-be-excluded",
                 },
             ],
         )
 
-        tasks = JSONLTaskLoader(metadata_fields=["category"]).load(jsonl_file)
+        tasks = JSONLTaskLoader(metadata_fields=["source"]).load(jsonl_file)
 
         assert len(tasks) == 1
-        assert "category" in tasks[0].metadata
+        assert tasks[0].category == "travel"
+        assert tasks[0].metadata == {"source": "handwritten"}
         assert "secret" not in tasks[0].metadata
 
     def test_load_metadata_all_by_default(self, tmp_path: Path) -> None:
@@ -294,6 +391,18 @@ class TestCSVTaskLoader:
 
         assert tasks[0].input_data == {"goal": "Build an API"}
 
+    def test_load_invalid_json_input_stays_text(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "text-input.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "{not json}", "name": "Literal input"}],
+            fieldnames=["input", "name"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.input_data == {"value": "{not json}"}
+
     def test_load_custom_input_field(self, tmp_path: Path) -> None:
         """Custom *input_field* maps that column to Task.input_data."""
         csv_file = tmp_path / "custom_col.csv"
@@ -341,6 +450,29 @@ class TestCSVTaskLoader:
         tasks = CSVTaskLoader().load(csv_file)
 
         assert tasks[0].metadata.get("extra") == "yes"
+
+    def test_loads_canonical_metadata_column(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "canonical-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "metadata": '{"source": "docs", "rank": 2}'}],
+            fieldnames=["input", "metadata"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.metadata == {"source": "docs", "rank": 2}
+
+    def test_rejects_canonical_and_flat_metadata_in_same_csv_row(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "mixed-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "metadata": '{"source": "docs"}', "owner": "evals"}],
+            fieldnames=["input", "metadata", "owner"],
+        )
+
+        with pytest.raises(ValueError, match="embedded metadata.*flat metadata"):
+            CSVTaskLoader().load(csv_file)
 
     def test_load_from_directory(self, tmp_path: Path) -> None:
         """Loading from a directory picks up all *.csv files recursively."""
@@ -411,6 +543,12 @@ class TestCSVTaskLoader:
 
         assert dest.exists()
         assert dest.read_text(encoding="utf-8") == ""
+
+    def test_load_empty_csv_file_returns_no_tasks(self, tmp_path: Path) -> None:
+        path = tmp_path / "empty.csv"
+        path.write_text("", encoding="utf-8")
+
+        assert CSVTaskLoader().load(path) == []
 
     def test_roundtrip_basic(self, tmp_path: Path) -> None:
         """save() → load() preserves name and input_data for simple string inputs."""
@@ -531,18 +669,21 @@ class TestCSVTaskLoader:
         assert loaded[1].description is None
 
     @pytest.mark.parametrize("metadata_key", ["name", "input"])
-    def test_save_rejects_metadata_column_collisions(
+    def test_roundtrip_preserves_metadata_keys_that_match_task_columns(
         self, tmp_path: Path, metadata_key: str
     ) -> None:
-        """Flattened metadata cannot overwrite Task or input columns."""
+        """Canonical metadata storage avoids collisions with CSV task columns."""
         task = Task(
             name="real name",
             input_data={"q": "real input"},
             metadata={metadata_key: "conflicting value"},
         )
 
-        with pytest.raises(ValueError, match="metadata key .* conflicts"):
-            CSVTaskLoader().save([task], tmp_path / "collision.csv")
+        path = tmp_path / "collision.csv"
+        loader = CSVTaskLoader()
+        loader.save([task], path)
+
+        assert loader.load(path)[0].metadata == task.metadata
 
 
 class TestCSVReservedColumnFidelity:
@@ -614,11 +755,6 @@ class TestCSVReservedColumnFidelity:
 
 
 class TestTaskFieldsDeriveFromModel:
-    """The shared Task field source must track the Pydantic model."""
-
-    def test_task_fields_match_the_model(self) -> None:
-        assert TASK_FIELDS == frozenset(Task.model_fields)
-
     def test_csv_header_covers_every_reserved_field(self, tmp_path: Path) -> None:
         import csv as _csv
 
@@ -630,5 +766,6 @@ class TestTaskFieldsDeriveFromModel:
         with open(tmp_path / "o.csv", newline="", encoding="utf-8") as fh:
             header = set(next(_csv.reader(fh)))
 
-        expected = TASK_FIELDS - {"input_data", "metadata"}
+        expected = set(Task.model_fields) - {"input_data", "metadata"}
         assert expected <= header
+        assert "metadata" in header
