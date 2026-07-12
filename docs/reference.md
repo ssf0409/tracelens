@@ -14,6 +14,8 @@ paths may move, so import from the root for anything you depend on long-term.
 ::: tracelens.Task
 ::: tracelens.TaskLoader
 ::: tracelens.JSONTaskLoader
+::: tracelens.JSONLTaskLoader
+::: tracelens.CSVTaskLoader
 ::: tracelens.EvalSet
 ::: tracelens.Transcript
 ::: tracelens.TranscriptStep

@@ -58,6 +58,14 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   Pre-0.4 bare-batch checkpoints still load, with a loud warning that their
   identity can't be verified.
 
+- **JSONL and CSV task loaders.** `JSONLTaskLoader` and `CSVTaskLoader`
+  (top-level exports) load eval sets from `.jsonl`/`.csv` files or
+  directories and save them back, with symmetric round-trips (CSV
+  serialises `tags` and `expectation` as JSON columns) and no JSON
+  coercion of free-text columns. Derived from #31 by @Balaji1304 with the
+  HuggingFace loader moved to a documented recipe per the thin-core
+  roadmap. Docs: `docs/task-sources.md`.
+
 ### Changed
 - **Gate misconfiguration is now an error.** `tracelens run
   --baseline-check` without `--baselines-file`, or with a nonexistent or
