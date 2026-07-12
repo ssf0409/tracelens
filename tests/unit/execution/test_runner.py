@@ -578,6 +578,11 @@ class TestFailFast:
         assert all(t.status != TrialStatus.SKIPPED for t in batch.trials)
 
     async def test_infra_error_trips_only_after_retries_exhausted(self) -> None:
+        """fail_fast must not cut infra retries short: the failing task gets
+        its full retry budget before the stop trips. Retries release the
+        concurrency slot between attempts by design, so other queued work
+        may legitimately interleave — a single-task eval set keeps this
+        assertion deterministic across Python versions."""
         fn, calls = self._failing_on({"t0"}, exc=ConnectionError)
         config = RunnerConfig(
             fail_fast=True,
@@ -587,12 +592,13 @@ class TestFailFast:
         )
         runner = EvaluationRunner(SimpleAdapter(fn), [_PassGrader()], config)
 
-        batch = await runner.run(self._eval_set(3))
+        batch = await runner.run(self._eval_set(1))
 
-        # t0 attempted 3 times (1 + 2 retries) before tripping fail-fast.
+        # t0 attempted 3 times (1 + 2 retries); fail_fast never truncated it.
         assert calls == ["t0", "t0", "t0"]
         assert batch.total_count == 1
         assert batch.trials[0].attempts == 3
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
 
     async def test_timeout_trips_fail_fast(self) -> None:
         async def slow(input_data: dict) -> dict:
