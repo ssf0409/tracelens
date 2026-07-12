@@ -85,6 +85,12 @@ manager.create_canary_baseline(
 manager.save()
 ```
 
+All `BaselineManager` write APIs also accept `decision_spec=`. For canaries,
+`fingerprint` is optional when a spec is given — it is derived from
+`decision_spec.fingerprint` — and the stored spec is what enables noise-aware
+comparison (`compare_with_specs()`) in the CI gate. A hand-typed `fingerprint=`
+string still works if you don't build specs.
+
 Commit the generated `eval/baselines/baselines.json` file. Treat it like a test
 fixture: changes should be reviewed, and the PR should explain why the baseline
 is being created or promoted.
@@ -190,14 +196,28 @@ Expected output:
 True Baseline promoted successfully
 ```
 
+`try_promote` and `force_promote` also accept `decision_spec=`; promotion then
+refreshes the stored spec (archiving the previous one in `previous_versions`)
+and derives the new fingerprint from it, so the baseline's spec can never drift
+from its fingerprint.
+
 For canaries, prefer manual review. `CANARY` baselines deliberately do not
 auto-promote; use `force_promote(...)` only after a maintainer approves the new
 floor and the associated `DecisionSpec` fingerprint.
 
 ## 7. Wire The Comparison Into CI
 
-In a downstream project, run your eval harness on pull requests and exit with a
-failure when the regression report blocks:
+If you run evals through the CLI, `tracelens run --baseline-check
+--baselines-file eval/baselines/baselines.json --fail-on-regression moderate`
+does this end to end. Exit codes: 0 = gate passed, 1 = gate blocked (a blocking
+regression, or `--require-baselines` with tasks missing baselines), 2 =
+misconfigured gate (no `--baselines-file`, or a missing/unparseable file —
+checked before the eval runs). The gate always prints a summary line
+(`N checked, M skipped (no baseline), B blocking regression(s)`) plus per-task
+warnings for missing baselines.
+
+For a hand-rolled Python gate, run your eval harness on pull requests and exit
+with a failure when the regression report blocks:
 
 ```python
 import sys

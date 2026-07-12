@@ -2,14 +2,17 @@
 
 import asyncio
 from datetime import UTC, datetime
-from pathlib import Path
 
 from tracelens.core.grader import CodeGrader
 from tracelens.core.task import EvalSet, Task
 from tracelens.core.transcript import Transcript
 from tracelens.core.trial import InfraError, TrialStatus
 from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
-from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.execution.runner import (
+    DEFAULT_INFRA_EXCEPTION_TYPES,
+    EvaluationRunner,
+    RunnerConfig,
+)
 
 
 class _PassGrader(CodeGrader):
@@ -422,119 +425,242 @@ class TestInfraErrorClassification:
         assert batch.passed_count == 2
 
 
-# --- Fail-fast semantics ---
+class TestConfigurableInfraClassification:
+    """Which exception types count as infra is downstream policy — one
+    team's OSError (disk full on a shared runner) is another team's agent
+    bug. RunnerConfig.infra_exception_types makes the set explicit and
+    extensible instead of a hard-coded module constant."""
+
+    async def test_oserror_is_task_failure_by_default(self) -> None:
+        """The default set stays conservative: OSError subclasses like
+        FileNotFoundError are usually agent bugs, so they must not
+        silently inflate the infra-error rate."""
+        async def disk_full(input_data: dict) -> dict:
+            raise OSError(28, "No space left on device")
+
+        runner = EvaluationRunner(SimpleAdapter(disk_full), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.FAILED
+        assert batch.infra_error_count == 0
+
+    async def test_extended_types_classify_oserror_as_infra(self) -> None:
+        async def disk_full(input_data: dict) -> dict:
+            raise OSError(28, "No space left on device")
+
+        config = RunnerConfig(
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)
+        )
+        runner = EvaluationRunner(SimpleAdapter(disk_full), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
+        assert batch.infra_error_rate == 1.0
+
+    async def test_extended_types_apply_to_setup_failures(self) -> None:
+        class _OSErrorSetup(AgentAdapter):
+            async def setup(self, task: Task) -> None:
+                raise OSError("sandbox mount failed")
+
+            async def run(self, task: Task) -> Transcript:
+                return Transcript(task_id=task.task_id, final_output={})
+
+        config = RunnerConfig(
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)
+        )
+        runner = EvaluationRunner(_OSErrorSetup(), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
+
+    async def test_runner_timeout_still_wins_over_extended_types(self) -> None:
+        """TimeoutError is a subclass of OSError on Python >= 3.10; the
+        runner's own budget timeout must stay classified TIMEOUT even
+        when OSError is configured as infra."""
+        async def too_slow(input_data: dict) -> dict:
+            await asyncio.sleep(1.0)
+            return {}
+
+        config = RunnerConfig(
+            timeout_seconds=0.05,
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,),
+        )
+        runner = EvaluationRunner(SimpleAdapter(too_slow), [_PassGrader()], config)
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.TIMEOUT
+
+    async def test_default_constant_is_conservative_and_public(self) -> None:
+        assert DEFAULT_INFRA_EXCEPTION_TYPES == (InfraError, MemoryError, ConnectionError)
+        assert RunnerConfig().infra_exception_types == DEFAULT_INFRA_EXCEPTION_TYPES
+
+
+class TestAdapterTimeoutClassification:
+    """Adapter-internal TimeoutError must not be confused with the
+    runner's own budget timeout (same exception type on Python >= 3.11):
+    the budget is TIMEOUT; adapter timeouts classify through
+    infra_exception_types (FAILED by default)."""
+
+    async def test_adapter_raised_timeout_is_failed_by_default(self) -> None:
+        async def upstream_timeout(input_data: dict) -> dict:
+            raise TimeoutError("upstream read timeout")
+
+        runner = EvaluationRunner(SimpleAdapter(upstream_timeout), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.FAILED
+        assert "upstream read timeout" in trial.error_message
+
+    async def test_adapter_raised_timeout_classifies_infra_when_configured(
+        self,
+    ) -> None:
+        async def upstream_timeout(input_data: dict) -> dict:
+            raise TimeoutError("upstream read timeout")
+
+        config = RunnerConfig(
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (TimeoutError,)
+        )
+        runner = EvaluationRunner(
+            SimpleAdapter(upstream_timeout), [_PassGrader()], config
+        )
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR
 
 
 class TestFailFast:
-    """RunnerConfig.fail_fast stops scheduling new trials after the first
-    execution failure (FAILED or INFRA_ERROR); queued trials are recorded
-    as SKIPPED rather than silently dropped."""
+    """fail_fast stops scheduling new work after the first execution
+    failure. No placeholder trials are created: pass rates, the baseline
+    gate, and checkpoints only ever see trials that actually executed,
+    and a checkpoint resume naturally runs the remainder."""
 
-    async def test_fail_fast_skips_pending_trials_after_failure(self):
-        """After the first FAILED trial, queued trials are not executed;
-        they are recorded as SKIPPED so the batch stays accountable."""
-        calls: list[int] = []
+    @staticmethod
+    def _failing_on(task_ids: set[str], exc: type[Exception] = RuntimeError):
+        calls: list[str] = []
 
-        async def fail_first(input_data: dict) -> dict:
-            calls.append(input_data["n"])
-            if input_data["n"] == 0:
-                raise RuntimeError("boom")
+        async def fn(input_data: dict) -> dict:
+            # SimpleAdapter passes input_data; encode task id in it.
+            task_id = input_data["id"]
+            calls.append(task_id)
+            if task_id in task_ids:
+                raise exc(f"boom on {task_id}")
             return {"ok": True}
 
-        config = RunnerConfig(fail_fast=True, max_concurrency=1)
-        runner = EvaluationRunner(SimpleAdapter(fail_first), [_PassGrader()], config)
-        batch = await runner.run(_make_eval_set(4))
+        return fn, calls
 
-        # Only the failing trial actually ran.
-        assert calls == [0]
-        # Every work item is still accounted for in the batch.
-        assert batch.total_count == 4
-        statuses = [t.status for t in batch.trials]
-        assert statuses.count(TrialStatus.FAILED) == 1
-        assert statuses.count(TrialStatus.SKIPPED) == 3
-        assert batch.all_complete
-
-        skipped = [t for t in batch.trials if t.status == TrialStatus.SKIPPED]
-        for trial in skipped:
-            assert "fail_fast" in trial.error_message
-            assert trial.outcomes == []  # never ran, never graded
-            assert trial.transcript is None
-
-    async def test_fail_fast_triggers_on_infra_error(self):
-        """INFRA_ERROR trials trigger fail-fast just like FAILED ones."""
-        calls: list[int] = []
-
-        async def infra_fail_first(input_data: dict) -> dict:
-            calls.append(input_data["n"])
-            if input_data["n"] == 0:
-                raise InfraError("sandbox died")
-            return {"ok": True}
-
-        config = RunnerConfig(fail_fast=True, max_concurrency=1)
-        runner = EvaluationRunner(
-            SimpleAdapter(infra_fail_first), [_PassGrader()], config
+    @staticmethod
+    def _eval_set(n: int) -> EvalSet:
+        return EvalSet(
+            name="s",
+            tasks=[
+                Task(
+                    task_id=f"t{i}",
+                    name=f"t{i}",
+                    description="d",
+                    input_data={"id": f"t{i}"},
+                )
+                for i in range(n)
+            ],
         )
-        batch = await runner.run(_make_eval_set(3))
 
-        assert calls == [0]
-        statuses = [t.status for t in batch.trials]
-        assert statuses.count(TrialStatus.INFRA_ERROR) == 1
-        assert statuses.count(TrialStatus.SKIPPED) == 2
-
-    async def test_fail_fast_disabled_runs_everything(self):
-        """Default (fail_fast=False): failures never stop the batch."""
-        calls: list[int] = []
-
-        async def always_fail(input_data: dict) -> dict:
-            calls.append(input_data["n"])
-            raise RuntimeError("boom")
-
-        config = RunnerConfig(max_concurrency=1)
-        runner = EvaluationRunner(SimpleAdapter(always_fail), [_PassGrader()], config)
-        batch = await runner.run(_make_eval_set(3))
-
-        assert len(calls) == 3
-        assert all(t.status == TrialStatus.FAILED for t in batch.trials)
-
-    async def test_fail_fast_ignores_graded_failures(self):
-        """A trial that executes fine but fails grading is COMPLETED, not
-        FAILED — it must not trip fail-fast, which targets execution errors."""
+    async def test_stops_scheduling_after_failure_without_placeholders(
+        self,
+    ) -> None:
+        fn, calls = self._failing_on({"t1"})
         config = RunnerConfig(fail_fast=True, max_concurrency=1)
-        runner = EvaluationRunner(SimpleAdapter(_echo_fn), [_FailGrader()], config)
-        batch = await runner.run(_make_eval_set(3))
+        runner = EvaluationRunner(SimpleAdapter(fn), [_PassGrader()], config)
 
-        assert all(t.status == TrialStatus.COMPLETED for t in batch.trials)
-        assert batch.pass_rate == 0.0
+        batch = await runner.run(self._eval_set(5))
 
-    async def test_resume_reruns_skipped_trials(self, tmp_path: Path):
-        """SKIPPED trials in a checkpoint are not real results: resuming a
-        fail-fast run must execute them instead of loading them as done."""
-        ckpt = str(tmp_path / "checkpoint.json")
+        assert calls == ["t0", "t1"]  # t2..t4 never started
+        assert batch.total_count == 2  # no SKIPPED placeholders
+        assert all(t.status != TrialStatus.SKIPPED for t in batch.trials)
 
-        async def fail_first(input_data: dict) -> dict:
-            if input_data["n"] == 0:
-                raise RuntimeError("boom")
-            return {"ok": True}
+    async def test_infra_error_trips_only_after_retries_exhausted(self) -> None:
+        fn, calls = self._failing_on({"t0"}, exc=ConnectionError)
+        config = RunnerConfig(
+            fail_fast=True,
+            max_concurrency=1,
+            max_infra_retries=2,
+            infra_retry_backoff_seconds=0.0,
+        )
+        runner = EvaluationRunner(SimpleAdapter(fn), [_PassGrader()], config)
+
+        batch = await runner.run(self._eval_set(3))
+
+        # t0 attempted 3 times (1 + 2 retries) before tripping fail-fast.
+        assert calls == ["t0", "t0", "t0"]
+        assert batch.total_count == 1
+        assert batch.trials[0].attempts == 3
+
+    async def test_timeout_trips_fail_fast(self) -> None:
+        async def slow(input_data: dict) -> dict:
+            await asyncio.sleep(1.0)
+            return {}
 
         config = RunnerConfig(
-            fail_fast=True, max_concurrency=1, checkpoint_path=ckpt
+            fail_fast=True, max_concurrency=1, timeout_seconds=0.05
         )
-        runner = EvaluationRunner(SimpleAdapter(fail_first), [_PassGrader()], config)
-        first = await runner.run(_make_eval_set(3))
-        assert sum(t.status == TrialStatus.SKIPPED for t in first.trials) == 2
+        runner = EvaluationRunner(SimpleAdapter(slow), [_PassGrader()], config)
 
-        async def now_ok(input_data: dict) -> dict:
+        batch = await runner.run(self._eval_set(3))
+
+        assert batch.total_count == 1
+        assert batch.trials[0].status == TrialStatus.TIMEOUT
+
+    async def test_disabled_runs_everything(self) -> None:
+        fn, calls = self._failing_on({"t0"})
+        config = RunnerConfig(fail_fast=False, max_concurrency=1)
+        runner = EvaluationRunner(SimpleAdapter(fn), [_PassGrader()], config)
+
+        batch = await runner.run(self._eval_set(4))
+
+        assert len(calls) == 4
+        assert batch.total_count == 4
+
+    async def test_graded_failures_do_not_trip(self) -> None:
+        async def ok(input_data: dict) -> dict:
             return {"ok": True}
 
-        config2 = RunnerConfig(
-            fail_fast=True, max_concurrency=1, checkpoint_path=ckpt
-        )
-        runner2 = EvaluationRunner(SimpleAdapter(now_ok), [_PassGrader()], config2)
-        second = await runner2.run(_make_eval_set(3))
+        config = RunnerConfig(fail_fast=True, max_concurrency=1)
+        runner = EvaluationRunner(SimpleAdapter(ok), [_FailGrader()], config)
 
-        statuses = [t.status for t in second.trials]
-        # The FAILED trial is a real result and stays loaded from checkpoint;
-        # the two previously-skipped trials were re-run and completed.
-        assert statuses.count(TrialStatus.FAILED) == 1
-        assert statuses.count(TrialStatus.COMPLETED) == 2
-        assert statuses.count(TrialStatus.SKIPPED) == 0
+        batch = await runner.run(self._eval_set(3))
+
+        assert batch.total_count == 3  # grading failures are not execution failures
+
+    async def test_teardown_failure_does_not_trip(self) -> None:
+        class _FlakyTeardown(AgentAdapter):
+            async def run(self, task: Task) -> Transcript:
+                return Transcript(task_id=task.task_id, final_output={})
+
+            async def teardown(self, task: Task, transcript) -> None:
+                raise RuntimeError("cleanup flake")
+
+        config = RunnerConfig(fail_fast=True, max_concurrency=1)
+        runner = EvaluationRunner(_FlakyTeardown(), [_PassGrader()], config)
+
+        batch = await runner.run(self._eval_set(3))
+
+        # Teardown flakiness marks trials FAILED but must not abort the suite.
+        assert batch.total_count == 3
+
+    async def test_fail_fast_resume_runs_remainder(self, tmp_path) -> None:
+        fn, calls = self._failing_on({"t0"})
+        config = RunnerConfig(
+            fail_fast=True, max_concurrency=1, checkpoint_path=str(tmp_path / "c.json")
+        )
+        runner = EvaluationRunner(SimpleAdapter(fn), [_PassGrader()], config)
+        first = await runner.run(self._eval_set(3))
+        assert first.total_count == 1
+
+        fn2, calls2 = self._failing_on(set())
+        resume_config = RunnerConfig(
+            fail_fast=False, max_concurrency=1, checkpoint_path=str(tmp_path / "c.json")
+        )
+        resumed = EvaluationRunner(SimpleAdapter(fn2), [_PassGrader()], resume_config)
+        batch = await resumed.run(self._eval_set(3))
+
+        assert sorted(calls2) == ["t1", "t2"]  # only the remainder ran
+        assert batch.total_count == 3

@@ -71,7 +71,10 @@ flaky agent passes review. This is important enough to have its own page:
 **Harness failure vs. agent failure.** A failing grade is not the same as a
 broken eval. TraceLens tracks two separate error rates on every `TrialBatch`:
 
-- `infra_error` — the agent run itself crashed (timeout, sandbox died).
+- `infra_error` — the environment failed the run (network dropped, OOM,
+  sandbox died — or any exception type you classify as infra via
+  `RunnerConfig.infra_exception_types`). A run that blows its time budget is
+  `TIMEOUT` and counts against the agent, not as infra.
 - `grader_error` — a grader threw while judging (the *grading harness* broke).
 
 A spike in either means your evaluation is broken, **not** that the agent got

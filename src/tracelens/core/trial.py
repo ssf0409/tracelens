@@ -25,7 +25,7 @@ class TrialStatus(str, Enum):
     COMPLETED = "completed"        # Finished successfully
     FAILED = "failed"              # Task-level failure (agent couldn't solve it)
     INFRA_ERROR = "infra_error"    # Infrastructure failure (OOM, network, sandbox)
-    TIMEOUT = "timeout"             # Exceeded timeout
+    TIMEOUT = "timeout"             # Runner budget timeout (adapter-raised timeouts classify as FAILED/INFRA_ERROR)
     SKIPPED = "skipped"             # Skipped (e.g., due to filter)
 
 
@@ -40,12 +40,17 @@ class InfraError(Exception):
     which measured infra error rates dropping from 5.8% at strict enforcement
     to 0.5% uncapped).
 
-    When the runner catches this exception (or other known-infra exception
-    types like ``MemoryError``, ``ConnectionError``, ``TimeoutError`` from
-    the network stack, or ``OSError``), the trial's status is set to
-    ``TrialStatus.INFRA_ERROR`` rather than ``FAILED``, and the infra error
-    rate is surfaced separately in reports so you can decide whether a
-    regression is real or a noise artefact.
+    When the runner catches this exception — or ``MemoryError`` /
+    ``ConnectionError``, the conservative default set — the trial's status
+    is set to ``TrialStatus.INFRA_ERROR`` rather than ``FAILED``, and the
+    infra error rate is surfaced separately in reports so you can decide
+    whether a regression is real or a noise artefact. Broader classes
+    (``OSError``, ``TimeoutError``, custom rate-limit errors, ...) are
+    downstream policy: add them via ``RunnerConfig.infra_exception_types``
+    or the CLI's ``--infra-exceptions``. Only the runner's own budget
+    timeout is classified ``TrialStatus.TIMEOUT``; a ``TimeoutError``
+    raised inside the adapter classifies through the configurable set
+    (``FAILED`` by default).
 
     Example:
         class MyAdapter(AgentAdapter):
@@ -87,6 +92,11 @@ class Trial(BaseModel):
     # Run tracking (for pass@k)
     run_index: int = 0
     total_runs: int = 1
+
+    # Number of execution attempts behind this trial. >1 means earlier
+    # attempts hit infra errors and were retried (RunnerConfig.max_infra_retries);
+    # the retried-away error messages are kept in metadata["infra_retry_errors"].
+    attempts: int = 1
 
     # Status
     status: TrialStatus = TrialStatus.PENDING

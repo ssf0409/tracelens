@@ -73,7 +73,6 @@ class Task(BaseModel):
 
     # Execution configuration
     timeout_seconds: float = 300.0
-    max_retries: int = 1
 
     def matches_filter(
         self,

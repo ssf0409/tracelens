@@ -223,7 +223,14 @@ batch = await runner.run(eval_set)
 If an adapter already attached its own `decision_spec` to a transcript, the runner
 leaves it untouched; otherwise it fills in the runner-level spec. The result: every
 trial in the batch records the configuration that produced it, so any baseline you
-promote from this batch carries its fingerprint.
+promote from this batch carries its fingerprint. Baselines can carry more than
+the fingerprint: every `BaselineManager` write API (`update_baseline`,
+`create_capability_baseline`, `create_canary_baseline`, `promote`,
+`try_promote`, `force_promote`) accepts `decision_spec=` and stores the full
+spec on `TaskBaseline.decision_spec` — creation derives the fingerprint from the
+spec when one isn't passed, and promotion refreshes the stored spec (archiving
+the previous one in `previous_versions`) so it can't drift from the fingerprint.
+The stored spec is what enables the infra-noise-aware comparison below.
 
 ## Infra-noise-aware regression
 
@@ -233,7 +240,13 @@ matters: resource-config changes alone can swing agentic-eval scores by several
 percentage points — often more than the gap between frontier models.
 
 `RegressionDetector.compare_with_specs(...)` takes both the baseline and current
-specs. When their `InfraConfig` differs, it sets `report.infra_config_mismatch`
+specs. You don't have to call this by hand in CI: `tracelens run
+--baseline-check` runs `compare_with_specs()` automatically, taking the baseline
+side from the spec stored on the baseline (`TaskBaseline.decision_spec`) and the
+current side from `--decision-spec path.json` or from adapter-stamped
+transcripts. When the infra configs differ, the gate prints the field-level diff
+and flags sub-noise-band regressions as non-blocking; `--noise-band <float>`
+tunes the band (default 0.03). When their `InfraConfig` differs, it sets `report.infra_config_mismatch`
 (with the field-level `report.infra_config_diff`) and marks sub-noise-band
 regressions as `within_noise_band=True`, so default CI gates don't block on a
 delta that is plausibly just infra noise:
@@ -254,7 +267,13 @@ print(report.should_block_ci())
 ```
 
 `report.blocking_regressions` filters out anything flagged `within_noise_band`, and
-`should_block_ci()` keys off that filtered set. The full runnable example —
+`should_block_ci()` keys off that filtered set. `compare_with_specs()` also
+recomputes `report.overall_severity` from the blocking set — a noise-only report
+reads `NONE` (while `has_regression` stays `True`, so the drop is still
+surfaced) — and appends a noise-band note to `report.summary`. The band is
+`noise_band_absolute` on the `RegressionDetector` constructor (default `0.03`
+absolute on a 0-1 metric); to count every regression regardless of the band,
+call `should_block_ci(ignore_noise_band=False)`. The full runnable example —
 including an `InfraError`-raising adapter that simulates an OOM kill so infra
 failures are classified separately from task failures — is at
 [`examples/noise_aware_regression.py`](https://github.com/ssf0409/tracelens/blob/main/examples/noise_aware_regression.py).

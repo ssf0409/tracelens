@@ -143,12 +143,40 @@ jobs:
 
 Notes:
 
-- `--baseline-check` blocks only when `--baselines-file` is supplied and a
-  matching baseline exists for a task.
+- `--baseline-check` requires `--baselines-file`, and the file must exist —
+  a missing flag or file exits 2 before the eval runs, so a misconfigured
+  gate can never pass vacuously. Exit 1 means the gate blocked on a
+  regression; exit 2 means the gate itself was misconfigured.
+- Tasks with no stored baseline are skipped with a stderr warning and
+  counted in the gate summary line (`N checked, M skipped (no baseline),
+  K blocking regression(s)`). Add `--require-baselines` to fail instead
+  when any task lacks a baseline.
+- Trials that failed for harness reasons (`INFRA_ERROR` status or a
+  grader crash) are excluded from the baseline comparison — they surface
+  via `infra_error_rate` / `grader_error_rate` and a per-task exclusion
+  note instead of dragging pass-rate samples to zero. A task with no
+  gradable trials left is counted as `skipped (no gradable trials)`.
 - The current CLI compares task-level `pass_rate` and `mean_score` against
   baselines. Store those metric names when you want CLI blocking.
+- Pass `--decision-spec run_spec.json` (or stamp `DecisionSpec` on
+  transcripts in your adapter) and store each baseline with its
+  `decision_spec` to enable infra-noise-aware comparison: sub-noise-band
+  regressions under a mismatched infra config are flagged but not
+  blocking. Tune the band with `--noise-band` (default 0.03).
+- `--infra-exceptions builtins.OSError myproject.errors.RateLimitError`
+  extends which exception types count as `INFRA_ERROR` instead of agent
+  failures — downstream policy, conservative by default.
 - Use GitHub job summaries or artifacts for reports. `tracelens report`
   supports `markdown`, `json`, and `html` output formats.
+- On flaky CI infrastructure, add `--max-infra-retries 2`: trials that end in
+  `INFRA_ERROR` (network drops, OOM kills) are re-attempted with exponential
+  backoff before counting against `infra_error_rate`. Agent failures and
+  timeouts never retry, so this cannot inflate the pass rate.
+- For long suites, `--checkpoint path.json` persists progress; re-running the
+  job with the same file resumes, skipping completed trials and re-running
+  infra-errored ones. Checkpoints are bound to the eval set, adapter, and
+  graders that produced them — resuming with a mismatched or corrupt file
+  fails with a clear error rather than mixing results from different runs.
 
 ## Baseline Files
 

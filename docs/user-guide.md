@@ -166,11 +166,22 @@ batch = await EvaluationRunner(adapter, [composite], config).run(eval_set)
 
 `run` is async — call it from `asyncio.run(...)`. For long suites, `RunnerConfig`
 also takes a progress callback and a `checkpoint_path` so a rerun resumes
-(`--progress` / `--checkpoint` on the CLI). `fail_fast=True` stops scheduling
-new trials after the first `FAILED` or `INFRA_ERROR` trial — the rest are
-recorded as `SKIPPED` — useful for smoke runs where one execution failure
-means the harness is broken.
-
+(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials but
+re-runs infra-errored ones, and refuses (with `CheckpointError`) a checkpoint
+written by a different eval set, adapter, graders, or `DecisionSpec` —
+identity is class-path based, so pass a `DecisionSpec` to distinguish two
+configs of the same adapter class, and use stable explicit `task_id`s
+(auto-generated ids change every run and can never resume). On flaky
+infrastructure,
+`max_infra_retries` re-attempts `INFRA_ERROR` trials with exponential backoff —
+agent failures and timeouts never retry, so retries can't inflate the pass rate.
+`fail_fast=True` stops scheduling new work after the first trial whose
+execution fails (`FAILED`, `INFRA_ERROR` after retries are exhausted, or
+`TIMEOUT`) — useful for smoke runs where one execution failure means the
+harness is broken. In-flight trials finish normally, unstarted work simply
+never runs (no placeholder trials, so pass rates and the baseline gate only
+see trials that actually executed), and a grading failure or a teardown
+error never trips it.
 **Reading the `TrialBatch`.** Three things matter, in order:
 
 1. **Harness vs. agent.** Check `batch.infra_error_rate` and
@@ -227,7 +238,14 @@ tracelens run \
 ```
 
 Add `--baseline-check --baselines-file eval/baselines.json --fail-on-regression
-moderate` to gate CI, and `--progress` / `--checkpoint path.json` for long runs.
+moderate` to gate CI. The gate exits 1 when it blocks on a regression and 2 when
+it is misconfigured (`--baseline-check` without a readable `--baselines-file`
+refuses to run rather than passing vacuously), and always prints a summary of
+what it checked. Tasks with no stored baseline are skipped with a warning — add
+`--require-baselines` to fail instead. Use `--progress` / `--checkpoint
+path.json` / `--max-infra-retries N` for long runs. See
+[CI/CD Integration](ci-cd-integration.md) for the noise-aware flags
+(`--decision-spec`, `--noise-band`, `--infra-exceptions`).
 `tracelens report --results results.json --format markdown` re-renders a saved
 run.
 

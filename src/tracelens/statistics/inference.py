@@ -501,8 +501,9 @@ def compare_to_baseline_summary(
         (current_std ** 2 / current_n)
     )
 
-    # Degrees of freedom (Welch-Satterthwaite)
-    if baseline_std > 0 and current_std > 0:
+    # Degrees of freedom (Welch-Satterthwaite). Undefined when either side
+    # has a single sample (n-1 = 0), so fall back to the pooled df floor.
+    if baseline_std > 0 and current_std > 0 and baseline_n > 1 and current_n > 1:
         num = (baseline_std ** 2 / baseline_n + current_std ** 2 / current_n) ** 2
         denom = (
             (baseline_std ** 2 / baseline_n) ** 2 / (baseline_n - 1) +
@@ -510,7 +511,7 @@ def compare_to_baseline_summary(
         )
         df = num / denom if denom > 0 else 1
     else:
-        df = baseline_n + current_n - 2
+        df = max(baseline_n + current_n - 2, 1)
 
     # CI using t-distribution
     alpha = (1 - confidence) / 2
@@ -522,12 +523,13 @@ def compare_to_baseline_summary(
     # Significance
     is_significant = not (ci_lower <= 0 <= ci_upper)
 
-    # Effect size (approximate)
+    # Effect size (approximate). The pooled denominator needs at least one
+    # side with n > 1; otherwise treat the pooled spread as undefined.
     pooled_std = np.sqrt(
         ((baseline_n - 1) * baseline_std ** 2 +
          (current_n - 1) * current_std ** 2) /
         (baseline_n + current_n - 2)
-    ) if baseline_std > 0 or current_std > 0 else 1.0
+    ) if (baseline_std > 0 or current_std > 0) and baseline_n + current_n > 2 else 1.0
 
     cohens_d_val = delta / pooled_std if pooled_std > 0 else 0.0
 

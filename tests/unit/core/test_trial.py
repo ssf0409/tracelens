@@ -34,6 +34,15 @@ class TestTrial:
         assert trial.total_runs == 1
         assert trial.status == TrialStatus.PENDING
         assert trial.outcomes == []
+        assert trial.attempts == 1
+
+    def test_trial_attempts_roundtrip(self):
+        """Attempt count (from infra retries) survives serialization."""
+        batch = TrialBatch(trials=[Trial(task_id="task-001", attempts=3)])
+
+        restored = TrialBatch.from_dict(batch.to_dict())
+
+        assert restored.trials[0].attempts == 3
 
     def test_trial_creation_full(self, sample_trial: Trial):
         """Test creating a full trial."""

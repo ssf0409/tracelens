@@ -49,8 +49,8 @@ No PyPI API token is required when trusted publishing is configured correctly.
 
    ```bash
    uv lock --check
-   uv run --frozen pytest -q
-   uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+   uv run --frozen --extra dev pytest -q
+   uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
    uv run --frozen --extra dev mypy src/tracelens/
    uv build --sdist --wheel
    ```
