@@ -29,14 +29,50 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   baseline check now runs `compare_with_specs()` — so sub-noise-band
   regressions under a mismatched infra config are flagged but not
   blocking, with the infra diff printed. `--noise-band` tunes the band.
+- **DecisionSpec write path.** `update_baseline`,
+  `create_capability_baseline`, `create_canary_baseline`, `promote`,
+  `try_promote`, and `force_promote` all accept a `decision_spec`;
+  creation derives the fingerprint from it when one isn't passed, and
+  promotion refreshes the stored spec (archiving the old one in
+  `previous_versions`) so it can't drift from the fingerprint.
+- **`DEFAULT_INFRA_EXCEPTION_TYPES` is exported top-level** (`from
+  tracelens import DEFAULT_INFRA_EXCEPTION_TYPES`), matching the
+  documented `+ (OSError,)` extension pattern.
 
 ### Changed
 
 - **Gate misconfiguration is now an error.** `tracelens run
-  --baseline-check` without `--baselines-file`, or with a nonexistent
-  baselines file, exits 2 before the eval runs instead of silently
-  skipping the entire regression check. `--baselines-file` without
-  `--baseline-check` warns that it has no effect.
+  --baseline-check` without `--baselines-file`, or with a nonexistent or
+  unparseable baselines file, exits 2 before the eval runs instead of
+  silently skipping the entire regression check (the file is fully
+  loaded during preflight, so a corrupt file can no longer burn a full
+  eval before crashing). `--require-baselines` or `--noise-band` without
+  `--baseline-check` is also an exit-2 usage error; `--baselines-file`
+  alone warns that it has no effect.
+- **Harness failures no longer masquerade as agent regressions in the
+  gate.** The baseline check excludes `INFRA_ERROR` and grader-crash
+  trials from the per-trial comparison samples (they remain visible via
+  `infra_error_rate` / `grader_error_rate`, a per-task exclusion note,
+  and a `skipped (no gradable trials)` count when nothing gradable
+  remains). `TIMEOUT` trials still count against the agent.
+- **Adapter-raised `TimeoutError` is no longer reported as a budget
+  timeout.** Only the runner's own `asyncio.wait_for` budget produces
+  `TrialStatus.TIMEOUT`; a `TimeoutError` from inside the adapter (e.g.
+  `socket.timeout`) now classifies through `infra_exception_types`
+  (`FAILED` by default, infra if configured) and keeps its original
+  message.
+- **Noise-downgraded reports are internally consistent.**
+  `compare_with_specs()` now recomputes `overall_severity` from the
+  blocking regressions and appends a noise-band note to the summary, so
+  a noise-only report no longer reads `SEVERE` while
+  `should_block_ci()` returns False. `should_block_ci(...,
+  ignore_noise_band=False)` still counts every regression.
+- **No more fabricated blocking on underpowered zero-variance samples.**
+  A consistent drop that a valid z-test cannot call significant (e.g.
+  five identical scores within one baseline standard deviation of the
+  mean) no longer blocks CI — previously it always blocked via the
+  fabricated p=0.0. Decisive drops still block; degenerate cases with no
+  valid test still block on thresholds with `insufficient_data=True`.
 - **No fabricated significance on degenerate samples.**
   `MetricRegression.p_value` is `None` (not `0.0`) when no valid test
   exists — n=1 with `baseline_std=0`, or zero variance on both sides. Such

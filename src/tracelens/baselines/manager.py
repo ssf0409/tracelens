@@ -305,6 +305,7 @@ class TaskBaseline(BaseModel):
         sample_size: int = 1,
         reason: str = "auto",
         fingerprint: str | None = None,
+        decision_spec: DecisionSpec | None = None,
     ) -> None:
         """Promote baseline to new values.
 
@@ -316,6 +317,10 @@ class TaskBaseline(BaseModel):
             sample_size: Number of samples
             reason: Reason for promotion
             fingerprint: Optional new fingerprint
+            decision_spec: DecisionSpec of the run being promoted. Pass it
+                whenever the baseline carries one — a fingerprint refresh
+                without the matching spec leaves noise-aware comparison
+                diffing against the pre-promotion infra config.
         """
         # Archive current version
         self.previous_versions.append({
@@ -323,6 +328,11 @@ class TaskBaseline(BaseModel):
             "updated_at": self.updated_at.isoformat(),
             "metrics": {k: v.model_dump() for k, v in self.metrics.items()},
             "fingerprint": self.fingerprint,
+            "decision_spec": (
+                self.decision_spec.model_dump(mode="json")
+                if self.decision_spec
+                else None
+            ),
         })
 
         # Update version
@@ -362,6 +372,10 @@ class TaskBaseline(BaseModel):
         self.promotion_count += 1
         self.last_promotion_reason = reason
 
+        if decision_spec is not None:
+            self.decision_spec = decision_spec
+            if fingerprint is None:
+                fingerprint = decision_spec.fingerprint
         if fingerprint:
             self.fingerprint = fingerprint
             self.fingerprint_short = fingerprint[:12] if fingerprint else None
@@ -488,6 +502,7 @@ class BaselineManager:
         metric_stds: dict[str, float] | None = None,
         sample_size: int = 1,
         keep_thresholds: bool = True,
+        decision_spec: DecisionSpec | None = None,
     ) -> TaskBaseline:
         """Update or create a baseline with new metric values.
 
@@ -497,6 +512,9 @@ class BaselineManager:
             metric_stds: Optional dict of metric_name -> std deviation
             sample_size: Number of samples used to compute metrics
             keep_thresholds: Keep existing thresholds when updating
+            decision_spec: DecisionSpec of the run these metrics came
+                from; stored on the baseline to enable noise-aware
+                comparison
 
         Returns:
             The updated TaskBaseline
@@ -544,6 +562,12 @@ class BaselineManager:
                 relative_threshold=rel_threshold,
                 higher_is_better=higher_is_better,
             )
+
+        if decision_spec is not None:
+            existing.decision_spec = decision_spec
+            if existing.fingerprint is None:
+                existing.fingerprint = decision_spec.fingerprint
+                existing.fingerprint_short = decision_spec.fingerprint_short
 
         existing.updated_at = utc_now()
         existing.git_commit = self._get_git_commit()
@@ -657,10 +681,11 @@ class BaselineManager:
         self,
         task_id: str,
         metrics: dict[str, float],
-        fingerprint: str,
+        fingerprint: str | None = None,
         metric_stds: dict[str, float] | None = None,
         sample_size: int = 1,
         task_name: str | None = None,
+        decision_spec: DecisionSpec | None = None,
     ) -> TaskBaseline:
         """Create a protected canary baseline.
 
@@ -670,19 +695,27 @@ class BaselineManager:
         Args:
             task_id: The task identifier
             metrics: Dict of metric_name -> value
-            fingerprint: DecisionSpec fingerprint (required for canary)
+            fingerprint: DecisionSpec fingerprint (required for canary;
+                derived from decision_spec when omitted)
             metric_stds: Optional dict of metric_name -> std deviation
             sample_size: Number of samples used to compute metrics
             task_name: Optional human-readable name
+            decision_spec: Full DecisionSpec of the recording run; stored
+                for noise-aware comparison and used to derive the
+                fingerprint when one isn't passed
 
         Returns:
             The created canary baseline
 
         Raises:
-            ValueError: If fingerprint is not provided
+            ValueError: If neither fingerprint nor decision_spec is provided
         """
+        if not fingerprint and decision_spec is not None:
+            fingerprint = decision_spec.fingerprint
         if not fingerprint:
-            raise ValueError("Canary baselines require a fingerprint")
+            raise ValueError(
+                "Canary baselines require a fingerprint or decision_spec"
+            )
 
         baseline = TaskBaseline(
             task_id=task_id,
@@ -690,6 +723,7 @@ class BaselineManager:
             baseline_type=BaselineType.CANARY,
             fingerprint=fingerprint,
             fingerprint_short=fingerprint[:12],
+            decision_spec=decision_spec,
             promotion_policy=PromotionPolicy(allow_auto_promotion=False),
             git_commit=self._get_git_commit(),
         )
@@ -715,6 +749,7 @@ class BaselineManager:
         task_name: str | None = None,
         promotion_policy: PromotionPolicy | None = None,
         fingerprint: str | None = None,
+        decision_spec: DecisionSpec | None = None,
     ) -> TaskBaseline:
         """Create a capability baseline that can auto-update.
 
@@ -728,17 +763,24 @@ class BaselineManager:
             sample_size: Number of samples used to compute metrics
             task_name: Optional human-readable name
             promotion_policy: Custom promotion policy (default allows auto-promotion)
-            fingerprint: Optional DecisionSpec fingerprint
+            fingerprint: Optional DecisionSpec fingerprint (derived from
+                decision_spec when omitted)
+            decision_spec: Full DecisionSpec of the recording run; stored
+                for noise-aware comparison
 
         Returns:
             The created capability baseline
         """
+        if fingerprint is None and decision_spec is not None:
+            fingerprint = decision_spec.fingerprint
+
         baseline = TaskBaseline(
             task_id=task_id,
             task_name=task_name,
             baseline_type=BaselineType.CAPABILITY,
             fingerprint=fingerprint,
             fingerprint_short=fingerprint[:12] if fingerprint else None,
+            decision_spec=decision_spec,
             promotion_policy=promotion_policy or PromotionPolicy(),
             git_commit=self._get_git_commit(),
         )
@@ -762,6 +804,7 @@ class BaselineManager:
         metric_stds: dict[str, float] | None = None,
         sample_size: int = 1,
         fingerprint: str | None = None,
+        decision_spec: DecisionSpec | None = None,
     ) -> tuple[bool, str]:
         """Try to promote a baseline if criteria are met.
 
@@ -795,6 +838,7 @@ class BaselineManager:
             sample_size=sample_size,
             reason="auto_promotion",
             fingerprint=fingerprint,
+            decision_spec=decision_spec,
         )
         baseline.git_commit = self._get_git_commit()
 
@@ -808,6 +852,7 @@ class BaselineManager:
         sample_size: int = 1,
         reason: str = "manual",
         fingerprint: str | None = None,
+        decision_spec: DecisionSpec | None = None,
     ) -> TaskBaseline:
         """Force promote a baseline, bypassing policy checks.
 
@@ -839,6 +884,7 @@ class BaselineManager:
             sample_size=sample_size,
             reason=f"force:{reason}",
             fingerprint=fingerprint,
+            decision_spec=decision_spec,
         )
         baseline.git_commit = self._get_git_commit()
 

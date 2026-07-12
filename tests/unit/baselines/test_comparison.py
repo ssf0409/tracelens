@@ -483,9 +483,67 @@ class TestSmallSampleHonesty:
         assert "insufficient samples" in report.to_ci_output()
 
     def test_degenerate_regression_still_blocks_ci_on_threshold(self) -> None:
-        """User decision (2026-07-12): threshold downgrade — the gate may
-        still block on threshold-based severity even without significance."""
+        """Threshold-downgrade policy: without a valid significance test,
+        the gate may still block on threshold-based severity alone."""
         detector = RegressionDetector()
         report = detector.compare(self._degenerate_baseline(), [{"pass_rate": 0.0}])
 
         assert report.should_block_ci(RegressionSeverity.MODERATE) is True
+
+
+class TestZFallbackNonSignificantPolicy:
+    """Pins the intent of the z-fallback: a VALID test that is not
+    significant does not gate — unlike degenerate data, where no test
+    exists and thresholds alone decide. Previously this case fabricated
+    p=0.0 and always blocked."""
+
+    def test_consistent_but_nonsignificant_drop_is_not_reported(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(
+            metric_name="mean_score", value=1.2, std=0.3, sample_size=100
+        )
+        detector = RegressionDetector()
+
+        report = detector.compare(baseline, [{"mean_score": 1.0}] * 5)
+
+        # z = 0.2 / (0.3/sqrt(5)) ~= 1.49 -> p ~= 0.136: honestly not
+        # significant, so nothing is reported and the gate stays green.
+        assert report.has_regression is False
+
+
+class TestNoiseAwareSeverityConsistency:
+    """After the noise-band downgrade, overall_severity must agree with
+    the blocking decision — a noise-only report must not keep shouting
+    SEVERE while should_block_ci() returns False."""
+
+    def _specs(self) -> tuple:
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+        return (
+            DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)),
+            DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512)),
+        )
+
+    def test_noise_only_report_downgrades_overall_severity(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(
+            metric_name="pass_rate", value=0.10, std=0.001, sample_size=20
+        )
+        baseline_spec, current_spec = self._specs()
+        detector = RegressionDetector()
+
+        # -20% relative (SEVERE by thresholds) but only 0.02 absolute:
+        # inside the 0.03 noise band under mismatched infra.
+        report = detector.compare_with_specs(
+            baseline,
+            [{"pass_rate": 0.08}],
+            baseline_spec=baseline_spec,
+            current_spec=current_spec,
+        )
+
+        assert report.regressions[0].within_noise_band is True
+        assert report.should_block_ci() is False
+        assert report.overall_severity == RegressionSeverity.NONE
+        assert "noise band" in report.summary.lower()
+        # Still surfaced — has_regression reports what was observed.
+        assert report.has_regression is True

@@ -431,7 +431,7 @@ class TestConfigurableInfraClassification:
     bug. RunnerConfig.infra_exception_types makes the set explicit and
     extensible instead of a hard-coded module constant."""
 
-    async def test_oserror_is_task_failure_by_default(self):
+    async def test_oserror_is_task_failure_by_default(self) -> None:
         """The default set stays conservative: OSError subclasses like
         FileNotFoundError are usually agent bugs, so they must not
         silently inflate the infra-error rate."""
@@ -444,7 +444,7 @@ class TestConfigurableInfraClassification:
         assert batch.trials[0].status == TrialStatus.FAILED
         assert batch.infra_error_count == 0
 
-    async def test_extended_types_classify_oserror_as_infra(self):
+    async def test_extended_types_classify_oserror_as_infra(self) -> None:
         async def disk_full(input_data: dict) -> dict:
             raise OSError(28, "No space left on device")
 
@@ -457,7 +457,7 @@ class TestConfigurableInfraClassification:
         assert batch.trials[0].status == TrialStatus.INFRA_ERROR
         assert batch.infra_error_rate == 1.0
 
-    async def test_extended_types_apply_to_setup_failures(self):
+    async def test_extended_types_apply_to_setup_failures(self) -> None:
         class _OSErrorSetup(AgentAdapter):
             async def setup(self, task: Task) -> None:
                 raise OSError("sandbox mount failed")
@@ -473,7 +473,7 @@ class TestConfigurableInfraClassification:
 
         assert batch.trials[0].status == TrialStatus.INFRA_ERROR
 
-    async def test_runner_timeout_still_wins_over_extended_types(self):
+    async def test_runner_timeout_still_wins_over_extended_types(self) -> None:
         """TimeoutError is a subclass of OSError on Python >= 3.10; the
         runner's own budget timeout must stay classified TIMEOUT even
         when OSError is configured as infra."""
@@ -490,6 +490,40 @@ class TestConfigurableInfraClassification:
 
         assert batch.trials[0].status == TrialStatus.TIMEOUT
 
-    async def test_default_constant_is_conservative_and_public(self):
+    async def test_default_constant_is_conservative_and_public(self) -> None:
         assert DEFAULT_INFRA_EXCEPTION_TYPES == (InfraError, MemoryError, ConnectionError)
         assert RunnerConfig().infra_exception_types == DEFAULT_INFRA_EXCEPTION_TYPES
+
+
+class TestAdapterTimeoutClassification:
+    """Adapter-internal TimeoutError must not be confused with the
+    runner's own budget timeout (same exception type on Python >= 3.11):
+    the budget is TIMEOUT; adapter timeouts classify through
+    infra_exception_types (FAILED by default)."""
+
+    async def test_adapter_raised_timeout_is_failed_by_default(self) -> None:
+        async def upstream_timeout(input_data: dict) -> dict:
+            raise TimeoutError("upstream read timeout")
+
+        runner = EvaluationRunner(SimpleAdapter(upstream_timeout), [_PassGrader()])
+        batch = await runner.run(_make_eval_set(1))
+
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.FAILED
+        assert "upstream read timeout" in trial.error_message
+
+    async def test_adapter_raised_timeout_classifies_infra_when_configured(
+        self,
+    ) -> None:
+        async def upstream_timeout(input_data: dict) -> dict:
+            raise TimeoutError("upstream read timeout")
+
+        config = RunnerConfig(
+            infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (TimeoutError,)
+        )
+        runner = EvaluationRunner(
+            SimpleAdapter(upstream_timeout), [_PassGrader()], config
+        )
+        batch = await runner.run(_make_eval_set(1))
+
+        assert batch.trials[0].status == TrialStatus.INFRA_ERROR

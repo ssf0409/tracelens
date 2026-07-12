@@ -25,6 +25,12 @@ from tracelens.core.decision_spec import DecisionSpec
 DEFAULT_NOISE_BAND_ABSOLUTE: float = 0.03
 
 
+def _two_sided_z_p(delta: float, spread: float) -> float:
+    """Two-sided z-test p-value for a delta against a known spread."""
+    z = abs(delta) / spread
+    return float(2 * (1 - stats.norm.cdf(z)))
+
+
 class RegressionSeverity(str, Enum):
     """Severity levels for regressions."""
 
@@ -131,13 +137,19 @@ class RegressionReport(BaseModel):
             RegressionSeverity.SEVERE,
         ]
         # When the regressions list is populated, recompute severity from
-        # the filtered list so noise-band-flagged entries drop out. When
-        # it's empty (e.g. a hand-constructed report where the caller
-        # only set overall_severity), fall back to the declared severity
-        # so existing callers keep working.
-        if ignore_noise_band and self.regressions:
+        # it directly — filtered to blocking_regressions on the lenient
+        # path, unfiltered on the strict path — so the stored
+        # overall_severity (which compare_with_specs downgrades to match
+        # the blocking decision) can't defeat ignore_noise_band=False.
+        # When the list is empty (e.g. a hand-constructed report where
+        # the caller only set overall_severity), fall back to the
+        # declared severity so existing callers keep working.
+        if self.regressions:
+            considered = (
+                self.blocking_regressions if ignore_noise_band else self.regressions
+            )
             effective_severity = max(
-                (r.severity for r in self.blocking_regressions),
+                (r.severity for r in considered),
                 default=RegressionSeverity.NONE,
             )
         else:
@@ -328,8 +340,9 @@ class RegressionDetector:
             # avoid scipy's precision-loss RuntimeWarning.
             current_std = float(np.std(current_values, ddof=1))
             if np.isclose(current_std, 0.0, atol=1e-12):
-                z = abs(delta) / (baseline_std / np.sqrt(len(current_values)))
-                p_value = float(2 * (1 - stats.norm.cdf(z)))
+                p_value = _two_sided_z_p(
+                    delta, baseline_std / float(np.sqrt(len(current_values)))
+                )
             else:
                 _t_stat, p_value_result = stats.ttest_1samp(current_values, baseline_value)
                 p_value = float(p_value_result)
@@ -337,14 +350,12 @@ class RegressionDetector:
             # Can't do proper test without baseline std, use empirical
             current_std = float(np.std(current_values))
             if current_std > 0:
-                z = abs(delta) / current_std
-                p_value = float(2 * (1 - stats.norm.cdf(z)))
+                p_value = _two_sided_z_p(delta, current_std)
             else:
                 p_value = None
         elif baseline_std > 0:
             # Single sample, use z-test with baseline std
-            z = abs(delta) / baseline_std
-            p_value = float(2 * (1 - stats.norm.cdf(z)))
+            p_value = _two_sided_z_p(delta, baseline_std)
         else:
             p_value = None
 
@@ -497,5 +508,22 @@ class RegressionDetector:
             for regression in report.regressions:
                 if abs(regression.delta) < self.noise_band_absolute:
                     regression.within_noise_band = True
+
+            # Keep overall_severity consistent with the blocking decision:
+            # a noise-only report must not read SEVERE while
+            # should_block_ci() returns False. has_regression stays True —
+            # the regression was observed and is surfaced, just not
+            # blocking.
+            report.overall_severity = max(
+                (r.severity for r in report.blocking_regressions),
+                default=RegressionSeverity.NONE,
+            )
+            noise_flagged = sum(1 for r in report.regressions if r.within_noise_band)
+            if noise_flagged:
+                report.summary += (
+                    f"\nNOTE: {noise_flagged} regression(s) fall within the "
+                    f"{self.noise_band_absolute} infra-noise band under a "
+                    "mismatched infra config — surfaced but not blocking."
+                )
 
         return report

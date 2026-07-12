@@ -151,6 +151,11 @@ Notes:
   counted in the gate summary line (`N checked, M skipped (no baseline),
   K blocking regression(s)`). Add `--require-baselines` to fail instead
   when any task lacks a baseline.
+- Trials that failed for harness reasons (`INFRA_ERROR` status or a
+  grader crash) are excluded from the baseline comparison — they surface
+  via `infra_error_rate` / `grader_error_rate` and a per-task exclusion
+  note instead of dragging pass-rate samples to zero. A task with no
+  gradable trials left is counted as `skipped (no gradable trials)`.
 - The current CLI compares task-level `pass_rate` and `mean_score` against
   baselines. Store those metric names when you want CLI blocking.
 - Pass `--decision-spec run_spec.json` (or stamp `DecisionSpec` on

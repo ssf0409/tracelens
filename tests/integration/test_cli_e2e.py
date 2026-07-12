@@ -14,6 +14,7 @@ import pytest
 
 from tracelens.baselines.manager import BaselineManager, TaskBaseline
 from tracelens.cli.main import build_parser, cmd_report, cmd_run, main
+from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 from tracelens.core.grader import CodeGrader
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, Transcript, TranscriptStep
@@ -174,13 +175,7 @@ def test_baseline_check_blocks_on_regression(
 def test_baseline_check_passes_without_regression(
     tasks_file: Path, tmp_path: Path
 ) -> None:
-    baselines = tmp_path / "baselines.json"
-    manager = BaselineManager(baselines)
-    baseline = TaskBaseline(task_id="t-pass")
-    baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=10)
-    baseline.add_metric(metric_name="mean_score", value=0.9, std=0.05, sample_size=10)
-    manager.set_baseline(baseline)
-    manager.save()
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9})
 
     exit_code = _run_cli(
         "run",
@@ -292,6 +287,26 @@ def test_init_refuses_to_overwrite_without_force(
 # --- Gate integrity: the baseline check must fail loudly, never silently ---
 
 
+def _write_pass_baseline(tmp_path: Path, task_ids: dict[str, float]) -> Path:
+    """Write a baselines file with pass_rate/mean_score metrics per task."""
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    for task_id, score in task_ids.items():
+        baseline = TaskBaseline(task_id=task_id)
+        baseline.add_metric(
+            metric_name="pass_rate",
+            value=1.0 if score >= 0.5 else 0.0,
+            std=0.05,
+            sample_size=10,
+        )
+        baseline.add_metric(
+            metric_name="mean_score", value=score, std=0.05, sample_size=10
+        )
+        manager.set_baseline(baseline)
+    manager.save()
+    return baselines
+
+
 def test_baseline_check_without_baselines_file_errors_before_running(
     tasks_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -336,13 +351,7 @@ def test_baseline_check_warns_and_counts_tasks_without_baseline(
 ) -> None:
     """A task with no stored baseline is skipped with a visible warning and
     shows up in the gate summary — never a silent skip."""
-    baselines = tmp_path / "baselines.json"
-    manager = BaselineManager(baselines)
-    baseline = TaskBaseline(task_id="t-pass")
-    baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=10)
-    baseline.add_metric(metric_name="mean_score", value=0.9, std=0.05, sample_size=10)
-    manager.set_baseline(baseline)
-    manager.save()
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9})
 
     exit_code = _run_cli(
         "run",
@@ -364,13 +373,7 @@ def test_baseline_check_warns_and_counts_tasks_without_baseline(
 def test_require_baselines_fails_when_any_task_has_no_baseline(
     tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    baselines = tmp_path / "baselines.json"
-    manager = BaselineManager(baselines)
-    baseline = TaskBaseline(task_id="t-pass")
-    baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=10)
-    baseline.add_metric(metric_name="mean_score", value=0.9, std=0.05, sample_size=10)
-    manager.set_baseline(baseline)
-    manager.save()
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9})
 
     exit_code = _run_cli(
         "run",
@@ -393,21 +396,7 @@ def test_gate_summary_printed_when_all_tasks_checked(
 ) -> None:
     """Even a fully-green gate says what it checked — a passing gate that
     prints nothing is indistinguishable from a gate that never ran."""
-    baselines = tmp_path / "baselines.json"
-    manager = BaselineManager(baselines)
-    for task_id, score in (("t-pass", 0.9), ("t-fail", 0.1)):
-        baseline = TaskBaseline(task_id=task_id)
-        baseline.add_metric(
-            metric_name="pass_rate",
-            value=1.0 if score >= 0.5 else 0.0,
-            std=0.05,
-            sample_size=10,
-        )
-        baseline.add_metric(
-            metric_name="mean_score", value=score, std=0.05, sample_size=10
-        )
-        manager.set_baseline(baseline)
-    manager.save()
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.1})
 
     exit_code = _run_cli(
         "run",
@@ -502,16 +491,11 @@ def test_infra_exceptions_flag_rejects_unimportable_path(
 # --- Noise-aware gating from the CLI (DecisionSpec wiring) ---
 
 
-_NOISE_SPEC = None  # set per-test via _SpecStampingAdapter.spec
-
-
 class SpecStampingAdapter(AgentAdapter):
     """Echoes input and stamps a DecisionSpec on the transcript, the way
     a real adapter that knows its runtime config would."""
 
     async def run(self, task: Task) -> Transcript:
-        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
-
         transcript = Transcript(
             task_id=task.task_id, final_output=dict(task.input_data)
         )
@@ -543,8 +527,6 @@ def noise_tasks_file(tmp_path: Path) -> Path:
 def _noise_baseline(
     tmp_path: Path, with_spec: bool
 ) -> Path:
-    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
-
     baselines = tmp_path / "baselines.json"
     manager = BaselineManager(baselines)
     baseline = TaskBaseline(
@@ -561,6 +543,16 @@ def _noise_baseline(
     manager.set_baseline(baseline)
     manager.save()
     return baselines
+
+
+def _write_current_spec(tmp_path: Path) -> Path:
+    spec_path = tmp_path / "current_spec.json"
+    spec_path.write_text(json.dumps(
+        DecisionSpec(
+            infra=InfraConfig(memory_hard_limit_mb=512)
+        ).model_dump(mode="json")
+    ))
+    return spec_path
 
 
 def test_gate_blocks_small_delta_without_specs(
@@ -588,15 +580,8 @@ def test_decision_spec_file_enables_noise_aware_gate(
     """--decision-spec + a baseline that carries its spec: a sub-noise-band
     delta under mismatched infra no longer blocks, and the mismatch is
     called out in the output."""
-    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
-
     baselines = _noise_baseline(tmp_path, with_spec=True)
-    spec_path = tmp_path / "current_spec.json"
-    spec_path.write_text(json.dumps(
-        DecisionSpec(
-            infra=InfraConfig(memory_hard_limit_mb=512)
-        ).model_dump(mode="json")
-    ))
+    spec_path = _write_current_spec(tmp_path)
 
     exit_code = _run_cli(
         "run",
@@ -639,15 +624,8 @@ def test_noise_band_flag_tightens_the_band(
 ) -> None:
     """--noise-band 0.01 shrinks the band below the 2pp delta, so the
     same mismatched-infra regression blocks again."""
-    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
-
     baselines = _noise_baseline(tmp_path, with_spec=True)
-    spec_path = tmp_path / "current_spec.json"
-    spec_path.write_text(json.dumps(
-        DecisionSpec(
-            infra=InfraConfig(memory_hard_limit_mb=512)
-        ).model_dump(mode="json")
-    ))
+    spec_path = _write_current_spec(tmp_path)
 
     exit_code = _run_cli(
         "run",
@@ -676,3 +654,86 @@ def test_decision_spec_flag_rejects_missing_file(
 
     assert exit_code == 2
     assert "decision-spec" in capsys.readouterr().err
+
+
+class FlakyInfraAdapter(AgentAdapter):
+    """Raises ConnectionError; loadable by dotted path from the CLI."""
+
+    async def run(self, task: Task) -> Transcript:
+        raise ConnectionError("connection refused")
+
+
+def test_infra_error_trials_do_not_trigger_baseline_regression(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A task whose trials all failed for infra reasons must be skipped
+    (visibly), not scored as a pass-rate collapse that blocks CI."""
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.1})
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", "tests.integration.test_cli_e2e.FlakyInfraAdapter",
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "no gradable trials" in captured.err
+    assert "2 skipped (no gradable trials)" in captured.out
+
+
+def test_corrupt_baselines_file_errors_before_running(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baselines = tmp_path / "baselines.json"
+    baselines.write_text("{not valid json")
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    assert exit_code == 2
+    assert EchoAdapter.run_count == 0
+    assert "could not load baselines file" in capsys.readouterr().err
+
+
+def test_require_baselines_without_baseline_check_errors(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9})
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--require-baselines",
+        "--baselines-file", str(baselines),
+    )
+
+    assert exit_code == 2
+    assert EchoAdapter.run_count == 0
+    assert "--baseline-check" in capsys.readouterr().err
+
+
+def test_noise_band_without_baseline_check_errors(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--noise-band", "0.05",
+    )
+
+    assert exit_code == 2
+    assert "--baseline-check" in capsys.readouterr().err

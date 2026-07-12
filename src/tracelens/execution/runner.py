@@ -49,6 +49,22 @@ DEFAULT_INFRA_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
 )
 
 
+class _AdapterTimeoutError(Exception):
+    """Wraps a TimeoutError raised inside adapter code.
+
+    On Python >= 3.11 ``asyncio.TimeoutError`` (raised by the runner's
+    budget via ``asyncio.wait_for``) and adapter-internal timeouts
+    (``socket.timeout`` etc.) are the same ``TimeoutError`` type. Wrapping
+    the adapter-raised one lets the runner keep TIMEOUT strictly for its
+    own budget while adapter timeouts classify through
+    ``infra_exception_types`` (FAILED by default).
+    """
+
+    def __init__(self, original: TimeoutError) -> None:
+        super().__init__(str(original))
+        self.original = original
+
+
 @dataclass
 class RunnerConfig:
     """Configuration for the evaluation runner."""
@@ -157,6 +173,18 @@ class EvaluationRunner:
         )
         return completed
 
+    async def _call_adapter_run(self, task: Task) -> Transcript:
+        """Run the adapter, wrapping adapter-raised TimeoutError.
+
+        Keeps the budget-timeout handler in ``_run_one`` from swallowing
+        timeouts that came from inside the adapter (same exception type
+        on Python >= 3.11).
+        """
+        try:
+            return await self.adapter.run(task)
+        except TimeoutError as exc:
+            raise _AdapterTimeoutError(exc) from exc
+
     def _save_checkpoint(self, batch: TrialBatch) -> None:
         """Atomically persist the batch to the checkpoint path."""
         if not self.config.checkpoint_path:
@@ -217,7 +245,7 @@ class EvaluationRunner:
             if not setup_failed:
                 try:
                     transcript = await asyncio.wait_for(
-                        self.adapter.run(task),
+                        self._call_adapter_run(task),
                         timeout=self.config.timeout_seconds,
                     )
                     if transcript.decision_spec is None and self.decision_spec is not None:
@@ -225,6 +253,9 @@ class EvaluationRunner:
                     trial.transcript = transcript
                     trial.status = TrialStatus.COMPLETED
                 except TimeoutError:
+                    # Only the runner's own budget timeout lands here:
+                    # adapter-raised TimeoutError is wrapped by
+                    # _call_adapter_run so it classifies below instead.
                     trial.status = TrialStatus.TIMEOUT
                     trial.error_message = (
                         f"Trial timed out after {self.config.timeout_seconds}s"
@@ -236,6 +267,8 @@ class EvaluationRunner:
                         self.config.timeout_seconds,
                     )
                 except Exception as exc:
+                    if isinstance(exc, _AdapterTimeoutError):
+                        exc = exc.original
                     is_infra = isinstance(exc, self.config.infra_exception_types)
                     trial.status = (
                         TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED

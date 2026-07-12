@@ -9,6 +9,7 @@ from tracelens.baselines.manager import (
     MetricBaseline,
     TaskBaseline,
 )
+from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 
 
 class TestMetricBaseline:
@@ -192,9 +193,7 @@ class TestBaselineDecisionSpecRoundTrip:
     infra-noise band. A fingerprint string alone can detect a mismatch
     but cannot diff the infra sections."""
 
-    def test_decision_spec_survives_save_and_load(self, tmp_path):
-        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
-
+    def test_decision_spec_survives_save_and_load(self, tmp_path: Path) -> None:
         path = tmp_path / "baselines.json"
         manager = BaselineManager(path)
         baseline = TaskBaseline(
@@ -213,6 +212,84 @@ class TestBaselineDecisionSpecRoundTrip:
         assert reloaded.decision_spec.infra is not None
         assert reloaded.decision_spec.infra.memory_hard_limit_mb == 2048
 
-    def test_decision_spec_defaults_to_none(self):
+    def test_decision_spec_defaults_to_none(self) -> None:
         baseline = TaskBaseline(task_id="t1")
         assert baseline.decision_spec is None
+
+
+class TestDecisionSpecWritePath:
+    """Every baseline write API must be able to record the DecisionSpec —
+    otherwise the noise-aware feature only activates via hand-edited
+    JSON, and promotion leaves a stale spec that fakes a permanent
+    infra mismatch."""
+
+    def _spec(self, memory_mb: int) -> "DecisionSpec":
+        return DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=memory_mb))
+
+    def test_update_baseline_stores_decision_spec(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+
+        baseline = manager.update_baseline(
+            "t1", {"pass_rate": 1.0}, decision_spec=self._spec(2048)
+        )
+
+        assert baseline.decision_spec is not None
+        assert baseline.fingerprint == self._spec(2048).fingerprint
+
+    def test_create_capability_baseline_stores_spec_and_derives_fingerprint(
+        self, tmp_path: Path
+    ) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        spec = self._spec(2048)
+
+        baseline = manager.create_capability_baseline(
+            "t1", {"pass_rate": 1.0}, decision_spec=spec
+        )
+
+        assert baseline.decision_spec == spec
+        assert baseline.fingerprint == spec.fingerprint
+
+    def test_create_canary_baseline_accepts_spec_instead_of_fingerprint(
+        self, tmp_path: Path
+    ) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        spec = self._spec(2048)
+
+        baseline = manager.create_canary_baseline(
+            "t1", {"pass_rate": 1.0}, decision_spec=spec
+        )
+
+        assert baseline.fingerprint == spec.fingerprint
+        assert baseline.decision_spec == spec
+
+    def test_promote_refreshes_spec_and_archives_the_old_one(
+        self, tmp_path: Path
+    ) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        old_spec, new_spec = self._spec(2048), self._spec(512)
+        baseline = manager.create_capability_baseline(
+            "t1", {"pass_rate": 1.0}, sample_size=20, decision_spec=old_spec
+        )
+
+        baseline.promote(
+            {"pass_rate": 1.0}, sample_size=20, decision_spec=new_spec
+        )
+
+        assert baseline.decision_spec == new_spec
+        assert baseline.fingerprint == new_spec.fingerprint
+        archived = baseline.previous_versions[-1]
+        assert archived["fingerprint"] == old_spec.fingerprint
+        assert archived["decision_spec"] is not None
+
+    def test_force_promote_threads_decision_spec(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        manager.create_capability_baseline(
+            "t1", {"pass_rate": 1.0}, decision_spec=self._spec(2048)
+        )
+
+        promoted = manager.force_promote(
+            "t1", {"pass_rate": 1.0}, decision_spec=self._spec(512)
+        )
+
+        assert promoted.decision_spec == self._spec(512)
+        assert promoted.fingerprint == self._spec(512).fingerprint
