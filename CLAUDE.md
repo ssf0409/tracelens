@@ -201,6 +201,15 @@ tracelens run \
   --fail-on-regression moderate
 ```
 
+Gate semantics: a misconfigured check (missing `--baselines-file`, or the
+file doesn't exist) exits 2 before the eval runs; exit 1 means a blocking
+regression. Tasks without baselines are warned and counted in the printed
+gate summary; `--require-baselines` makes them fail instead. Noise-aware
+comparison activates when both sides carry a `DecisionSpec` — via
+`--decision-spec` or adapter-stamped transcripts, plus
+`TaskBaseline.decision_spec`; tune the band with `--noise-band`.
+`--infra-exceptions` extends which exception types count as `INFRA_ERROR`.
+
 Long runs: `--progress` prints per-trial progress to stderr, and
 `--checkpoint path.json` persists trials periodically so a rerun with the same
 path resumes, skipping completed trials.

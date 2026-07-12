@@ -59,7 +59,12 @@ Use `DecisionSpec.InfraConfig` when resource differences can change the result:
 - Harness or sandbox provider.
 
 TraceLens can mark small regressions as within the infrastructure noise band
-when the agent config is unchanged but infra changed.
+when the agent config is unchanged but infra changed. This works from the CLI
+too: store baselines with their `decision_spec`, then run
+`tracelens run --baseline-check --baselines-file ... --decision-spec
+run_spec.json` (tune the band with `--noise-band`, default 0.03).
+Sub-noise-band regressions under a mismatched infra config are flagged but not
+blocking, and the infra diff is printed.
 
 Start with `examples/noise_aware_regression.py` and
 `benchmarks/high-stakes-autonomous/`.
