@@ -12,16 +12,24 @@ import logging
 import sys
 from pathlib import Path
 
-from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
+from pydantic import ValidationError
+
+from tracelens.baselines.comparison import (
+    DEFAULT_NOISE_BAND_ABSOLUTE,
+    RegressionDetector,
+    RegressionSeverity,
+)
 from tracelens.baselines.manager import BaselineManager
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
 from tracelens.cli.init import add_init_parser, cmd_init
 from tracelens.cli.sample import add_sample_parser, cmd_sample
+from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.task import EvalSet, JSONTaskLoader
-from tracelens.core.trial import TrialBatch
+from tracelens.core.trial import Trial, TrialStatus
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
 from tracelens.execution.runner import (
+    DEFAULT_INFRA_EXCEPTION_TYPES,
     CheckpointError,
     EvaluationRunner,
     RunnerConfig,
@@ -67,11 +75,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--baseline-check", action="store_true",
-        help="Check results against baselines",
+        help=(
+            "Check results against baselines. Requires --baselines-file; "
+            "a missing flag or file is a usage error (exit 2)"
+        ),
     )
     run_parser.add_argument(
         "--baselines-file", default=None,
         help="Path to baselines JSON file",
+    )
+    run_parser.add_argument(
+        "--require-baselines", action="store_true",
+        help=(
+            "Fail (exit 1) if any task in the eval set has no stored "
+            "baseline, instead of warning and skipping it"
+        ),
     )
     run_parser.add_argument(
         "--fail-on-regression", default="moderate",
@@ -114,6 +132,33 @@ def build_parser() -> argparse.ArgumentParser:
             "retry (default: 0)"
         ),
     )
+    run_parser.add_argument(
+        "--infra-exceptions", default=None, nargs="+",
+        help=(
+            "Dotted paths of extra exception types to classify as "
+            "INFRA_ERROR instead of FAILED (e.g. builtins.OSError "
+            "myproject.errors.RateLimitError). Extends the conservative "
+            "default set (InfraError, MemoryError, ConnectionError)"
+        ),
+    )
+    run_parser.add_argument(
+        "--decision-spec", default=None,
+        help=(
+            "Path to a DecisionSpec JSON file describing this run's "
+            "configuration. Stamped onto transcripts and, together with a "
+            "baseline that carries its own spec, enables infra-noise-aware "
+            "regression comparison in --baseline-check"
+        ),
+    )
+    run_parser.add_argument(
+        "--noise-band", type=float, default=None,
+        help=(
+            "Absolute metric delta treated as within infra noise when "
+            f"baseline and current infra configs differ (default: "
+            f"{DEFAULT_NOISE_BAND_ABSOLUTE}, i.e. 3 percentage points on "
+            "a 0-1 metric). Requires --baseline-check"
+        ),
+    )
 
     # -- tracelens report --
     report_parser = subparsers.add_parser(
@@ -145,17 +190,78 @@ def _severity_from_str(s: str) -> RegressionSeverity:
     return RegressionSeverity(s)
 
 
-def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]]:
-    """One metric sample per trial for regression detection.
+def _load_infra_exceptions(
+    paths: list[str],
+) -> tuple[type[BaseException], ...] | None:
+    """Load --infra-exceptions dotted paths into exception types.
+
+    Returns None (with a message on stderr) if any path fails to import
+    or names something that isn't an exception type.
+    """
+    types: list[type[BaseException]] = []
+    for path in paths:
+        try:
+            cls = load_class(path)
+        except (ImportError, AttributeError) as exc:
+            print(
+                f"Error: could not load infra exception '{path}': {exc}",
+                file=sys.stderr,
+            )
+            return None
+        if not (isinstance(cls, type) and issubclass(cls, BaseException)):
+            print(
+                f"Error: '{path}' is not an exception type",
+                file=sys.stderr,
+            )
+            return None
+        types.append(cls)
+    return tuple(types)
+
+
+def _spec_from_trials(trials: list[Trial]) -> DecisionSpec | None:
+    """Recover the current run's DecisionSpec from adapter-stamped transcripts.
+
+    Lets noise-aware comparison work without --decision-spec when the
+    adapter records its own runtime configuration. The most recent spec
+    wins: on checkpoint resume, trials from the previous run are loaded
+    first, so the last-stamped spec belongs to the current run.
+    """
+    specs = [
+        trial.transcript.decision_spec
+        for trial in trials
+        if trial.transcript is not None and trial.transcript.decision_spec is not None
+    ]
+    if not specs:
+        return None
+    if len({spec.fingerprint for spec in specs}) > 1:
+        print(
+            "[tracelens] warning: mixed decision specs found across trials "
+            "(checkpoint resume with a changed config?); using the most "
+            "recent — pass --decision-spec to be explicit",
+            file=sys.stderr,
+        )
+    return specs[-1]
+
+
+def _per_trial_results(trials: list[Trial]) -> list[dict[str, float]]:
+    """One metric sample per gradable trial for regression detection.
 
     RegressionDetector.compare() runs a t-test over the sample
     distribution, so it needs per-trial values — a pre-aggregated
     single dict would collapse it to a one-sample z-test. The sample
     mean of the per-trial ``pass_rate`` indicators equals the task's
     pass rate, so baseline metric names stay unchanged.
+
+    Trials that failed for harness reasons — INFRA_ERROR status or a
+    grader crash — are excluded: they are surfaced separately via
+    infra_error_rate / grader_error_rate and must not masquerade as
+    agent regressions in the gate. TIMEOUT stays included: a run that
+    blows the time budget is an agent-quality signal.
     """
     results: list[dict[str, float]] = []
-    for trial in batch.get_trials_for_task(task_id):
+    for trial in trials:
+        if trial.status == TrialStatus.INFRA_ERROR or trial.has_grader_error:
+            continue
         results.append({
             "pass_rate": 1.0 if trial.passed else 0.0,
             "mean_score": (
@@ -167,9 +273,89 @@ def _per_trial_results(batch: TrialBatch, task_id: str) -> list[dict[str, float]
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute the 'run' subcommand."""
+    # Gate preflight — a misconfigured baseline check must fail before any
+    # eval time is spent, never silently skip (exit 2 = usage error, so CI
+    # can tell "misconfigured gate" apart from "gate blocked" exit 1).
+    baseline_manager: BaselineManager | None = None
+    if args.baseline_check:
+        if not args.baselines_file:
+            print(
+                "Error: --baseline-check requires --baselines-file; "
+                "refusing to run with a vacuously-passing gate",
+                file=sys.stderr,
+            )
+            return 2
+        if not Path(args.baselines_file).exists():
+            print(
+                f"Error: baselines file not found: {args.baselines_file}",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            baseline_manager = BaselineManager(args.baselines_file)
+        except (ValueError, KeyError, TypeError) as exc:
+            print(
+                f"Error: could not load baselines file "
+                f"{args.baselines_file}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        gate_only_flags = [
+            flag
+            for flag, is_set in (
+                ("--require-baselines", args.require_baselines),
+                ("--noise-band", args.noise_band is not None),
+            )
+            if is_set
+        ]
+        if gate_only_flags:
+            print(
+                f"Error: {', '.join(gate_only_flags)} require(s) "
+                "--baseline-check; refusing to run with a "
+                "vacuously-passing gate",
+                file=sys.stderr,
+            )
+            return 2
+        if args.baselines_file:
+            print(
+                "[tracelens] warning: --baselines-file has "
+                "no effect without --baseline-check",
+                file=sys.stderr,
+            )
+
     cwd = str(Path.cwd())
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
+
+    # Resolve --infra-exceptions before running (usage error -> exit 2)
+    infra_exception_types = DEFAULT_INFRA_EXCEPTION_TYPES
+    if args.infra_exceptions:
+        extra_types = _load_infra_exceptions(args.infra_exceptions)
+        if extra_types is None:
+            return 2
+        infra_exception_types = infra_exception_types + extra_types
+
+    # Resolve --decision-spec before running (usage error -> exit 2)
+    decision_spec: DecisionSpec | None = None
+    if args.decision_spec:
+        spec_path = Path(args.decision_spec)
+        if not spec_path.exists():
+            print(
+                f"Error: --decision-spec file not found: {args.decision_spec}",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            decision_spec = DecisionSpec.model_validate(
+                json.loads(spec_path.read_text())
+            )
+        except (json.JSONDecodeError, ValidationError) as exc:
+            print(
+                f"Error: invalid --decision-spec file {args.decision_spec}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
 
     # Load eval set
     try:
@@ -217,18 +403,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         num_runs=args.num_runs,
         max_concurrency=args.max_concurrency,
         timeout_seconds=args.timeout,
+        infra_exception_types=infra_exception_types,
         progress_callback=_print_progress if args.progress else None,
         checkpoint_path=args.checkpoint,
         max_infra_retries=args.max_infra_retries,
     )
 
     # Run evaluation
-    runner = EvaluationRunner(adapter, graders, config)
+    runner = EvaluationRunner(adapter, graders, config, decision_spec=decision_spec)
     try:
         batch = asyncio.run(runner.run(eval_set))
     except CheckpointError as exc:
+        # A stale/corrupt/foreign checkpoint is a misconfigured run, not a
+        # blocked gate — same exit-2 contract as the gate preflight.
         print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return 2
 
     # Generate report
     gen = ReportGenerator()
@@ -260,24 +449,100 @@ def cmd_run(args: argparse.Namespace) -> int:
     # CI summary to stdout
     print(gen.render_ci_summary(report))
 
-    # Baseline check
-    if args.baseline_check and args.baselines_file:
-        manager = BaselineManager(args.baselines_file)
-        detector = RegressionDetector()
+    # Baseline check (manager loaded and validated in the preflight)
+    if args.baseline_check and baseline_manager is not None:
+        detector = RegressionDetector(
+            noise_band_absolute=(
+                args.noise_band
+                if args.noise_band is not None
+                else DEFAULT_NOISE_BAND_ABSOLUTE
+            )
+        )
 
         threshold = _severity_from_str(args.fail_on_regression)
 
-        has_blocking = False
-        for task_summary in report.task_summaries:
-            baseline = manager.get_baseline(task_summary.task_id)
-            if baseline:
-                current_results = _per_trial_results(batch, task_summary.task_id)
-                reg_report = detector.compare(baseline, current_results)
-                if reg_report.should_block_ci(threshold):
-                    print(reg_report.to_ci_output())
-                    has_blocking = True
+        trials_by_task: dict[str, list[Trial]] = {}
+        for trial in batch.trials:
+            trials_by_task.setdefault(trial.task_id, []).append(trial)
 
-        if has_blocking:
+        checked = 0
+        skipped: list[str] = []
+        no_gradable: list[str] = []
+        blocking = 0
+        for task_summary in report.task_summaries:
+            baseline = baseline_manager.get_baseline(task_summary.task_id)
+            if baseline is None:
+                skipped.append(task_summary.task_id)
+                print(
+                    f"[tracelens] warning: no baseline for task "
+                    f"'{task_summary.task_id}' — skipped in baseline check",
+                    file=sys.stderr,
+                )
+                continue
+            task_trials = trials_by_task.get(task_summary.task_id, [])
+            current_results = _per_trial_results(task_trials)
+            excluded = len(task_trials) - len(current_results)
+            if excluded:
+                print(
+                    f"[tracelens] note: excluded {excluded} infra-error/"
+                    f"grader-error trial(s) from the baseline comparison "
+                    f"for task '{task_summary.task_id}'",
+                    file=sys.stderr,
+                )
+            if not current_results:
+                no_gradable.append(task_summary.task_id)
+                print(
+                    f"[tracelens] warning: no gradable trials for task "
+                    f"'{task_summary.task_id}' (all infra/grader failures) "
+                    f"— skipped in baseline check",
+                    file=sys.stderr,
+                )
+                continue
+            checked += 1
+            current_spec = decision_spec or _spec_from_trials(task_trials)
+            reg_report = detector.compare_with_specs(
+                baseline,
+                current_results,
+                baseline_spec=baseline.decision_spec,
+                current_spec=current_spec,
+            )
+            if reg_report.infra_config_mismatch:
+                diff = ", ".join(
+                    f"{key}: {b} -> {c}"
+                    for key, (b, c) in sorted(reg_report.infra_config_diff.items())
+                )
+                print(
+                    f"[tracelens] note: infra config mismatch vs baseline for "
+                    f"task '{task_summary.task_id}' ({diff}); regressions "
+                    f"within the {detector.noise_band_absolute} noise band "
+                    f"are flagged but not blocking"
+                )
+            if reg_report.should_block_ci(threshold):
+                print(reg_report.to_ci_output())
+                blocking += 1
+
+        # A gate that prints nothing on success is indistinguishable from
+        # a gate that never ran — always say what was checked.
+        no_gradable_part = (
+            f"{len(no_gradable)} skipped (no gradable trials), "
+            if no_gradable
+            else ""
+        )
+        print(
+            f"[tracelens] Baseline check: {checked} checked, "
+            f"{len(skipped)} skipped (no baseline), "
+            f"{no_gradable_part}"
+            f"{blocking} blocking regression(s)"
+        )
+
+        if skipped and args.require_baselines:
+            print(
+                f"Error: --require-baselines set but {len(skipped)} task(s) "
+                f"have no baseline: {', '.join(skipped)}",
+                file=sys.stderr,
+            )
+            return 1
+        if blocking:
             return 1
 
     return 0

@@ -14,6 +14,30 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   `eval/` suite, including tasks, adapter, grader, README, and a GitHub Actions
   workflow. The command refuses to overwrite generated files unless `--force`
   is provided.
+- **Loud CI gate.** The baseline check now always prints a gate summary
+  (`N checked, M skipped (no baseline), K blocking regression(s)`), warns
+  per task when a baseline is missing, and `--require-baselines` turns
+  missing baselines into a hard failure.
+- **Configurable infra classification.** `RunnerConfig.infra_exception_types`
+  (CLI: `--infra-exceptions`) extends which exception types are classified
+  `INFRA_ERROR` instead of `FAILED`. The default set
+  (`DEFAULT_INFRA_EXCEPTION_TYPES`) stays conservative: `InfraError`,
+  `MemoryError`, `ConnectionError`.
+- **Noise-aware gating from the CLI.** `TaskBaseline.decision_spec` stores
+  the full spec alongside the fingerprint, `--decision-spec` loads the
+  current run's spec (adapter-stamped transcripts work too), and the
+  baseline check now runs `compare_with_specs()` — so sub-noise-band
+  regressions under a mismatched infra config are flagged but not
+  blocking, with the infra diff printed. `--noise-band` tunes the band.
+- **DecisionSpec write path.** `update_baseline`,
+  `create_capability_baseline`, `create_canary_baseline`, `promote`,
+  `try_promote`, and `force_promote` all accept a `decision_spec`;
+  creation derives the fingerprint from it when one isn't passed, and
+  promotion refreshes the stored spec (archiving the old one in
+  `previous_versions`) so it can't drift from the fingerprint.
+- **`DEFAULT_INFRA_EXCEPTION_TYPES` is exported top-level** (`from
+  tracelens import DEFAULT_INFRA_EXCEPTION_TYPES`), matching the
+  documented `+ (OSError,)` extension pattern.
 - **Infra-error retry.** `RunnerConfig.max_infra_retries` re-attempts trials
   that end `INFRA_ERROR`, with exponential backoff
   (`infra_retry_backoff_seconds`). `FAILED` and `TIMEOUT` trials never retry —
@@ -22,27 +46,76 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   `Trial.attempts`, and retried-away error messages are kept in
   `Trial.metadata["infra_retry_errors"]`. CLI: `--max-infra-retries`.
 - **Checkpoint run identity.** Checkpoint files now carry a versioned envelope
-  with the eval-set content hash and adapter/grader class identity. Resuming
-  against a checkpoint written by a different eval set, adapter, or grader
-  stack raises `CheckpointError` (exported from `tracelens`) instead of
-  silently merging foreign trials keyed only on `(task_id, run_index)`.
+  with the eval-set content hash, adapter/grader class identity, and the
+  run-level `DecisionSpec` fingerprint when one is set (class paths alone
+  cannot distinguish two configs of the same adapter class). Resuming
+  against a checkpoint written by a different eval set, adapter, grader
+  stack, or decision spec raises `CheckpointError` (exported from
+  `tracelens`) instead of silently merging foreign trials keyed only on
+  `(task_id, run_index)`. Envelopes with an unknown format version or a
+  missing identity are rejected as corrupt. Note: resume requires stable
+  explicit `task_id`s — auto-generated ids change every process.
   Pre-0.4 bare-batch checkpoints still load, with a loud warning that their
   identity can't be verified.
 
 ### Changed
-
+- **Gate misconfiguration is now an error.** `tracelens run
+  --baseline-check` without `--baselines-file`, or with a nonexistent or
+  unparseable baselines file, exits 2 before the eval runs instead of
+  silently skipping the entire regression check (the file is fully
+  loaded during preflight, so a corrupt file can no longer burn a full
+  eval before crashing). `--require-baselines` or `--noise-band` without
+  `--baseline-check` is also an exit-2 usage error; `--baselines-file`
+  alone warns that it has no effect.
+- **Harness failures no longer masquerade as agent regressions in the
+  gate.** The baseline check excludes `INFRA_ERROR` and grader-crash
+  trials from the per-trial comparison samples (they remain visible via
+  `infra_error_rate` / `grader_error_rate`, a per-task exclusion note,
+  and a `skipped (no gradable trials)` count when nothing gradable
+  remains). `TIMEOUT` trials still count against the agent.
+- **Adapter-raised `TimeoutError` is no longer reported as a budget
+  timeout.** Only the runner's own `asyncio.wait_for` budget produces
+  `TrialStatus.TIMEOUT`; a `TimeoutError` from inside the adapter (e.g.
+  `socket.timeout`) now classifies through `infra_exception_types`
+  (`FAILED` by default, infra if configured) and keeps its original
+  message.
+- **Noise-downgraded reports are internally consistent.**
+  `compare_with_specs()` now recomputes `overall_severity` from the
+  blocking regressions and appends a noise-band note to the summary, so
+  a noise-only report no longer reads `SEVERE` while
+  `should_block_ci()` returns False. `should_block_ci(...,
+  ignore_noise_band=False)` still counts every regression.
+- **No more fabricated blocking on underpowered zero-variance samples.**
+  A consistent drop that a valid z-test cannot call significant (e.g.
+  five identical scores half a baseline standard deviation below the
+  mean) no longer blocks CI — previously it always blocked via the
+  fabricated p=0.0. Decisive drops still block; degenerate cases with no
+  valid test still block on thresholds with `insufficient_data=True`.
+- **No fabricated significance on degenerate samples.**
+  `MetricRegression.p_value` is `None` (not `0.0`) when no valid test
+  exists — n=1 with `baseline_std=0`, or zero variance on both sides. Such
+  regressions are still reported and can still block CI, with severity
+  from the delta thresholds and an explicit `insufficient_data` flag.
+  Zero-variance samples against a known baseline spread now get a real
+  z-test.
 - **Checkpoint resume re-runs infra-errored trials.** Resume previously
   skipped every finished trial, permanently freezing `INFRA_ERROR` results
   into the batch. A rerun with the same checkpoint path now re-executes
-  infra-errored trials (`TIMEOUT` trials stay skipped — a timeout is an
-  observation about the agent). The checkpoint file format changed to the
+  infra-errored trials and `SKIPPED` placeholders (`TIMEOUT` trials stay
+  skipped — a timeout is an observation about the agent). The checkpoint file format changed to the
   identity envelope described above; old files remain readable.
 
 ### Fixed
-
+- **`InfraError` docstring matched to behavior.** It previously claimed
+  `OSError` and network `TimeoutError` were classified as infra; they never
+  were. The docstring now describes the real (configurable) set and that
+  the runner's own budget timeout is always `TIMEOUT`.
+- **`compare_to_baseline_summary` no longer crashes at n=1.** The
+  Welch-Satterthwaite degrees of freedom fell back to a division by zero
+  when either side had a single sample.
 - **Corrupt checkpoint files fail clearly.** An unreadable or unparseable
   checkpoint now raises `CheckpointError` with the offending path and a
-  recovery hint (the CLI prints the error and exits 1) instead of an
+  recovery hint (the CLI prints the error and exits 2 — the misconfigured-run contract) instead of an
   unhandled `JSONDecodeError`.
 
 ### Removed

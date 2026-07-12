@@ -396,3 +396,31 @@ class TestComparisonResult:
             p_value=0.0001,
         )
         assert result.effect_magnitude == "large"
+
+
+class TestCompareToBaselineSummarySmallSamples:
+    """Welch-Satterthwaite df must not divide by zero at n=1."""
+
+    def test_baseline_n_of_one_does_not_crash(self) -> None:
+        result = compare_to_baseline_summary(
+            baseline_mean=0.9,
+            baseline_std=0.05,
+            baseline_n=1,
+            current_mean=0.7,
+            current_std=0.05,
+            current_n=5,
+        )
+        assert np.isfinite(result.delta)
+        assert np.isfinite(result.p_value)
+
+    def test_both_sides_n_of_one_does_not_crash(self) -> None:
+        result = compare_to_baseline_summary(
+            baseline_mean=0.9,
+            baseline_std=0.05,
+            baseline_n=1,
+            current_mean=0.7,
+            current_std=0.05,
+            current_n=1,
+        )
+        assert np.isfinite(result.delta)
+        assert np.isfinite(result.p_value)

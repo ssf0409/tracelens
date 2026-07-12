@@ -5,14 +5,16 @@ End-to-end demonstration of tracelens's infra-noise awareness.
 Typical session (see README.md for the full narrative):
 
     # 1. Record a baseline under a generous 2GB memory cap.
-    python -m benchmarks.high_stakes_autonomous.run_benchmark \
+    python benchmarks/high-stakes-autonomous/run_benchmark.py \
         --memory-hard-limit-mb 2048 \
         --save-baseline benchmarks/high-stakes-autonomous/baseline.json
 
-    # 2. Re-run under a tight 512MB cap. The pass rate drops, but the
-    #    regression report flags the sub-3pp deltas as within the infra-
-    #    noise band because the DecisionSpec.infra section changed.
-    python -m benchmarks.high_stakes_autonomous.run_benchmark \
+    # 2. Re-run under a tight 512MB cap. The heavy tasks OOM and classify
+    #    as INFRA_ERROR; the comparison reports 100pp SEVERE drops plus the
+    #    infra-config-mismatch warning (sub-3pp deltas would additionally
+    #    be flagged as within the noise band) because DecisionSpec.infra
+    #    changed.
+    python benchmarks/high-stakes-autonomous/run_benchmark.py \
         --memory-hard-limit-mb 512 \
         --compare-baseline benchmarks/high-stakes-autonomous/baseline.json
 

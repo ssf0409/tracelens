@@ -16,7 +16,7 @@ the ladder as the blast radius grows.
 | Environment | Use When | Required Commands |
 |-------------|----------|-------------------|
 | Editable dev checkout | Changing source, tests, or docs locally. | `uv sync --extra dev --extra http` |
-| Local verification gate | Before every PR. | `uv lock --check`, `uv run --frozen pytest -q`, `uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous`, `uv run --frozen --extra dev mypy src/tracelens/` |
+| Local verification gate | Before every PR. | `uv lock --check`, `uv run --frozen --extra dev pytest -q`, `uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous`, `uv run --frozen --extra dev mypy src/tracelens/` |
 | Built artifact smoke | Changing packaging, CLI, public imports, README, or release metadata. | Build wheel/sdist, install the wheel into a clean venv, run import and CLI smoke tests. |
 | Downstream integration smoke | Changing public APIs, dependency metadata, adapters, baselines, or statistics. | Install the built wheel into a small downstream fixture or real downstream project and run its TraceLens-facing tests. |
 | PyPI release | Maintainer-only final publish path. | Push `vX.Y.Z`; GitHub Actions publishes with PyPI trusted publishing. |
@@ -44,8 +44,8 @@ Run this before opening or updating a PR:
 
 ```bash
 uv lock --check
-uv run --frozen pytest -q
-uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+uv run --frozen --extra dev pytest -q
+uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
 uv run --frozen --extra dev mypy src/tracelens/
 ```
 

@@ -231,15 +231,23 @@ class TestRegressionDetector:
         self,
         sample_baseline: TaskBaseline,
     ):
-        """Zero-variance samples should not leak scipy precision warnings."""
+        """Zero-variance samples should not leak scipy precision warnings.
+
+        A decisive drop (1.2 -> 0.2 against std=0.3) stays detected via the
+        z-fallback against the baseline spread — with a real p-value, not
+        the fabricated p=0.0 this path used to produce.
+        """
         detector = RegressionDetector(min_delta_percent=1.0)
-        current_results = [{"sharpe_ratio": 1.0}] * 5
+        current_results = [{"sharpe_ratio": 0.2}] * 5
 
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
             report = detector.compare(sample_baseline, current_results)
 
         assert report.has_regression is True
+        reg = next(r for r in report.regressions if r.metric_name == "sharpe_ratio")
+        assert reg.p_value is not None
+        assert reg.insufficient_data is False
 
 
 # --- Noise-aware regression detection (Track 2 / Anthropic infra-noise) ---
@@ -394,3 +402,148 @@ class TestNoiseAwareRegression:
         assert report.infra_config_mismatch is False
         for reg in report.regressions:
             assert reg.within_noise_band is False
+
+
+class TestSmallSampleHonesty:
+    """Degenerate samples must never fabricate statistical significance.
+
+    With n=1 and baseline_std=0 (both are the model defaults) there is no
+    valid statistical test. The regression is still reported — severity
+    comes from the delta thresholds alone — but it must be marked
+    ``insufficient_data`` with ``p_value=None`` instead of claiming a
+    fabricated p=0.0.
+    """
+
+    def _degenerate_baseline(self, value: float = 1.0) -> TaskBaseline:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="pass_rate", value=value, std=0.0, sample_size=1)
+        return baseline
+
+    def test_single_sample_zero_std_reports_threshold_regression_without_significance(
+        self,
+    ) -> None:
+        detector = RegressionDetector()
+        report = detector.compare(self._degenerate_baseline(), [{"pass_rate": 0.0}])
+
+        assert report.has_regression is True
+        reg = report.regressions[0]
+        assert reg.severity == RegressionSeverity.SEVERE
+        assert reg.p_value is None
+        assert reg.is_significant is False
+        assert reg.insufficient_data is True
+
+    def test_multi_sample_zero_variance_both_sides_marked_insufficient(self) -> None:
+        detector = RegressionDetector()
+        report = detector.compare(
+            self._degenerate_baseline(),
+            [{"pass_rate": 0.0}, {"pass_rate": 0.0}],
+        )
+
+        assert report.has_regression is True
+        reg = report.regressions[0]
+        assert reg.p_value is None
+        assert reg.is_significant is False
+        assert reg.insufficient_data is True
+        assert reg.severity == RegressionSeverity.SEVERE
+
+    def test_single_sample_with_baseline_std_still_runs_z_test(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=10)
+        detector = RegressionDetector()
+
+        report = detector.compare(baseline, [{"pass_rate": 0.0}])
+
+        reg = report.regressions[0]
+        assert reg.p_value is not None
+        assert reg.is_significant is True
+        assert reg.insufficient_data is False
+
+    def test_zero_variance_sample_with_baseline_std_gets_real_z_test(self) -> None:
+        """n>=2 identical failures vs a known baseline spread: a z-test
+        against the baseline std is valid — p must be a real number, not
+        the old fabricated 0.0."""
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.05, sample_size=20)
+        detector = RegressionDetector()
+
+        report = detector.compare(
+            baseline, [{"pass_rate": 0.0}, {"pass_rate": 0.0}, {"pass_rate": 0.0}]
+        )
+
+        reg = report.regressions[0]
+        assert reg.p_value is not None
+        assert 0.0 <= reg.p_value < 0.05
+        assert reg.insufficient_data is False
+
+    def test_summary_and_ci_output_state_insufficient_samples(self) -> None:
+        detector = RegressionDetector()
+        report = detector.compare(self._degenerate_baseline(), [{"pass_rate": 0.0}])
+
+        assert "insufficient samples" in report.summary
+        assert "insufficient samples" in report.to_ci_output()
+
+    def test_degenerate_regression_still_blocks_ci_on_threshold(self) -> None:
+        """Threshold-downgrade policy: without a valid significance test,
+        the gate may still block on threshold-based severity alone."""
+        detector = RegressionDetector()
+        report = detector.compare(self._degenerate_baseline(), [{"pass_rate": 0.0}])
+
+        assert report.should_block_ci(RegressionSeverity.MODERATE) is True
+
+
+class TestZFallbackNonSignificantPolicy:
+    """Pins the intent of the z-fallback: a VALID test that is not
+    significant does not gate — unlike degenerate data, where no test
+    exists and thresholds alone decide. Previously this case fabricated
+    p=0.0 and always blocked."""
+
+    def test_consistent_but_nonsignificant_drop_is_not_reported(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(
+            metric_name="mean_score", value=1.2, std=0.3, sample_size=100
+        )
+        detector = RegressionDetector()
+
+        report = detector.compare(baseline, [{"mean_score": 1.0}] * 5)
+
+        # z = 0.2 / (0.3/sqrt(5)) ~= 1.49 -> p ~= 0.136: honestly not
+        # significant, so nothing is reported and the gate stays green.
+        assert report.has_regression is False
+
+
+class TestNoiseAwareSeverityConsistency:
+    """After the noise-band downgrade, overall_severity must agree with
+    the blocking decision — a noise-only report must not keep shouting
+    SEVERE while should_block_ci() returns False."""
+
+    def _specs(self) -> tuple:
+        from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+        return (
+            DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)),
+            DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512)),
+        )
+
+    def test_noise_only_report_downgrades_overall_severity(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(
+            metric_name="pass_rate", value=0.10, std=0.001, sample_size=20
+        )
+        baseline_spec, current_spec = self._specs()
+        detector = RegressionDetector()
+
+        # -20% relative (SEVERE by thresholds) but only 0.02 absolute:
+        # inside the 0.03 noise band under mismatched infra.
+        report = detector.compare_with_specs(
+            baseline,
+            [{"pass_rate": 0.08}],
+            baseline_spec=baseline_spec,
+            current_spec=current_spec,
+        )
+
+        assert report.regressions[0].within_noise_band is True
+        assert report.should_block_ci() is False
+        assert report.overall_severity == RegressionSeverity.NONE
+        assert "noise band" in report.summary.lower()
+        # Still surfaced — has_regression reports what was observed.
+        assert report.has_regression is True

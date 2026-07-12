@@ -4,17 +4,20 @@
 
 .PHONY: test lint typecheck coverage format lockcheck verify docs docs-serve
 
+# All tool invocations pass --extra dev: pytest/ruff/mypy live in the dev
+# extra, and without it `uv run` silently falls back to whatever binary is on
+# PATH (e.g. a system pytest importing a stale globally-installed tracelens).
 test:
-	uv run --frozen pytest -q
+	uv run --frozen --extra dev pytest -q
 
 coverage:
-	uv run --frozen pytest -q --cov=tracelens --cov-report=term-missing --cov-fail-under=90
+	uv run --frozen --extra dev pytest -q --cov=tracelens --cov-report=term-missing --cov-fail-under=90
 
 lint:
-	uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+	uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
 
 format:
-	uv run --frozen ruff format src/ tests/ examples/
+	uv run --frozen --extra dev ruff format src/ tests/ examples/
 
 typecheck:
 	uv run --frozen --extra dev mypy src/tracelens/

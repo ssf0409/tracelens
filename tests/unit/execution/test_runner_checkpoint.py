@@ -322,3 +322,99 @@ def test_no_checkpoint_config_writes_nothing(tmp_path: Path) -> None:
     runner = EvaluationRunner(adapter=_CountingAdapter(), graders=[])
     asyncio.run(runner.run(EvalSet(name="s", tasks=[_task("a")])))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_undecodable_checkpoint_raises_checkpoint_error(tmp_path: Path) -> None:
+    """Binary/truncated-multibyte corruption must raise CheckpointError,
+    not leak UnicodeDecodeError."""
+    ckpt = tmp_path / "c.json"
+    ckpt.write_bytes(b"\xff\xfe\x00garbage\x80")
+
+    runner = _runner(_CountingAdapter(), ckpt)
+    with pytest.raises(CheckpointError, match="[Cc]orrupt"):
+        asyncio.run(runner.run(EvalSet(name="s", tasks=[_task("t1")])))
+
+
+def test_envelope_without_identity_is_corrupt(tmp_path: Path) -> None:
+    """A versioned envelope must carry its identity — a missing one is
+    corruption, not a legacy file (legacy files are bare batches)."""
+    ckpt = tmp_path / "c.json"
+    ckpt.write_text(json.dumps({"version": 1, "batch": TrialBatch().to_dict()}))
+
+    runner = _runner(_CountingAdapter(), ckpt)
+    with pytest.raises(CheckpointError, match="identity"):
+        asyncio.run(runner.run(EvalSet(name="s", tasks=[_task("t1")])))
+
+
+def test_unknown_checkpoint_version_raises(tmp_path: Path) -> None:
+    ckpt = tmp_path / "c.json"
+    ckpt.write_text(json.dumps({
+        "version": 99,
+        "identity": {"eval_set_hash": "x", "adapter": "a", "graders": []},
+        "batch": TrialBatch().to_dict(),
+    }))
+
+    runner = _runner(_CountingAdapter(), ckpt)
+    with pytest.raises(CheckpointError, match="version"):
+        asyncio.run(runner.run(EvalSet(name="s", tasks=[_task("t1")])))
+
+
+def test_decision_spec_change_refuses_resume(tmp_path: Path) -> None:
+    """The DecisionSpec is the run's reproducibility identity — resuming a
+    checkpoint recorded under a different spec would mix two configurations."""
+    from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+
+    ckpt = tmp_path / "c.json"
+    eval_set = EvalSet(name="s", tasks=[_task("t1")])
+    spec_a = DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048))
+    spec_b = DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512))
+
+    runner = EvaluationRunner(
+        _CountingAdapter(),
+        [_GraderA()],
+        RunnerConfig(checkpoint_path=str(ckpt)),
+        decision_spec=spec_a,
+    )
+    asyncio.run(runner.run(eval_set))
+
+    # Same spec resumes fine.
+    same = EvaluationRunner(
+        _CountingAdapter(),
+        [_GraderA()],
+        RunnerConfig(checkpoint_path=str(ckpt)),
+        decision_spec=spec_a,
+    )
+    asyncio.run(same.run(eval_set))
+
+    # Different spec refuses.
+    different = EvaluationRunner(
+        _CountingAdapter(),
+        [_GraderA()],
+        RunnerConfig(checkpoint_path=str(ckpt)),
+        decision_spec=spec_b,
+    )
+    with pytest.raises(CheckpointError, match="decision spec"):
+        asyncio.run(different.run(eval_set))
+
+
+def test_resume_reruns_skipped_trials(tmp_path: Path) -> None:
+    """SKIPPED trials carry no signal (e.g. fail-fast placeholders from a
+    prior run) — resume must re-run them, not load them as done."""
+    ckpt = tmp_path / "c.json"
+    eval_set = EvalSet(name="s", tasks=[_task("t1")])
+
+    runner = _runner(_CountingAdapter(), ckpt)
+    asyncio.run(runner.run(eval_set))
+
+    # Doctor the checkpoint: mark the completed trial SKIPPED.
+    data = json.loads(ckpt.read_text())
+    data["batch"]["trials"][0]["status"] = "skipped"
+    data["batch"]["trials"][0]["outcomes"] = []
+    ckpt.write_text(json.dumps(data))
+
+    adapter = _CountingAdapter()
+    resumed = _runner(adapter, ckpt)
+    batch = asyncio.run(resumed.run(eval_set))
+
+    assert adapter.run_calls == ["t1"]  # re-ran, not skipped
+    assert all(t.status != TrialStatus.SKIPPED for t in batch.trials)

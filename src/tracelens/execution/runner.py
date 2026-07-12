@@ -33,24 +33,40 @@ from tracelens.execution.agent_adapter import AgentAdapter
 logger = logging.getLogger(__name__)
 
 
-# Exceptions that the runner treats as infrastructure failures (as opposed
-# to task-level failures). Adapters can also raise ``InfraError`` explicitly
-# for cases the runner can't infer from the exception type.
+# Default exceptions that the runner treats as infrastructure failures (as
+# opposed to task-level failures). Adapters can also raise ``InfraError``
+# explicitly for cases the runner can't infer from the exception type.
 #
-# The list is intentionally conservative: we only include errors that are
-# almost always caused by the runtime (OOM, network, OS-level resource
-# issues). Arbitrary exceptions stay classified as FAILED so a buggy agent
-# doesn't silently inflate the infra-error rate and mask real regressions.
-_INFRA_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
+# The default is intentionally conservative: only errors that are almost
+# always caused by the runtime (OOM, network). Broad classes like OSError
+# are excluded because their subclasses (FileNotFoundError, PermissionError)
+# are usually agent bugs — counting those as infra would silently inflate
+# the infra-error rate and mask real regressions. Which types count as
+# infra is downstream policy: extend the set per project via
+# ``RunnerConfig.infra_exception_types`` (or ``--infra-exceptions`` on the
+# CLI), e.g. ``DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)`` for evals on
+# shared runners where disk-full is an environment problem.
+DEFAULT_INFRA_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
     InfraError,
     MemoryError,
     ConnectionError,
 )
 
 
-def _is_infra_exception(exc: BaseException) -> bool:
-    """Return True if the exception should classify the trial as INFRA_ERROR."""
-    return isinstance(exc, _INFRA_EXCEPTION_TYPES)
+class _AdapterTimeoutError(Exception):
+    """Wraps a TimeoutError raised inside adapter code.
+
+    On Python >= 3.11 ``asyncio.TimeoutError`` (raised by the runner's
+    budget via ``asyncio.wait_for``) and adapter-internal timeouts
+    (``socket.timeout`` etc.) are the same ``TimeoutError`` type. Wrapping
+    the adapter-raised one lets the runner keep TIMEOUT strictly for its
+    own budget while adapter timeouts classify through
+    ``infra_exception_types`` (FAILED by default).
+    """
+
+    def __init__(self, original: TimeoutError) -> None:
+        super().__init__(str(original))
+        self.original = original
 
 
 class CheckpointError(Exception):
@@ -99,6 +115,15 @@ class RunnerConfig:
     max_concurrency: int = 5
     timeout_seconds: float = 300.0
     fail_fast: bool = False
+
+    # Exception types classified as INFRA_ERROR instead of FAILED. The
+    # conservative default is DEFAULT_INFRA_EXCEPTION_TYPES; extend it when
+    # your environment makes broader classes unambiguous infra, e.g.
+    # ``DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)``. The runner's own
+    # budget timeout is classified TIMEOUT before this set is consulted.
+    infra_exception_types: tuple[type[BaseException], ...] = (
+        DEFAULT_INFRA_EXCEPTION_TYPES
+    )
 
     # Trials that end INFRA_ERROR are re-attempted up to this many extra
     # times. FAILED and TIMEOUT never retry: those are observations about
@@ -156,6 +181,12 @@ class EvaluationRunner:
             "eval_set_hash": _eval_set_fingerprint(eval_set),
             "adapter": _class_path(self.adapter),
             "graders": [_class_path(g) for g in self.graders],
+            # The spec is the run's reproducibility identity; class paths
+            # alone can't tell two SimpleAdapter/HTTPAPIAdapter configs
+            # apart, so include the fingerprint whenever a spec is given.
+            "decision_spec_fingerprint": (
+                self.decision_spec.fingerprint if self.decision_spec else None
+            ),
         }
         completed_keys = self._load_resume_state(batch)
         semaphore = asyncio.Semaphore(self.config.max_concurrency)
@@ -203,16 +234,28 @@ class EvaluationRunner:
 
         try:
             data = json.loads(path.read_text())
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
             raise CheckpointError(
-                f"Corrupt checkpoint file {path}: not valid JSON ({exc}). "
+                f"Corrupt or unreadable checkpoint file {path}: {exc}. "
                 "Delete it, or point checkpoint_path somewhere else, to "
                 "start fresh."
             ) from exc
 
         if isinstance(data, dict) and "batch" in data:
+            version = data.get("version")
+            if version != CHECKPOINT_FORMAT_VERSION:
+                raise CheckpointError(
+                    f"Checkpoint {path} has format version {version!r}; this "
+                    f"TraceLens reads version {CHECKPOINT_FORMAT_VERSION}. "
+                    "Delete the file or re-run with the matching version."
+                )
             batch_data = data.get("batch")
             identity = data.get("identity")
+            if not isinstance(identity, dict):
+                raise CheckpointError(
+                    f"Corrupt checkpoint file {path}: envelope is missing its "
+                    "run identity."
+                )
         else:
             # Bare-TrialBatch checkpoint written by TraceLens <= 0.3.x.
             logger.warning(
@@ -239,7 +282,9 @@ class EvaluationRunner:
         for trial in loaded.trials:
             if not trial.is_complete:
                 continue
-            if trial.status == TrialStatus.INFRA_ERROR:
+            # INFRA_ERROR says nothing about the agent; SKIPPED is a
+            # placeholder (e.g. from a fail-fast run) — both re-run.
+            if trial.status in (TrialStatus.INFRA_ERROR, TrialStatus.SKIPPED):
                 infra_reruns += 1
                 continue
             batch.add_trial(trial)
@@ -267,7 +312,14 @@ class EvaluationRunner:
             )
         mismatches: list[str] = []
         if identity.get("eval_set_hash") != current["eval_set_hash"]:
-            mismatches.append("eval set content")
+            mismatches.append(
+                "eval set content (note: checkpointing requires stable, "
+                "explicit task_ids — auto-generated ids change every run)"
+            )
+        if identity.get("decision_spec_fingerprint") != current[
+            "decision_spec_fingerprint"
+        ]:
+            mismatches.append("decision spec")
         if identity.get("adapter") != current["adapter"]:
             mismatches.append(
                 f"adapter ({identity.get('adapter')!r} vs {current['adapter']!r})"
@@ -284,6 +336,18 @@ class EvaluationRunner:
                 "merging it would silently mix results from two runs. "
                 "Delete the checkpoint file or use a different path."
             )
+
+    async def _call_adapter_run(self, task: Task) -> Transcript:
+        """Run the adapter, wrapping adapter-raised TimeoutError.
+
+        Keeps the budget-timeout handler in ``_run_one`` from swallowing
+        timeouts that came from inside the adapter (same exception type
+        on Python >= 3.11).
+        """
+        try:
+            return await self.adapter.run(task)
+        except TimeoutError as exc:
+            raise _AdapterTimeoutError(exc) from exc
 
     def _save_checkpoint(self, batch: TrialBatch) -> None:
         """Atomically persist the batch and its run identity."""
@@ -387,7 +451,7 @@ class EvaluationRunner:
                 await self.adapter.setup(task)
             except Exception as exc:
                 setup_failed = True
-                is_infra = _is_infra_exception(exc)
+                is_infra = isinstance(exc, self.config.infra_exception_types)
                 trial.status = (
                     TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                 )
@@ -405,7 +469,7 @@ class EvaluationRunner:
             if not setup_failed:
                 try:
                     transcript = await asyncio.wait_for(
-                        self.adapter.run(task),
+                        self._call_adapter_run(task),
                         timeout=self.config.timeout_seconds,
                     )
                     if transcript.decision_spec is None and self.decision_spec is not None:
@@ -413,6 +477,9 @@ class EvaluationRunner:
                     trial.transcript = transcript
                     trial.status = TrialStatus.COMPLETED
                 except TimeoutError:
+                    # Only the runner's own budget timeout lands here:
+                    # adapter-raised TimeoutError is wrapped by
+                    # _call_adapter_run so it classifies below instead.
                     trial.status = TrialStatus.TIMEOUT
                     trial.error_message = (
                         f"Trial timed out after {self.config.timeout_seconds}s"
@@ -424,7 +491,9 @@ class EvaluationRunner:
                         self.config.timeout_seconds,
                     )
                 except Exception as exc:
-                    is_infra = _is_infra_exception(exc)
+                    if isinstance(exc, _AdapterTimeoutError):
+                        exc = exc.original
+                    is_infra = isinstance(exc, self.config.infra_exception_types)
                     trial.status = (
                         TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                     )

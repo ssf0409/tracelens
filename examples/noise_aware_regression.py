@@ -62,6 +62,10 @@ async def run_once(budget_mb: int) -> tuple[float, float, DecisionSpec]:
         SimpleAdapter(flaky_agent), [], RunnerConfig(num_runs=3),
     ).run(EvalSet(name="demo", tasks=tasks))
     # Pass rate from the runner: INFRA_ERROR trials don't count as passes.
+    # NOTE: the CLI baseline gate EXCLUDES infra-error trials from its
+    # comparison samples (they surface via infra_error_rate instead); this
+    # example folds them into the rate deliberately to show the raw score
+    # swing an infra change can cause.
     completed_rate = sum(1 for t in batch.trials if t.is_successful) / len(batch.trials)
     return completed_rate, batch.infra_error_rate, spec
 

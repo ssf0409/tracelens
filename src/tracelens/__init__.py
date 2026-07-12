@@ -93,6 +93,7 @@ from tracelens.execution.http_adapter import (
     RetryConfig,
 )
 from tracelens.execution.runner import (
+    DEFAULT_INFRA_EXCEPTION_TYPES,
     CheckpointError,
     EvaluationRunner,
     RunnerConfig,
@@ -211,6 +212,7 @@ __all__ = [
     "EvaluationRunner",
     "RunnerConfig",
     "CheckpointError",
+    "DEFAULT_INFRA_EXCEPTION_TYPES",
     # --- Baselines & regression detection ---
     "BaselineManager",
     "BaselineType",

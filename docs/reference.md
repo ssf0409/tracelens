@@ -38,6 +38,7 @@ paths may move, so import from the root for anything you depend on long-term.
 ::: tracelens.EvaluationRunner
 ::: tracelens.RunnerConfig
 ::: tracelens.CheckpointError
+::: tracelens.DEFAULT_INFRA_EXCEPTION_TYPES
 
 ## Graders — base classes
 

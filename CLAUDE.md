@@ -201,10 +201,21 @@ tracelens run \
   --fail-on-regression moderate
 ```
 
+Gate semantics: a misconfigured check (missing `--baselines-file`, or the
+file doesn't exist) exits 2 before the eval runs; exit 1 means a blocking
+regression. Tasks without baselines are warned and counted in the printed
+gate summary; `--require-baselines` makes them fail instead. Noise-aware
+comparison activates when both sides carry a `DecisionSpec` — via
+`--decision-spec` or adapter-stamped transcripts, plus
+`TaskBaseline.decision_spec`; tune the band with `--noise-band`.
+`--infra-exceptions` extends which exception types count as `INFRA_ERROR`.
+
 Long runs: `--progress` prints per-trial progress to stderr, and
 `--checkpoint path.json` persists trials periodically so a rerun with the same
 path resumes — completed trials are skipped, infra-errored trials re-run.
-Checkpoints record the eval-set content hash plus adapter/grader identity;
+Checkpoints record the eval-set content hash, adapter/grader identity, and
+the run's `DecisionSpec` fingerprint (when one is set); resume requires
+stable explicit `task_id`s;
 resuming against a mismatched or corrupt checkpoint raises `CheckpointError`
 instead of silently merging foreign trials. `--max-infra-retries N`
 re-attempts `INFRA_ERROR` trials with exponential backoff (agent failures and
@@ -235,9 +246,9 @@ Individual steps (what `make verify` runs):
 
 ```bash
 uv lock --check
-uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
 uv run --frozen --extra dev mypy src/tracelens/
-uv run --frozen pytest -q --cov=tracelens --cov-fail-under=90
+uv run --frozen --extra dev pytest -q --cov=tracelens --cov-fail-under=90
 ```
 
 For packaging, CLI, README, public imports, or dependency metadata changes, also
