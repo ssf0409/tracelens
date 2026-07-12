@@ -230,9 +230,9 @@ Individual steps (what `make verify` runs):
 
 ```bash
 uv lock --check
-uv run --frozen ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
 uv run --frozen --extra dev mypy src/tracelens/
-uv run --frozen pytest -q --cov=tracelens --cov-fail-under=90
+uv run --frozen --extra dev pytest -q --cov=tracelens --cov-fail-under=90
 ```
 
 For packaging, CLI, README, public imports, or dependency metadata changes, also
