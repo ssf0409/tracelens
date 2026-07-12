@@ -215,6 +215,26 @@ def test_checkpoint_resume_skips_completed_trials(
     assert EchoAdapter.run_count == 2
 
 
+def test_corrupt_checkpoint_fails_cleanly(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A corrupt checkpoint file exits 1 with an error, not a traceback."""
+    checkpoint = tmp_path / "checkpoint.json"
+    checkpoint.write_text("{not valid json")
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--checkpoint", str(checkpoint),
+    )
+
+    assert exit_code == 1
+    assert "checkpoint" in capsys.readouterr().err.lower()
+    assert EchoAdapter.run_count == 0
+
+
 def test_progress_flag_prints_to_stderr(
     tasks_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

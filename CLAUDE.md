@@ -203,7 +203,12 @@ tracelens run \
 
 Long runs: `--progress` prints per-trial progress to stderr, and
 `--checkpoint path.json` persists trials periodically so a rerun with the same
-path resumes, skipping completed trials.
+path resumes — completed trials are skipped, infra-errored trials re-run.
+Checkpoints record the eval-set content hash plus adapter/grader identity;
+resuming against a mismatched or corrupt checkpoint raises `CheckpointError`
+instead of silently merging foreign trials. `--max-infra-retries N`
+re-attempts `INFRA_ERROR` trials with exponential backoff (agent failures and
+timeouts never retry); the attempt count is recorded on `Trial.attempts`.
 
 ## Human Evaluation Workflow
 

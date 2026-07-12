@@ -92,7 +92,11 @@ from tracelens.execution.http_adapter import (
     HTTPAPIAdapter,
     RetryConfig,
 )
-from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.execution.runner import (
+    CheckpointError,
+    EvaluationRunner,
+    RunnerConfig,
+)
 from tracelens.graders.event_chain import (
     EventChainConfig,
     EventChainVerifier,
@@ -206,6 +210,7 @@ __all__ = [
     "RetryConfig",
     "EvaluationRunner",
     "RunnerConfig",
+    "CheckpointError",
     # --- Baselines & regression detection ---
     "BaselineManager",
     "BaselineType",

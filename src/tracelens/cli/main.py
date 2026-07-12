@@ -21,7 +21,11 @@ from tracelens.core.task import EvalSet, JSONTaskLoader
 from tracelens.core.trial import TrialBatch
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
-from tracelens.execution.runner import EvaluationRunner, RunnerConfig
+from tracelens.execution.runner import (
+    CheckpointError,
+    EvaluationRunner,
+    RunnerConfig,
+)
 from tracelens.reporting.generator import ReportData, ReportGenerator
 
 logger = logging.getLogger(__name__)
@@ -99,7 +103,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to a checkpoint file. Trials are periodically persisted "
             "there; re-running with the same path resumes, skipping "
-            "already-completed trials"
+            "already-completed trials (infra-errored trials re-run)"
+        ),
+    )
+    run_parser.add_argument(
+        "--max-infra-retries", type=int, default=0,
+        help=(
+            "Re-attempt trials that end in INFRA_ERROR up to N extra times "
+            "with exponential backoff. Agent failures and timeouts never "
+            "retry (default: 0)"
         ),
     )
 
@@ -207,11 +219,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         timeout_seconds=args.timeout,
         progress_callback=_print_progress if args.progress else None,
         checkpoint_path=args.checkpoint,
+        max_infra_retries=args.max_infra_retries,
     )
 
     # Run evaluation
     runner = EvaluationRunner(adapter, graders, config)
-    batch = asyncio.run(runner.run(eval_set))
+    try:
+        batch = asyncio.run(runner.run(eval_set))
+    except CheckpointError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     # Generate report
     gen = ReportGenerator()

@@ -166,7 +166,11 @@ batch = await EvaluationRunner(adapter, [composite], config).run(eval_set)
 
 `run` is async — call it from `asyncio.run(...)`. For long suites, `RunnerConfig`
 also takes a progress callback and a `checkpoint_path` so a rerun resumes
-(`--progress` / `--checkpoint` on the CLI).
+(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials but
+re-runs infra-errored ones, and refuses (with `CheckpointError`) a checkpoint
+written by a different eval set, adapter, or graders. On flaky infrastructure,
+`max_infra_retries` re-attempts `INFRA_ERROR` trials with exponential backoff —
+agent failures and timeouts never retry, so retries can't inflate the pass rate.
 
 **Reading the `TrialBatch`.** Three things matter, in order:
 
@@ -224,7 +228,8 @@ tracelens run \
 ```
 
 Add `--baseline-check --baselines-file eval/baselines.json --fail-on-regression
-moderate` to gate CI, and `--progress` / `--checkpoint path.json` for long runs.
+moderate` to gate CI, and `--progress` / `--checkpoint path.json` /
+`--max-infra-retries N` for long runs.
 `tracelens report --results results.json --format markdown` re-renders a saved
 run.
 

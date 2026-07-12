@@ -37,6 +37,7 @@ paths may move, so import from the root for anything you depend on long-term.
 ::: tracelens.RetryConfig
 ::: tracelens.EvaluationRunner
 ::: tracelens.RunnerConfig
+::: tracelens.CheckpointError
 
 ## Graders — base classes
 

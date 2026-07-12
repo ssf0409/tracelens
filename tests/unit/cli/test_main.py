@@ -40,6 +40,7 @@ class TestBuildParser:
         assert args.fail_on_regression == "moderate"
         assert args.output is None
         assert args.report is None
+        assert args.max_infra_retries == 0
 
     def test_run_with_all_options(self):
         """Run command accepts all optional args."""
@@ -57,6 +58,7 @@ class TestBuildParser:
             "--fail-on-regression", "severe",
             "--output", "results.json",
             "--report", "report.md",
+            "--max-infra-retries", "2",
         ])
         assert args.num_runs == 5
         assert args.max_concurrency == 10
@@ -66,6 +68,7 @@ class TestBuildParser:
         assert args.fail_on_regression == "severe"
         assert args.output == "results.json"
         assert args.report == "report.md"
+        assert args.max_infra_retries == 2
 
     def test_report_required_args(self):
         """Report command requires results file."""
