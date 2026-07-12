@@ -77,6 +77,7 @@ from tracelens.core.task import (
     Task,
     TaskLoader,
 )
+from tracelens.loaders import CSVTaskLoader, HFDatasetLoader, JSONLTaskLoader
 from tracelens.core.transcript import (
     StreamingEvent,
     StreamingEventType,
@@ -155,6 +156,9 @@ __all__ = [
     "Task",
     "TaskLoader",
     "JSONTaskLoader",
+    "JSONLTaskLoader",
+    "CSVTaskLoader",
+    "HFDatasetLoader",
     "EvalSet",
     "Trial",
     "TrialBatch",

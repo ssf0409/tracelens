@@ -86,6 +86,7 @@ nav:
   - Guides:
       - Evaluating a Real Agent: real-agent.md
       - Comparing Versions: comparing-versions.md
+      - Loading Tasks from External Sources: task-sources.md
       - Grader Library: grader-library.md
       - User Guide: user-guide.md
       - Multi-Level Evaluation: evaluation-levels.md

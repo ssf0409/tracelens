@@ -63,6 +63,10 @@ llm = [
 http = [
     "httpx>=0.25",
 ]
+# HuggingFace datasets loader. Install with: pip install "tracelens[datasets]"
+datasets = [
+    "datasets>=2.14",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
