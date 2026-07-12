@@ -201,12 +201,22 @@ class EvaluationRunner:
 
         total = len(work_items) + len(completed_keys)
 
-        # Run all concurrently with semaphore
+        # Run all concurrently with semaphore. fail_fast shares one event:
+        # once set, work items that haven't started yet produce no trials.
+        stop_event = asyncio.Event() if self.config.fail_fast else None
         tasks = [
-            self._run_one(task, run_index, semaphore, batch, total)
+            self._run_one(task, run_index, semaphore, batch, total, stop_event)
             for task, run_index in work_items
         ]
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        unrun = sum(1 for executed in results if not executed)
+        if unrun:
+            logger.warning(
+                "fail_fast: %d work item(s) were not run after the first "
+                "execution failure; a rerun with the same --checkpoint "
+                "path executes them",
+                unrun,
+            )
 
         batch.completed_at = utc_now()
         self._save_checkpoint(batch)
@@ -371,18 +381,27 @@ class EvaluationRunner:
         semaphore: asyncio.Semaphore,
         batch: TrialBatch,
         total: int,
-    ) -> None:
+        stop_event: asyncio.Event | None = None,
+    ) -> bool:
         """Execute one (task, run_index) slot, retrying infra errors.
 
         Only INFRA_ERROR outcomes retry (up to ``max_infra_retries`` extra
         attempts, exponential backoff): they carry no signal about the
         agent. FAILED and TIMEOUT are agent observations and never retry.
+
+        Returns True if the slot executed (a trial was recorded), False if
+        fail_fast stopped it before it started — deliberately producing NO
+        placeholder trial, so pass rates, the baseline gate, and
+        checkpoints only see work that actually ran.
         """
         max_attempts = self.config.max_infra_retries + 1
         retried_errors: list[str] = []
 
         attempt = 1
-        trial = await self._attempt_trial(task, run_index, semaphore)
+        first = await self._attempt_trial(task, run_index, semaphore, stop_event)
+        if first is None:
+            return False
+        trial = first
         while trial.status == TrialStatus.INFRA_ERROR and attempt < max_attempts:
             retried_errors.append(trial.error_message or "")
             backoff = self.config.infra_retry_backoff_seconds * 2 ** (attempt - 1)
@@ -398,10 +417,34 @@ class EvaluationRunner:
             )
             if backoff > 0:
                 await asyncio.sleep(backoff)
-            trial = await self._attempt_trial(task, run_index, semaphore)
+            retry = await self._attempt_trial(task, run_index, semaphore, stop_event)
+            if retry is None:
+                # Another trial tripped fail_fast mid-backoff; keep the
+                # last real observation instead of discarding it.
+                break
+            trial = retry
             attempt += 1
 
         trial.attempts = attempt
+
+        # fail_fast trips only on execution failures, only after retries
+        # are exhausted, and never on teardown flakiness (the run itself
+        # succeeded) or grading outcomes (graded below; a graded failure
+        # is an agent-quality observation, not a broken harness).
+        if (
+            stop_event is not None
+            and not stop_event.is_set()
+            and trial.status
+            in (TrialStatus.FAILED, TrialStatus.INFRA_ERROR, TrialStatus.TIMEOUT)
+            and not trial.metadata.get("teardown_failed")
+        ):
+            stop_event.set()
+            logger.warning(
+                "fail_fast: task %s run %d ended %s — no new trials will start",
+                task.task_id,
+                run_index,
+                trial.status.value,
+            )
         if retried_errors:
             trial.metadata["infra_retry_errors"] = retried_errors
 
@@ -421,12 +464,15 @@ class EvaluationRunner:
         ):
             self._save_checkpoint(batch)
 
+        return True
+
     async def _attempt_trial(
         self,
         task: Task,
         run_index: int,
         semaphore: asyncio.Semaphore,
-    ) -> Trial:
+        stop_event: asyncio.Event | None = None,
+    ) -> Trial | None:
         """One execution attempt: lifecycle hooks, timeout, error handling.
 
         Lifecycle: setup → run → teardown (always called).
@@ -444,6 +490,10 @@ class EvaluationRunner:
         transcript: Transcript | None = None
 
         async with semaphore:
+            # Check under the semaphore: a work item that reaches its slot
+            # after fail_fast tripped never starts (and records nothing).
+            if stop_event is not None and stop_event.is_set():
+                return None
             setup_failed = False
 
             # --- setup ---
@@ -517,6 +567,9 @@ class EvaluationRunner:
                         f"Teardown failed: {teardown_exc}"
                     )
                     trial.error_traceback = traceback.format_exc()
+                    # The run itself succeeded; record the distinction so
+                    # fail_fast doesn't abort a suite over cleanup flakiness.
+                    trial.metadata["teardown_failed"] = True
                 else:
                     trial.error_message = (
                         f"{trial.error_message}; "

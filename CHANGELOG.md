@@ -125,6 +125,19 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   `RunnerConfig.max_infra_retries`. Eval-set JSON containing the old field
   still loads; the value is ignored.
 
+### Fixed
+
+- **`RunnerConfig.fail_fast` is honored.** The field was previously accepted
+  and silently ignored. When enabled, the first trial whose execution fails —
+  final status `FAILED`, `INFRA_ERROR` (after `max_infra_retries` is
+  exhausted), or `TIMEOUT` — stops new work from being scheduled. In-flight
+  trials still run to completion; unstarted work items produce no trials at
+  all, so pass rates, the baseline gate, and checkpoints only ever see
+  trials that actually executed (a resume naturally runs the remainder).
+  Trials that execute but fail grading, and teardown errors on otherwise
+  successful trials, do not trip it. The runner logs how many work items
+  were left unrun.
+
 ## [0.3.0] - 2026-06-10
 
 Hardening release: the grading path now honors its own configuration, harness

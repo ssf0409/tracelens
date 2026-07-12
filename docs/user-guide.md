@@ -175,7 +175,13 @@ configs of the same adapter class, and use stable explicit `task_id`s
 infrastructure,
 `max_infra_retries` re-attempts `INFRA_ERROR` trials with exponential backoff —
 agent failures and timeouts never retry, so retries can't inflate the pass rate.
-
+`fail_fast=True` stops scheduling new work after the first trial whose
+execution fails (`FAILED`, `INFRA_ERROR` after retries are exhausted, or
+`TIMEOUT`) — useful for smoke runs where one execution failure means the
+harness is broken. In-flight trials finish normally, unstarted work simply
+never runs (no placeholder trials, so pass rates and the baseline gate only
+see trials that actually executed), and a grading failure or a teardown
+error never trips it.
 **Reading the `TrialBatch`.** Three things matter, in order:
 
 1. **Harness vs. agent.** Check `batch.infra_error_rate` and
