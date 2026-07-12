@@ -168,6 +168,15 @@ Notes:
   failures — downstream policy, conservative by default.
 - Use GitHub job summaries or artifacts for reports. `tracelens report`
   supports `markdown`, `json`, and `html` output formats.
+- On flaky CI infrastructure, add `--max-infra-retries 2`: trials that end in
+  `INFRA_ERROR` (network drops, OOM kills) are re-attempted with exponential
+  backoff before counting against `infra_error_rate`. Agent failures and
+  timeouts never retry, so this cannot inflate the pass rate.
+- For long suites, `--checkpoint path.json` persists progress; re-running the
+  job with the same file resumes, skipping completed trials and re-running
+  infra-errored ones. Checkpoints are bound to the eval set, adapter, and
+  graders that produced them — resuming with a mismatched or corrupt file
+  fails with a clear error rather than mixing results from different runs.
 
 ## Baseline Files
 

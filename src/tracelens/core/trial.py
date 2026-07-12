@@ -93,6 +93,11 @@ class Trial(BaseModel):
     run_index: int = 0
     total_runs: int = 1
 
+    # Number of execution attempts behind this trial. >1 means earlier
+    # attempts hit infra errors and were retried (RunnerConfig.max_infra_retries);
+    # the retried-away error messages are kept in metadata["infra_retry_errors"].
+    attempts: int = 1
+
     # Status
     status: TrialStatus = TrialStatus.PENDING
 

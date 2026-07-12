@@ -30,6 +30,7 @@ from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
 from tracelens.execution.runner import (
     DEFAULT_INFRA_EXCEPTION_TYPES,
+    CheckpointError,
     EvaluationRunner,
     RunnerConfig,
 )
@@ -120,7 +121,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to a checkpoint file. Trials are periodically persisted "
             "there; re-running with the same path resumes, skipping "
-            "already-completed trials"
+            "already-completed trials (infra-errored trials re-run)"
+        ),
+    )
+    run_parser.add_argument(
+        "--max-infra-retries", type=int, default=0,
+        help=(
+            "Re-attempt trials that end in INFRA_ERROR up to N extra times "
+            "with exponential backoff. Agent failures and timeouts never "
+            "retry (default: 0)"
         ),
     )
     run_parser.add_argument(
@@ -397,11 +406,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         infra_exception_types=infra_exception_types,
         progress_callback=_print_progress if args.progress else None,
         checkpoint_path=args.checkpoint,
+        max_infra_retries=args.max_infra_retries,
     )
 
     # Run evaluation
     runner = EvaluationRunner(adapter, graders, config, decision_spec=decision_spec)
-    batch = asyncio.run(runner.run(eval_set))
+    try:
+        batch = asyncio.run(runner.run(eval_set))
+    except CheckpointError as exc:
+        # A stale/corrupt/foreign checkpoint is a misconfigured run, not a
+        # blocked gate — same exit-2 contract as the gate preflight.
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
 
     # Generate report
     gen = ReportGenerator()

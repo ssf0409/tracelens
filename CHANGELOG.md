@@ -38,9 +38,27 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 - **`DEFAULT_INFRA_EXCEPTION_TYPES` is exported top-level** (`from
   tracelens import DEFAULT_INFRA_EXCEPTION_TYPES`), matching the
   documented `+ (OSError,)` extension pattern.
+- **Infra-error retry.** `RunnerConfig.max_infra_retries` re-attempts trials
+  that end `INFRA_ERROR`, with exponential backoff
+  (`infra_retry_backoff_seconds`). `FAILED` and `TIMEOUT` trials never retry —
+  those are observations about the agent, and retrying them would launder
+  flakiness out of the pass rate. The final trial records its attempt count in
+  `Trial.attempts`, and retried-away error messages are kept in
+  `Trial.metadata["infra_retry_errors"]`. CLI: `--max-infra-retries`.
+- **Checkpoint run identity.** Checkpoint files now carry a versioned envelope
+  with the eval-set content hash, adapter/grader class identity, and the
+  run-level `DecisionSpec` fingerprint when one is set (class paths alone
+  cannot distinguish two configs of the same adapter class). Resuming
+  against a checkpoint written by a different eval set, adapter, grader
+  stack, or decision spec raises `CheckpointError` (exported from
+  `tracelens`) instead of silently merging foreign trials keyed only on
+  `(task_id, run_index)`. Envelopes with an unknown format version or a
+  missing identity are rejected as corrupt. Note: resume requires stable
+  explicit `task_id`s — auto-generated ids change every process.
+  Pre-0.4 bare-batch checkpoints still load, with a loud warning that their
+  identity can't be verified.
 
 ### Changed
-
 - **Gate misconfiguration is now an error.** `tracelens run
   --baseline-check` without `--baselines-file`, or with a nonexistent or
   unparseable baselines file, exits 2 before the eval runs instead of
@@ -80,9 +98,14 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   from the delta thresholds and an explicit `insufficient_data` flag.
   Zero-variance samples against a known baseline spread now get a real
   z-test.
+- **Checkpoint resume re-runs infra-errored trials.** Resume previously
+  skipped every finished trial, permanently freezing `INFRA_ERROR` results
+  into the batch. A rerun with the same checkpoint path now re-executes
+  infra-errored trials and `SKIPPED` placeholders (`TIMEOUT` trials stay
+  skipped — a timeout is an observation about the agent). The checkpoint file format changed to the
+  identity envelope described above; old files remain readable.
 
 ### Fixed
-
 - **`InfraError` docstring matched to behavior.** It previously claimed
   `OSError` and network `TimeoutError` were classified as infra; they never
   were. The docstring now describes the real (configurable) set and that
@@ -90,6 +113,17 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 - **`compare_to_baseline_summary` no longer crashes at n=1.** The
   Welch-Satterthwaite degrees of freedom fell back to a division by zero
   when either side had a single sample.
+- **Corrupt checkpoint files fail clearly.** An unreadable or unparseable
+  checkpoint now raises `CheckpointError` with the offending path and a
+  recovery hint (the CLI prints the error and exits 2 — the misconfigured-run contract) instead of an
+  unhandled `JSONDecodeError`.
+
+### Removed
+
+- **`Task.max_retries`.** Dead configuration — the runner never read it.
+  Retry policy is an execution concern and lives in
+  `RunnerConfig.max_infra_retries`. Eval-set JSON containing the old field
+  still loads; the value is ignored.
 
 ## [0.3.0] - 2026-06-10
 

@@ -30,6 +30,14 @@ class TestTask:
         assert task.difficulty is None
         assert task.timeout_seconds == 300.0
 
+    def test_legacy_max_retries_input_ignored(self):
+        """max_retries was dead config (the runner never read it) and was
+        removed; retry policy lives in RunnerConfig.max_infra_retries.
+        Eval-set JSON saved by older versions must still load."""
+        task = Task(name="t", input_data={}, max_retries=5)
+
+        assert not hasattr(task, "max_retries")
+
     def test_task_creation_full(self, sample_task: Task):
         """Test creating a task with all fields."""
         assert sample_task.task_id == "test-task-001"

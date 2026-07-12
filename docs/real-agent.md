@@ -222,7 +222,14 @@ print(f"{batch.total_count} trials, pass rate {batch.pass_rate:.1%}")
 
 `runner.run` is async — call it from `asyncio.run(main())`. `RunnerConfig`
 also exposes `progress_callback`, `checkpoint_path`, and `checkpoint_interval`
-for long runs (the CLI surfaces these as `--progress` and `--checkpoint`).
+for long runs (the CLI surfaces these as `--progress` and `--checkpoint`),
+plus `max_infra_retries` to re-attempt `INFRA_ERROR` trials with exponential
+backoff. Checkpoint resume skips completed trials, re-runs infra-errored
+ones and skipped placeholders, and refuses (with `CheckpointError`) a
+checkpoint from a mismatched eval set, adapter, graders, or `DecisionSpec`.
+Identity uses class paths, so two configs of the same adapter class are only
+told apart when the runner carries a `DecisionSpec`; checkpointing also
+requires stable, explicit `task_id`s (auto-generated ids change every run).
 
 The returned `TrialBatch` separates harness failures from agent failures:
 alongside `pass_rate` it carries `infra_error_rate` and `grader_error_rate`.

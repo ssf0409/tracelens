@@ -166,7 +166,15 @@ batch = await EvaluationRunner(adapter, [composite], config).run(eval_set)
 
 `run` is async — call it from `asyncio.run(...)`. For long suites, `RunnerConfig`
 also takes a progress callback and a `checkpoint_path` so a rerun resumes
-(`--progress` / `--checkpoint` on the CLI).
+(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials but
+re-runs infra-errored ones, and refuses (with `CheckpointError`) a checkpoint
+written by a different eval set, adapter, graders, or `DecisionSpec` —
+identity is class-path based, so pass a `DecisionSpec` to distinguish two
+configs of the same adapter class, and use stable explicit `task_id`s
+(auto-generated ids change every run and can never resume). On flaky
+infrastructure,
+`max_infra_retries` re-attempts `INFRA_ERROR` trials with exponential backoff —
+agent failures and timeouts never retry, so retries can't inflate the pass rate.
 
 **Reading the `TrialBatch`.** Three things matter, in order:
 
@@ -229,8 +237,9 @@ it is misconfigured (`--baseline-check` without a readable `--baselines-file`
 refuses to run rather than passing vacuously), and always prints a summary of
 what it checked. Tasks with no stored baseline are skipped with a warning — add
 `--require-baselines` to fail instead. Use `--progress` / `--checkpoint
-path.json` for long runs. See [CI/CD Integration](ci-cd-integration.md) for the
-noise-aware flags (`--decision-spec`, `--noise-band`, `--infra-exceptions`).
+path.json` / `--max-infra-retries N` for long runs. See
+[CI/CD Integration](ci-cd-integration.md) for the noise-aware flags
+(`--decision-spec`, `--noise-band`, `--infra-exceptions`).
 `tracelens report --results results.json --format markdown` re-renders a saved
 run.
 
