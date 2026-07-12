@@ -1,18 +1,20 @@
-"""CSV, JSONL, and HuggingFace task loaders for TraceLens.
+"""CSV and JSONL task loaders for TraceLens.
 
-Provides three :class:`~tracelens.core.task.TaskLoader` implementations:
+Two :class:`~tracelens.core.task.TaskLoader` implementations, stdlib-only —
+the parsing is delegated to :mod:`json` and :mod:`csv`; these classes own
+only the row-to-:class:`~tracelens.core.task.Task` mapping:
 
-- :class:`JSONLTaskLoader` — one JSON object per line (``.jsonl``). Stdlib only.
-- :class:`CSVTaskLoader` — tabular data via :mod:`csv`. Stdlib only.
+- :class:`JSONLTaskLoader` — one JSON object per line (``.jsonl``).
+- :class:`CSVTaskLoader` — tabular data via :mod:`csv.DictReader`.
 
-      pip install "tracelens[datasets]"
-
-Both CSV/JSONL loaders accept configurable field/column names so you can
-point them at your own files without renaming columns.
+Both accept configurable field/column names so you can point them at your
+own files without renaming columns. For hosted datasets (HuggingFace etc.)
+see the recipe in ``docs/task-sources.md`` — hosted integrations wrap their
+ecosystem's maintained client rather than living in core.
 
 Example::
 
-    from tracelens.loaders import JSONLTaskLoader, CSVTaskLoader, HFDatasetLoader
+    from tracelens import CSVTaskLoader, JSONLTaskLoader
 
     # JSONL — each line must have at least an "input" key
     tasks = JSONLTaskLoader().load("eval_suite.jsonl")
@@ -25,12 +27,6 @@ Example::
         input_col="prompt",
         metadata_cols=["category", "difficulty"],
     ).load("my_data.csv")
-
-    # HuggingFace Hub dataset (requires tracelens[datasets])
-    tasks = HFDatasetLoader(
-        input_field="question",
-        metadata_fields=["subject", "level"],
-    ).load("cais/mmlu", split="test")
 """
 
 import csv

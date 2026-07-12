@@ -154,6 +154,20 @@ tasks2 = loader.load("output.csv")
 
 ---
 
+## Design policy: wrap parsers, own only the mapping
+
+TraceLens loaders never implement file-format parsing. `JSONLTaskLoader` and
+`CSVTaskLoader` delegate to the stdlib `json` and `csv` modules — the
+maintained parsers for those formats — and own only the row-to-`Task`
+mapping (which columns are Task fields, what gets JSON-parsed vs kept as
+text, how metadata is collected). The same rule applies to future sources:
+a Parquet loader would wrap `pyarrow`, a database loader would wrap its
+driver, and hosted-dataset sources wrap their ecosystem client (see the
+HuggingFace recipe below). Per the roadmap's thin-core doctrine, sources
+that need a third-party dependency start as recipes or optional extras and
+are only promoted into core when multiple downstream projects need the same
+abstraction.
+
 ## HuggingFace datasets (recipe)
 
 TraceLens deliberately does not ship a HuggingFace loader: hosted-dataset
