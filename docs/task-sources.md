@@ -1,9 +1,9 @@
 # Loading Tasks from External Sources
 
-TraceLens evaluations are built around :class:`~tracelens.core.task.Task` objects, but your
-data almost certainly already lives in a spreadsheet, a log file, or a HuggingFace
-dataset. The loaders in this page let you point TraceLens at those files directly —
-no conversion step required.
+TraceLens evaluations are built around [`Task`][tracelens.Task] objects, but your data
+almost certainly already lives in a spreadsheet, a log file, or a HuggingFace dataset.
+The loaders in this page let you point TraceLens at those files directly — no conversion
+step required.
 
 ## Overview
 
@@ -67,7 +67,8 @@ tasks = JSONLTaskLoader(
 
 `metadata_fields` may select only foreign keys. Native `Task` fields such as
 `difficulty` and `category` always map to their corresponding Task attributes,
-so a field never has two meanings.
+so a field never has two meanings. It filters flat foreign keys only; an embedded
+canonical `metadata` object is already normalized and is therefore loaded intact.
 
 ### Directory loading
 
@@ -135,6 +136,10 @@ collected into `Task.metadata` automatically.
 The configured input field is required. A missing JSONL field or CSV column is
 reported as an error instead of producing an empty task. It must not reuse a
 native `Task` field name such as `name` or `metadata`.
+
+CSV headers must be unique and non-blank, and every row must have no more values
+than the header. Malformed source structure fails with the file and line location
+instead of silently dropping data.
 
 ### JSON-encoded cells
 

@@ -78,6 +78,11 @@ def map_record(
     validate_mapping_fields(input_field, metadata_fields)
     if input_field not in row:
         raise ValueError(f"missing required input field {input_field!r}")
+    if "input_data" in row:
+        raise ValueError(
+            "input_data cannot be combined with the configured input field "
+            f"{input_field!r}"
+        )
 
     raw_input = row[input_field]
     input_data = dict(raw_input) if isinstance(raw_input, Mapping) else {"value": raw_input}

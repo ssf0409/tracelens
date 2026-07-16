@@ -123,6 +123,15 @@ class TestMapRecord:
         with pytest.raises(ValueError, match="conflicts with a Task field"):
             map_record({"name": "prompt"}, input_field="name")
 
+    def test_rejects_native_input_data_alongside_configured_input(self) -> None:
+        with pytest.raises(ValueError, match="input_data.*configured input field"):
+            map_record(
+                {
+                    "input": "configured input",
+                    "input_data": {"source": "ambiguous native input"},
+                }
+            )
+
 
 # ===========================================================================
 # JSONLTaskLoader
@@ -463,6 +472,30 @@ class TestCSVTaskLoader:
 
         assert task.metadata == {"source": "docs", "rank": 2}
 
+    def test_load_empty_canonical_metadata_cell_uses_default(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "empty-canonical-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "metadata": ""}],
+            fieldnames=["input", "metadata"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.metadata == {}
+
+    def test_load_blank_flat_metadata_cell_is_ignored(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "blank-flat-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "source": ""}],
+            fieldnames=["input", "source"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.metadata == {}
+
     def test_rejects_canonical_and_flat_metadata_in_same_csv_row(self, tmp_path: Path) -> None:
         csv_file = tmp_path / "mixed-metadata.csv"
         _write_csv(
@@ -519,6 +552,44 @@ class TestCSVTaskLoader:
 
         with pytest.raises(ValueError, match="missing required input field 'input'"):
             CSVTaskLoader().load(csv_file)
+
+    @pytest.mark.parametrize("duplicate", ["input", "name", "metadata"])
+    def test_load_duplicate_column_names_raises(
+        self, tmp_path: Path, duplicate: str
+    ) -> None:
+        csv_file = tmp_path / "duplicate-header.csv"
+        csv_file.write_text(
+            f"input,name,metadata,{duplicate}\nprompt,T,{{}},duplicate value\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match=rf"duplicate CSV column.*{duplicate}"):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_blank_column_name_raises(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "blank-header.csv"
+        csv_file.write_text("input,,name\nprompt,extra,T\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="blank CSV column"):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_row_wider_than_header_raises_with_location(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "wide-row.csv"
+        csv_file.write_text("input,name\nprompt,T,unexpected\n", encoding="utf-8")
+
+        with pytest.raises(
+            ValueError,
+            match=rf"{csv_file}:2: row has more values than the CSV header",
+        ):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_row_shorter_than_header_uses_task_defaults(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "short-row.csv"
+        csv_file.write_text("input,name,description\nprompt,T\n", encoding="utf-8")
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.description is None
 
     def test_input_field_cannot_shadow_task_field(self) -> None:
         """The external input field cannot duplicate a native Task field column."""
@@ -732,6 +803,19 @@ class TestCSVReservedColumnFidelity:
 
         assert task.tags == ["smoke", "regression"]
         assert task.timeout_seconds == 42.5
+
+    @pytest.mark.parametrize("tags", ["not-json", '""'])
+    def test_invalid_structured_columns_raise_with_location(
+        self, tmp_path: Path, tags: str
+    ) -> None:
+        _write_csv(
+            tmp_path / "invalid-tags.csv",
+            [{"input": "prompt", "name": "n", "tags": tags}],
+            ["input", "name", "tags"],
+        )
+
+        with pytest.raises(ValueError, match=r"invalid-tags\.csv:2:"):
+            CSVTaskLoader().load(tmp_path / "invalid-tags.csv")
 
     def test_save_load_round_trip_preserves_tags_and_expectation(self, tmp_path: Path) -> None:
         from tracelens.core.task import TaskExpectation

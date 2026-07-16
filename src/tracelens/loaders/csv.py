@@ -2,10 +2,11 @@
 
 import csv
 import json
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -45,21 +46,43 @@ def _decode_task_cell(name: str, value: str) -> Any:
             return value
 
 
-def _decode_csv_record(row: Mapping[str, str | None], input_field: str) -> dict[str, Any]:
+def _validate_csv_header(path: Path, fieldnames: Sequence[str], input_field: str) -> None:
+    blank_columns = [name for name in fieldnames if not name.strip()]
+    if blank_columns:
+        raise ValueError(f"{path}: blank CSV column names are not allowed")
+
+    duplicate_columns = [
+        name for name, count in Counter(fieldnames).items() if count > 1
+    ]
+    if duplicate_columns:
+        names = ", ".join(repr(name) for name in duplicate_columns)
+        raise ValueError(f"{path}: duplicate CSV column names: {names}")
+
+    if input_field not in fieldnames:
+        raise ValueError(f"{path}: missing required input field {input_field!r}")
+
+
+def _decode_csv_record(
+    row: Mapping[str | None, str | list[str] | None], input_field: str
+) -> dict[str, Any]:
     record: dict[str, Any] = {}
     for name, value in row.items():
+        if name is None:
+            raise ValueError("row has more values than the CSV header")
         if value is None:
             continue
+        # DictReader emits list values only for overflow under the None key above.
+        cell = cast(str, value)
         if name == input_field:
-            record[name] = _decode_json_or_text(value)
+            record[name] = _decode_json_or_text(cell)
         elif name == "metadata":
-            if value != "":
-                record[name] = _decode_json_or_text(value)
+            if cell != "":
+                record[name] = _decode_json_or_text(cell)
         elif name in Task.model_fields and name not in {"input_data", "metadata"}:
-            if value != "":
-                record[name] = _decode_task_cell(name, value)
-        elif value != "":
-            record[name] = _decode_json_or_text(value)
+            if cell != "":
+                record[name] = _decode_task_cell(name, cell)
+        elif cell != "":
+            record[name] = _decode_json_or_text(cell)
     return record
 
 
@@ -90,8 +113,7 @@ class CSVTaskLoader(TaskLoader):
                 reader = csv.DictReader(file)
                 if reader.fieldnames is None:
                     continue
-                if self.input_field not in reader.fieldnames:
-                    raise ValueError(f"{path}: missing required input field {self.input_field!r}")
+                _validate_csv_header(path, reader.fieldnames, self.input_field)
                 for line_number, row in enumerate(reader, start=2):
                     try:
                         tasks.append(

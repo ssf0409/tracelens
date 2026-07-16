@@ -62,8 +62,9 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   (top-level exports) load eval sets from `.jsonl`/`.csv` files or
   directories and save them back, with JSON-compatible round-trips (CSV
   serialises structured Task fields and one canonical metadata column as JSON) and
-  no JSON coercion of free-text Task fields. Missing inputs and mixed
-  canonical/flat metadata representations fail loudly. Derived from #31 by @Balaji1304
+  no JSON coercion of free-text Task fields. Missing or ambiguous inputs,
+  malformed CSV structure, and mixed canonical/flat metadata representations
+  fail loudly. Derived from #31 by @Balaji1304
   with the HuggingFace loader moved to a documented recipe per the
   thin-core roadmap. Docs: `docs/task-sources.md`.
 
