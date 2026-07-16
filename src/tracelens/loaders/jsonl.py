@@ -3,12 +3,12 @@
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
+from tracelens._paths import prepare_destination_path, source_files
 from tracelens.core.task import Task, TaskLoader
 from tracelens.loaders._records import (
     map_record,
-    source_files,
+    task_to_record,
     validate_mapping_fields,
 )
 
@@ -54,10 +54,8 @@ class JSONLTaskLoader(TaskLoader):
         return tasks
 
     def save(self, tasks: list[Task], destination: str | Path) -> None:
-        path = Path(destination)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = prepare_destination_path(destination)
         with open(path, "w", encoding="utf-8") as file:
             for task in tasks:
-                record: dict[str, Any] = task.model_dump(mode="json")
-                record[self.input_field] = record.pop("input_data")
+                record = task_to_record(task, input_field=self.input_field)
                 file.write(json.dumps(record, default=str) + "\n")

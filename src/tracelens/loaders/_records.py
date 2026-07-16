@@ -1,20 +1,9 @@
-"""Shared source traversal and foreign-record mapping."""
+"""Shared mapping between foreign records and Tasks."""
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 from tracelens.core.task import Task
-
-
-def source_files(source: str | Path, suffix: str) -> list[Path]:
-    """Resolve a file or recursively sorted directory into source files."""
-    path = Path(source)
-    if path.is_file():
-        return [path]
-    if path.is_dir():
-        return sorted(path.glob(f"**/*{suffix}"))
-    raise ValueError(f"Source is not a file or directory: {source!r}")
 
 
 def validate_mapping_fields(
@@ -33,6 +22,14 @@ def validate_mapping_fields(
             raise ValueError("metadata_fields cannot include the input field")
         if field in Task.model_fields:
             raise ValueError("metadata_fields cannot include a Task field")
+
+
+def task_to_record(task: Task, *, input_field: str = "input") -> dict[str, Any]:
+    """Serialize a Task into the canonical record shape used by foreign sinks."""
+    validate_mapping_fields(input_field, None)
+    record: dict[str, Any] = task.model_dump(mode="json")
+    record[input_field] = record.pop("input_data")
+    return record
 
 
 def _task_values(row: Mapping[str, Any]) -> dict[str, Any]:

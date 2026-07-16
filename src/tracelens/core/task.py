@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from tracelens._paths import prepare_destination_path
 from tracelens.core._time import utc_now
 
 
@@ -139,8 +140,7 @@ class JSONTaskLoader(TaskLoader):
 
     def save(self, tasks: list[Task], destination: str | Path) -> None:
         """Save tasks to JSON file."""
-        path = Path(destination)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = prepare_destination_path(destination)
 
         with open(path, "w") as f:
             json.dump(

@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from tracelens.core.task import Task
-from tracelens.loaders import CSVTaskLoader, JSONLTaskLoader, map_record
+import tracelens.loaders as loaders
+from tracelens.core.task import Task, TaskExpectation
+from tracelens.loaders import CSVTaskLoader, JSONLTaskLoader
+from tracelens.loaders._records import map_record, task_to_record
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,6 +133,62 @@ class TestMapRecord:
                     "input_data": {"source": "ambiguous native input"},
                 }
             )
+
+
+class TestTaskToRecord:
+    """Canonical serialization contract shared by every foreign record sink."""
+
+    def test_renames_input_and_preserves_every_native_task_field(self) -> None:
+        task = Task(
+            task_id="task-42",
+            name="Full task",
+            description="Every field is populated",
+            input_data={"question": "What is 2 + 2?"},
+            expectation=TaskExpectation(
+                expected_output="4",
+                validation_hints={"match": "exact"},
+            ),
+            metadata={"source": "unit-test"},
+            tags=["math", "smoke"],
+            difficulty="easy",
+            category="reasoning",
+            timeout_seconds=12.5,
+        )
+        expected = task.model_dump(mode="json")
+        expected["prompt"] = expected.pop("input_data")
+
+        record = task_to_record(task, input_field="prompt")
+
+        assert record == expected
+        assert "input_data" not in record
+
+    def test_round_trips_through_shared_record_mapping(self) -> None:
+        task = Task(
+            task_id="round-trip",
+            name="Round trip",
+            input_data={"goal": "preserve me"},
+            metadata={"owner": "evals"},
+        )
+
+        record = task_to_record(task, input_field="prompt")
+        reloaded = map_record(record, input_field="prompt")
+
+        assert reloaded == task
+
+    def test_rejects_an_input_field_that_would_overwrite_task_data(self) -> None:
+        task = Task(name="Ambiguous", input_data={"goal": "preserve me"})
+
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            task_to_record(task, input_field="metadata")
+
+
+def test_internal_loader_helpers_are_not_public_exports() -> None:
+    assert "map_record" not in loaders.__all__
+    assert "source_files" not in loaders.__all__
+    assert "task_to_record" not in loaders.__all__
+    assert not hasattr(loaders, "map_record")
+    assert not hasattr(loaders, "source_files")
+    assert not hasattr(loaders, "task_to_record")
 
 
 # ===========================================================================

@@ -1,7 +1,7 @@
 # Loading Tasks from External Sources
 
 TraceLens evaluations are built around [`Task`][tracelens.Task] objects, but your data
-almost certainly already lives in a spreadsheet, a log file, or a HuggingFace dataset.
+almost certainly already lives in a spreadsheet, a log file, or a Hugging Face dataset.
 The loaders in this page let you point TraceLens at those files directly — no conversion
 step required.
 
@@ -12,10 +12,10 @@ step required.
 | `JSONTaskLoader` | JSON file(s) / directory | — (core) |
 | `JSONLTaskLoader` | Newline-delimited JSON (`.jsonl`) | — (stdlib) |
 | `CSVTaskLoader` | Comma-separated values (`.csv`) | — (stdlib) |
-| custom (recipe below) | HuggingFace `datasets` | `pip install datasets` |
+| `HFDatasetLoader` | Hugging Face Hub / saved `Dataset` | `tracelens[datasets]` |
 
-All loaders implement the same [`TaskLoader`][tracelens.core.task.TaskLoader] ABC so
-they are interchangeable in your code:
+All loaders implement the same [`TaskLoader`][tracelens.core.task.TaskLoader] ABC, so
+their `load()` and `save()` result contracts remain consistent:
 
 ```python
 loader = CSVTaskLoader(input_field="prompt")   # or any other loader
@@ -182,37 +182,46 @@ maintained parsers for those formats — and own only the row-to-`Task`
 mapping (which columns are Task fields, what gets JSON-parsed vs kept as
 text, how metadata is collected). The same rule applies to future sources:
 a Parquet loader would wrap `pyarrow`, a database loader would wrap its
-driver, and hosted-dataset sources wrap their ecosystem client (see the
-HuggingFace recipe below). Per the roadmap's thin-core doctrine, sources
-that need a third-party dependency start as recipes or optional extras and
-are only promoted into core when multiple downstream projects need the same
-abstraction.
+driver, and hosted-dataset sources wrap their ecosystem client. Optional
+integrations remain isolated from core imports and reuse the same record
+mapping contract as local loaders.
 
-## HuggingFace datasets (recipe)
+## HFDatasetLoader
 
-TraceLens deliberately does not ship a HuggingFace loader: hosted-dataset
-integrations start as recipes until enough downstream projects need a shared
-abstraction (see ROADMAP non-goals). Loading from `datasets` is a few lines
-against the same `Task` model:
+Install the optional dependency:
 
-```python
-from datasets import load_dataset  # pip install datasets
-
-from tracelens import Task
-
-def tasks_from_hf(name: str, split: str, input_field: str = "question") -> list[Task]:
-    rows = load_dataset(name, split=split)  # explicit split: no DatasetDict ambiguity
-    return [
-        Task(
-            name=str(row[input_field])[:80],
-            description=f"{name}:{split} row {i}",
-            input_data={input_field: row[input_field]},
-            metadata={k: v for k, v in row.items() if k != input_field},
-        )
-        for i, row in enumerate(rows)
-    ]
+```bash
+pip install "tracelens[datasets]"
 ```
 
-Pin the dataset revision (`load_dataset(..., revision=...)`) if you need the
-eval set to be reproducible, and save the result with `JSONLTaskLoader` so
-reruns don't depend on the Hub.
+Hub datasets require an explicit split. Pin `revision` to a commit SHA for
+reproducible CI evaluations:
+
+```python
+from tracelens.loaders import HFDatasetLoader
+
+loader = HFDatasetLoader(
+    input_field="question",
+    metadata_fields=["subject"],
+    config_name="all",
+    split="test",
+    revision="<dataset-commit-sha>",
+)
+tasks = loader.load("cais/mmlu")
+```
+
+String sources are always treated as Hub dataset identifiers. A local
+dataset previously written by `datasets.Dataset.save_to_disk()` uses an
+explicit `Path`:
+
+```python
+from pathlib import Path
+
+loader.save(tasks, Path("eval-data/mmlu"))
+reloaded = loader.load(Path("eval-data/mmlu"))
+```
+
+`HFDatasetLoader` does not stream or push datasets to the Hub. Its `load()`
+contract returns a materialized `list[Task]`, and `save()` writes only a local
+Hugging Face dataset directory. Saving an empty Task list is rejected because
+Hugging Face cannot infer a reloadable dataset schema without any rows.

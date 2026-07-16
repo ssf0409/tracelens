@@ -64,9 +64,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   serialises structured Task fields and one canonical metadata column as JSON) and
   no JSON coercion of free-text Task fields. Missing or ambiguous inputs,
   malformed CSV structure, and mixed canonical/flat metadata representations
-  fail loudly. Derived from #31 by @Balaji1304
-  with the HuggingFace loader moved to a documented recipe per the
-  thin-core roadmap. Docs: `docs/task-sources.md`.
+  fail loudly. The optional `HFDatasetLoader` loads explicit Hub splits, supports
+  revision pinning, and round-trips local saved datasets through the same mapping
+  contract without adding a core dependency. Derived from #31 by @Balaji1304.
+  Docs: `docs/task-sources.md`.
 
 ### Changed
 - **Gate misconfiguration is now an error.** `tracelens run

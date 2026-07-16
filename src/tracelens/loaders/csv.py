@@ -10,10 +10,11 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
 
+from tracelens._paths import prepare_destination_path, source_files
 from tracelens.core.task import Task, TaskLoader
 from tracelens.loaders._records import (
     map_record,
-    source_files,
+    task_to_record,
     validate_mapping_fields,
 )
 
@@ -128,8 +129,7 @@ class CSVTaskLoader(TaskLoader):
         return tasks
 
     def save(self, tasks: list[Task], destination: str | Path) -> None:
-        path = Path(destination)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = prepare_destination_path(destination)
         if not tasks:
             path.write_text("", encoding="utf-8")
             return
@@ -142,10 +142,6 @@ class CSVTaskLoader(TaskLoader):
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writeheader()
             for task in tasks:
-                dumped = task.model_dump(mode="json")
-                record = {
-                    name: _encode_task_cell(dumped[name]) for name in task_columns
-                }
-                record[self.input_field] = json.dumps(dumped["input_data"], default=str)
-                record["metadata"] = json.dumps(dumped["metadata"], default=str)
-                writer.writerow(record)
+                record = task_to_record(task, input_field=self.input_field)
+                encoded_record = {name: _encode_task_cell(record[name]) for name in fieldnames}
+                writer.writerow(encoded_record)

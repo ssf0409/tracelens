@@ -1,7 +1,7 @@
-"""Flat Task loaders for local JSONL and CSV sources."""
+"""Flat Task loaders for local files and optional external sources."""
 
-from tracelens.loaders._records import map_record, source_files
 from tracelens.loaders.csv import CSVTaskLoader
+from tracelens.loaders.hf import HFDatasetLoader
 from tracelens.loaders.jsonl import JSONLTaskLoader
 
-__all__ = ["CSVTaskLoader", "JSONLTaskLoader", "map_record", "source_files"]
+__all__ = ["CSVTaskLoader", "HFDatasetLoader", "JSONLTaskLoader"]
