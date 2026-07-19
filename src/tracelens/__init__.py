@@ -113,6 +113,7 @@ from tracelens.graders.event_chain import (
 # canonical pattern.
 from tracelens.llm.factory import create_provider
 from tracelens.llm.provider import InMemoryProvider, LLMProvider
+from tracelens.loaders import CSVTaskLoader, JSONLTaskLoader
 from tracelens.metrics.budgets import (
     LatencyGrader,
     TokenBudgetGrader,
@@ -156,6 +157,8 @@ __all__ = [
     "Task",
     "TaskLoader",
     "JSONTaskLoader",
+    "JSONLTaskLoader",
+    "CSVTaskLoader",
     "EvalSet",
     "Trial",
     "TrialBatch",

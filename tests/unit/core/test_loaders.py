@@ -1,0 +1,913 @@
+"""Round-trip tests for CSVTaskLoader and JSONLTaskLoader."""
+
+import csv
+import json
+from pathlib import Path
+
+import pytest
+
+import tracelens.loaders as loaders
+from tracelens.core.task import Task, TaskExpectation
+from tracelens.loaders import CSVTaskLoader, JSONLTaskLoader
+from tracelens.loaders._records import map_record, task_to_record
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    """Write a list of dicts to a JSONL file."""
+    with open(path, "w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+
+
+def _write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
+    """Write a list of dicts to a CSV file."""
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+# ===========================================================================
+# Shared record mapping
+# ===========================================================================
+
+
+class TestMapRecord:
+    """Behavioral contract shared by every foreign record source."""
+
+    def test_maps_native_fields_and_foreign_metadata(self) -> None:
+        task = map_record(
+            {
+                "input": {"goal": "review"},
+                "name": "Review",
+                "category": "engineering",
+                "source": "incident-42",
+            }
+        )
+
+        assert task.input_data == {"goal": "review"}
+        assert task.name == "Review"
+        assert task.category == "engineering"
+        assert task.metadata == {"source": "incident-42"}
+
+    def test_selects_only_requested_foreign_metadata_fields(self) -> None:
+        task = map_record(
+            {"input": "prompt", "source": "docs", "owner": "evals"},
+            metadata_fields=["source"],
+        )
+
+        assert task.metadata == {"source": "docs"}
+
+    def test_wraps_scalar_input_and_derives_a_default_name(self) -> None:
+        task = map_record({"input": "summarise this document"})
+
+        assert task.input_data == {"value": "summarise this document"}
+        assert task.name == "summarise this document"
+        assert task.metadata == {}
+
+    def test_ignores_missing_selected_foreign_metadata_fields(self) -> None:
+        task = map_record(
+            {"input": "prompt", "source": "docs"},
+            metadata_fields=["source", "owner"],
+        )
+
+        assert task.metadata == {"source": "docs"}
+
+    def test_rejects_native_metadata_field_selection(self) -> None:
+        with pytest.raises(ValueError, match="metadata_fields.*Task field"):
+            map_record(
+                {"input": "prompt", "category": "engineering"},
+                metadata_fields=["category"],
+            )
+
+    def test_rejects_input_field_metadata_selection(self) -> None:
+        with pytest.raises(ValueError, match="metadata_fields.*input field"):
+            map_record({"input": "prompt", "source": "docs"}, metadata_fields=["input"])
+
+    def test_uses_embedded_metadata_as_the_canonical_representation(self) -> None:
+        task = map_record(
+            {
+                "input": "prompt",
+                "metadata": {"source": "canonical", "priority": True},
+            },
+            metadata_fields=["source"],
+        )
+
+        assert task.metadata == {"source": "canonical", "priority": True}
+
+    def test_rejects_mixed_embedded_and_flat_metadata(self) -> None:
+        with pytest.raises(ValueError, match="embedded metadata.*flat metadata"):
+            map_record(
+                {
+                    "input": "prompt",
+                    "metadata": {"source": "canonical"},
+                    "owner": "evals",
+                }
+            )
+
+    def test_rejects_non_mapping_embedded_metadata(self) -> None:
+        with pytest.raises(ValueError, match="metadata field must be an object"):
+            map_record({"input": "prompt", "metadata": "not-an-object"})
+
+    def test_accepts_an_empty_embedded_metadata_object(self) -> None:
+        task = map_record({"input": "prompt", "metadata": {}})
+
+        assert task.metadata == {}
+
+    def test_rejects_missing_input_and_task_field_input_names(self) -> None:
+        with pytest.raises(ValueError, match="missing required input field 'input'"):
+            map_record({"name": "Missing input"})
+
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            map_record({"name": "prompt"}, input_field="name")
+
+    def test_rejects_native_input_data_alongside_configured_input(self) -> None:
+        with pytest.raises(ValueError, match="input_data.*configured input field"):
+            map_record(
+                {
+                    "input": "configured input",
+                    "input_data": {"source": "ambiguous native input"},
+                }
+            )
+
+
+class TestTaskToRecord:
+    """Canonical serialization contract shared by every foreign record sink."""
+
+    def test_renames_input_and_preserves_every_native_task_field(self) -> None:
+        task = Task(
+            task_id="task-42",
+            name="Full task",
+            description="Every field is populated",
+            input_data={"question": "What is 2 + 2?"},
+            expectation=TaskExpectation(
+                expected_output="4",
+                validation_hints={"match": "exact"},
+            ),
+            metadata={"source": "unit-test"},
+            tags=["math", "smoke"],
+            difficulty="easy",
+            category="reasoning",
+            timeout_seconds=12.5,
+        )
+        expected = task.model_dump(mode="json")
+        expected["prompt"] = expected.pop("input_data")
+
+        record = task_to_record(task, input_field="prompt")
+
+        assert record == expected
+        assert "input_data" not in record
+
+    def test_round_trips_through_shared_record_mapping(self) -> None:
+        task = Task(
+            task_id="round-trip",
+            name="Round trip",
+            input_data={"goal": "preserve me"},
+            metadata={"owner": "evals"},
+        )
+
+        record = task_to_record(task, input_field="prompt")
+        reloaded = map_record(record, input_field="prompt")
+
+        assert reloaded == task
+
+    def test_rejects_an_input_field_that_would_overwrite_task_data(self) -> None:
+        task = Task(name="Ambiguous", input_data={"goal": "preserve me"})
+
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            task_to_record(task, input_field="metadata")
+
+
+def test_internal_loader_helpers_are_not_public_exports() -> None:
+    assert "map_record" not in loaders.__all__
+    assert "source_files" not in loaders.__all__
+    assert "task_to_record" not in loaders.__all__
+    assert not hasattr(loaders, "map_record")
+    assert not hasattr(loaders, "source_files")
+    assert not hasattr(loaders, "task_to_record")
+
+
+# ===========================================================================
+# JSONLTaskLoader
+# ===========================================================================
+
+
+class TestJSONLTaskLoader:
+    """Tests for JSONLTaskLoader."""
+
+    # -----------------------------------------------------------------------
+    # load()
+    # -----------------------------------------------------------------------
+
+    def test_load_basic(self, tmp_path: Path) -> None:
+        """Each line becomes one Task; default 'input' field is used."""
+        jsonl_file = tmp_path / "tasks.jsonl"
+        _write_jsonl(
+            jsonl_file,
+            [
+                {"input": {"goal": "Write a haiku"}, "name": "Haiku task"},
+                {"input": {"goal": "Summarise the article"}, "name": "Summary task"},
+            ],
+        )
+
+        tasks = JSONLTaskLoader().load(jsonl_file)
+
+        assert len(tasks) == 2
+        assert tasks[0].name == "Haiku task"
+        assert tasks[0].input_data == {"goal": "Write a haiku"}
+        assert tasks[1].name == "Summary task"
+        assert tasks[1].input_data == {"goal": "Summarise the article"}
+
+    def test_load_custom_input_field(self, tmp_path: Path) -> None:
+        """Custom *input_field* is mapped to Task.input_data."""
+        jsonl_file = tmp_path / "custom.jsonl"
+        _write_jsonl(
+            jsonl_file,
+            [{"prompt": "Translate to French", "name": "Translation"}],
+        )
+
+        tasks = JSONLTaskLoader(input_field="prompt").load(jsonl_file)
+
+        assert len(tasks) == 1
+        assert tasks[0].input_data == {"value": "Translate to French"}
+
+    def test_load_metadata_fields_selected(self, tmp_path: Path) -> None:
+        """Only requested *metadata_fields* end up in Task.metadata."""
+        jsonl_file = tmp_path / "meta.jsonl"
+        _write_jsonl(
+            jsonl_file,
+            [
+                {
+                    "input": {"goal": "Plan a trip"},
+                    "name": "Travel planner",
+                    "category": "travel",
+                    "difficulty": "easy",
+                    "source": "handwritten",
+                    "secret": "should-be-excluded",
+                },
+            ],
+        )
+
+        tasks = JSONLTaskLoader(metadata_fields=["source"]).load(jsonl_file)
+
+        assert len(tasks) == 1
+        assert tasks[0].category == "travel"
+        assert tasks[0].metadata == {"source": "handwritten"}
+        assert "secret" not in tasks[0].metadata
+
+    def test_load_metadata_all_by_default(self, tmp_path: Path) -> None:
+        """When *metadata_fields* is None, non-reserved/non-input keys go into metadata."""
+        jsonl_file = tmp_path / "all_meta.jsonl"
+        _write_jsonl(
+            jsonl_file,
+            [{"input": {"goal": "Cook pasta"}, "name": "Cooking", "source": "kitchen"}],
+        )
+
+        tasks = JSONLTaskLoader().load(jsonl_file)
+
+        assert tasks[0].metadata.get("source") == "kitchen"
+
+    def test_load_scalar_input_wrapped(self, tmp_path: Path) -> None:
+        """A scalar input value is wrapped as {'value': ...} for Task.input_data."""
+        jsonl_file = tmp_path / "scalar.jsonl"
+        _write_jsonl(jsonl_file, [{"input": "Just a string", "name": "Scalar task"}])
+
+        tasks = JSONLTaskLoader().load(jsonl_file)
+
+        assert tasks[0].input_data == {"value": "Just a string"}
+
+    def test_load_blank_lines_skipped(self, tmp_path: Path) -> None:
+        """Blank lines in the JSONL file are silently ignored."""
+        jsonl_file = tmp_path / "blanks.jsonl"
+        jsonl_file.write_text(
+            '\n{"input": {"goal": "g1"}, "name": "T1"}\n\n{"input": {"goal": "g2"}, "name": "T2"}\n',
+            encoding="utf-8",
+        )
+
+        tasks = JSONLTaskLoader().load(jsonl_file)
+
+        assert len(tasks) == 2
+
+    def test_load_from_directory(self, tmp_path: Path) -> None:
+        """Loading from a directory collects all *.jsonl files recursively."""
+        (tmp_path / "a.jsonl").write_text(
+            json.dumps({"input": {"goal": "A"}, "name": "Task A"}) + "\n",
+            encoding="utf-8",
+        )
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "b.jsonl").write_text(
+            json.dumps({"input": {"goal": "B"}, "name": "Task B"}) + "\n",
+            encoding="utf-8",
+        )
+
+        tasks = JSONLTaskLoader().load(tmp_path)
+
+        names = {t.name for t in tasks}
+        assert names == {"Task A", "Task B"}
+
+    def test_load_invalid_json_raises(self, tmp_path: Path) -> None:
+        """A malformed line raises ValueError with a useful location hint."""
+        bad_file = tmp_path / "bad.jsonl"
+        bad_file.write_text("not valid json\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="invalid JSON"):
+            JSONLTaskLoader().load(bad_file)
+
+    def test_load_non_object_line_raises(self, tmp_path: Path) -> None:
+        """A JSON array on a line (not an object) raises ValueError."""
+        bad_file = tmp_path / "array.jsonl"
+        bad_file.write_text("[1, 2, 3]\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="JSON object"):
+            JSONLTaskLoader().load(bad_file)
+
+    def test_load_missing_source_raises(self, tmp_path: Path) -> None:
+        """A path that doesn't exist raises ValueError."""
+        with pytest.raises(ValueError, match="not a file or directory"):
+            JSONLTaskLoader().load(tmp_path / "ghost.jsonl")
+
+    def test_load_missing_input_field_raises(self, tmp_path: Path) -> None:
+        """A row without the configured input field must not become an empty task."""
+        jsonl_file = tmp_path / "missing-input.jsonl"
+        _write_jsonl(jsonl_file, [{"name": "Missing input"}])
+
+        with pytest.raises(ValueError, match="missing required input field 'input'"):
+            JSONLTaskLoader().load(jsonl_file)
+
+    def test_input_field_cannot_shadow_task_field(self) -> None:
+        """The external input field cannot overwrite a native Task field on save."""
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            JSONLTaskLoader(input_field="name")
+
+    # -----------------------------------------------------------------------
+    # save() — and round-trip
+    # -----------------------------------------------------------------------
+
+    def test_save_creates_parent_dirs(self, tmp_path: Path) -> None:
+        """save() creates intermediate directories automatically."""
+        dest = tmp_path / "nested" / "dir" / "out.jsonl"
+        tasks = [Task(name="T", input_data={"goal": "g"})]
+
+        JSONLTaskLoader().save(tasks, dest)
+
+        assert dest.exists()
+
+    def test_roundtrip_basic(self, tmp_path: Path) -> None:
+        """save() → load() preserves name and input_data."""
+        original = [
+            Task(name="Task One", input_data={"goal": "Write tests"}, category="dev"),
+            Task(name="Task Two", input_data={"goal": "Review PR"}, category="dev"),
+        ]
+        dest = tmp_path / "output.jsonl"
+
+        loader = JSONLTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert len(loaded) == len(original)
+        for orig, reloaded in zip(original, loaded):
+            assert reloaded.name == orig.name
+            assert reloaded.input_data == orig.input_data
+
+    def test_roundtrip_with_metadata(self, tmp_path: Path) -> None:
+        """Metadata survives a save/load cycle."""
+        original = [Task(name="T", input_data={"q": "x"}, metadata={"source": "web"})]
+        dest = tmp_path / "meta_rt.jsonl"
+
+        loader = JSONLTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].metadata.get("source") == "web"
+
+    def test_roundtrip_custom_input_field(self, tmp_path: Path) -> None:
+        """A custom input_field is written and re-read consistently."""
+        original = [Task(name="T", input_data={"goal": "custom"})]
+        dest = tmp_path / "custom_field.jsonl"
+        loader = JSONLTaskLoader(input_field="prompt")
+
+        loader.save(original, dest)
+
+        # The raw file should use "prompt", not "input_data".
+        raw = json.loads(dest.read_text(encoding="utf-8").strip())
+        assert "prompt" in raw
+        assert "input_data" not in raw
+
+        # And loading with the same loader recovers the task correctly.
+        loaded = loader.load(dest)
+        assert loaded[0].input_data == {"goal": "custom"}
+
+    def test_roundtrip_task_id_preserved(self, tmp_path: Path) -> None:
+        """task_id is preserved across a round-trip."""
+        original = [Task(task_id="fixed-id-42", name="T", input_data={})]
+        dest = tmp_path / "ids.jsonl"
+
+        loader = JSONLTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].task_id == "fixed-id-42"
+
+
+# ===========================================================================
+# CSVTaskLoader
+# ===========================================================================
+
+
+class TestCSVTaskLoader:
+    """Tests for CSVTaskLoader."""
+
+    # -----------------------------------------------------------------------
+    # load()
+    # -----------------------------------------------------------------------
+
+    def test_load_basic(self, tmp_path: Path) -> None:
+        """Each CSV row becomes one Task using the default 'input' column."""
+        csv_file = tmp_path / "tasks.csv"
+        _write_csv(
+            csv_file,
+            [
+                {"input": "Explain photosynthesis", "name": "Biology 101"},
+                {"input": "Describe the water cycle", "name": "Earth Science"},
+            ],
+            fieldnames=["input", "name"],
+        )
+
+        tasks = CSVTaskLoader().load(csv_file)
+
+        assert len(tasks) == 2
+        assert tasks[0].name == "Biology 101"
+        assert tasks[0].input_data == {"value": "Explain photosynthesis"}
+        assert tasks[1].name == "Earth Science"
+
+    def test_load_dict_input_parsed(self, tmp_path: Path) -> None:
+        """If the input cell is a JSON object string, it is parsed to a dict."""
+        csv_file = tmp_path / "json_input.csv"
+        _write_csv(
+            csv_file,
+            [{"input": json.dumps({"goal": "Build an API"}), "name": "API task"}],
+            fieldnames=["input", "name"],
+        )
+
+        tasks = CSVTaskLoader().load(csv_file)
+
+        assert tasks[0].input_data == {"goal": "Build an API"}
+
+    def test_load_invalid_json_input_stays_text(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "text-input.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "{not json}", "name": "Literal input"}],
+            fieldnames=["input", "name"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.input_data == {"value": "{not json}"}
+
+    def test_load_custom_input_field(self, tmp_path: Path) -> None:
+        """Custom *input_field* maps that column to Task.input_data."""
+        csv_file = tmp_path / "custom_col.csv"
+        _write_csv(
+            csv_file,
+            [{"prompt": "Summarise this doc", "name": "Summary"}],
+            fieldnames=["prompt", "name"],
+        )
+
+        tasks = CSVTaskLoader(input_field="prompt").load(csv_file)
+
+        assert tasks[0].input_data == {"value": "Summarise this doc"}
+
+    def test_load_metadata_fields_selected(self, tmp_path: Path) -> None:
+        """Only *metadata_fields* columns land in Task.metadata."""
+        csv_file = tmp_path / "selective_meta.csv"
+        _write_csv(
+            csv_file,
+            [
+                {
+                    "input": "Classify sentiment",
+                    "name": "Sentiment",
+                    "lang": "en",
+                    "source": "twitter",
+                    "internal_id": "x99",
+                },
+            ],
+            fieldnames=["input", "name", "lang", "source", "internal_id"],
+        )
+
+        tasks = CSVTaskLoader(metadata_fields=["lang", "source"]).load(csv_file)
+
+        assert tasks[0].metadata == {"lang": "en", "source": "twitter"}
+        assert "internal_id" not in tasks[0].metadata
+
+    def test_load_metadata_all_by_default(self, tmp_path: Path) -> None:
+        """When *metadata_fields* is None, non-reserved columns go to metadata."""
+        csv_file = tmp_path / "default_meta.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "name": "T", "extra": "yes"}],
+            fieldnames=["input", "name", "extra"],
+        )
+
+        tasks = CSVTaskLoader().load(csv_file)
+
+        assert tasks[0].metadata.get("extra") == "yes"
+
+    def test_loads_canonical_metadata_column(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "canonical-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "metadata": '{"source": "docs", "rank": 2}'}],
+            fieldnames=["input", "metadata"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.metadata == {"source": "docs", "rank": 2}
+
+    def test_load_empty_canonical_metadata_cell_uses_default(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "empty-canonical-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "metadata": ""}],
+            fieldnames=["input", "metadata"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.metadata == {}
+
+    def test_load_blank_flat_metadata_cell_is_ignored(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "blank-flat-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "source": ""}],
+            fieldnames=["input", "source"],
+        )
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.metadata == {}
+
+    def test_rejects_canonical_and_flat_metadata_in_same_csv_row(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "mixed-metadata.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Do something", "metadata": '{"source": "docs"}', "owner": "evals"}],
+            fieldnames=["input", "metadata", "owner"],
+        )
+
+        with pytest.raises(ValueError, match="embedded metadata.*flat metadata"):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_from_directory(self, tmp_path: Path) -> None:
+        """Loading from a directory picks up all *.csv files recursively."""
+        _write_csv(
+            tmp_path / "a.csv",
+            [{"input": "Task A", "name": "A"}],
+            fieldnames=["input", "name"],
+        )
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        _write_csv(
+            sub / "b.csv",
+            [{"input": "Task B", "name": "B"}],
+            fieldnames=["input", "name"],
+        )
+
+        tasks = CSVTaskLoader().load(tmp_path)
+
+        names = {t.name for t in tasks}
+        assert names == {"A", "B"}
+
+    def test_load_reserved_fields_forwarded(self, tmp_path: Path) -> None:
+        """Reserved columns such as 'difficulty' are forwarded to Task directly."""
+        csv_file = tmp_path / "reserved.csv"
+        _write_csv(
+            csv_file,
+            [{"input": "Hard task", "name": "Tricky", "difficulty": "hard"}],
+            fieldnames=["input", "name", "difficulty"],
+        )
+
+        tasks = CSVTaskLoader().load(csv_file)
+
+        assert tasks[0].difficulty == "hard"
+
+    def test_load_missing_source_raises(self, tmp_path: Path) -> None:
+        """A non-existent path raises ValueError."""
+        with pytest.raises(ValueError, match="not a file or directory"):
+            CSVTaskLoader().load(tmp_path / "ghost.csv")
+
+    def test_load_missing_input_column_raises(self, tmp_path: Path) -> None:
+        """A CSV without the configured input column must fail before loading rows."""
+        csv_file = tmp_path / "missing-input.csv"
+        _write_csv(csv_file, [{"name": "Missing input"}], fieldnames=["name"])
+
+        with pytest.raises(ValueError, match="missing required input field 'input'"):
+            CSVTaskLoader().load(csv_file)
+
+    @pytest.mark.parametrize("duplicate", ["input", "name", "metadata"])
+    def test_load_duplicate_column_names_raises(
+        self, tmp_path: Path, duplicate: str
+    ) -> None:
+        csv_file = tmp_path / "duplicate-header.csv"
+        csv_file.write_text(
+            f"input,name,metadata,{duplicate}\nprompt,T,{{}},duplicate value\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match=rf"duplicate CSV column.*{duplicate}"):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_blank_column_name_raises(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "blank-header.csv"
+        csv_file.write_text("input,,name\nprompt,extra,T\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="blank CSV column"):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_row_wider_than_header_raises_with_location(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "wide-row.csv"
+        csv_file.write_text("input,name\nprompt,T,unexpected\n", encoding="utf-8")
+
+        with pytest.raises(
+            ValueError,
+            match=rf"{csv_file}:2: row has more values than the CSV header",
+        ):
+            CSVTaskLoader().load(csv_file)
+
+    def test_load_row_shorter_than_header_uses_task_defaults(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "short-row.csv"
+        csv_file.write_text("input,name,description\nprompt,T\n", encoding="utf-8")
+
+        task = CSVTaskLoader().load(csv_file)[0]
+
+        assert task.description is None
+
+    def test_input_field_cannot_shadow_task_field(self) -> None:
+        """The external input field cannot duplicate a native Task field column."""
+        with pytest.raises(ValueError, match="conflicts with a Task field"):
+            CSVTaskLoader(input_field="name")
+
+    # -----------------------------------------------------------------------
+    # save() — and round-trip
+    # -----------------------------------------------------------------------
+
+    def test_save_creates_parent_dirs(self, tmp_path: Path) -> None:
+        """save() creates intermediate directories automatically."""
+        dest = tmp_path / "nested" / "out.csv"
+        CSVTaskLoader().save([Task(name="T", input_data={"goal": "x"})], dest)
+
+        assert dest.exists()
+
+    def test_save_empty_list_writes_empty_file(self, tmp_path: Path) -> None:
+        """Saving an empty list produces an empty file without error."""
+        dest = tmp_path / "empty.csv"
+        CSVTaskLoader().save([], dest)
+
+        assert dest.exists()
+        assert dest.read_text(encoding="utf-8") == ""
+
+    def test_load_empty_csv_file_returns_no_tasks(self, tmp_path: Path) -> None:
+        path = tmp_path / "empty.csv"
+        path.write_text("", encoding="utf-8")
+
+        assert CSVTaskLoader().load(path) == []
+
+    def test_roundtrip_basic(self, tmp_path: Path) -> None:
+        """save() → load() preserves name and input_data for simple string inputs."""
+        original = [
+            Task(name="Alpha", input_data={"goal": "Write docs"}),
+            Task(name="Beta", input_data={"goal": "Fix bugs"}),
+        ]
+        dest = tmp_path / "rt.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert len(loaded) == len(original)
+        for orig, reloaded in zip(original, loaded):
+            assert reloaded.name == orig.name
+            assert reloaded.input_data == orig.input_data
+
+    def test_roundtrip_with_metadata(self, tmp_path: Path) -> None:
+        """Metadata survives a CSV save/load cycle."""
+        original = [Task(name="T", input_data={"q": "x"}, metadata={"region": "eu"})]
+        dest = tmp_path / "meta_rt.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].metadata.get("region") == "eu"
+
+    def test_roundtrip_custom_input_field(self, tmp_path: Path) -> None:
+        """Custom input_field name is written and re-read consistently."""
+        original = [Task(name="T", input_data={"goal": "custom"})]
+        dest = tmp_path / "custom_col_rt.csv"
+        loader = CSVTaskLoader(input_field="prompt")
+
+        loader.save(original, dest)
+
+        # Header must contain 'prompt', not 'input_data'.
+        header_line = dest.read_text(encoding="utf-8").splitlines()[0]
+        assert "prompt" in header_line
+        assert "input_data" not in header_line
+
+        loaded = loader.load(dest)
+        assert loaded[0].input_data == {"goal": "custom"}
+
+    def test_roundtrip_task_id_preserved(self, tmp_path: Path) -> None:
+        """task_id is preserved across a CSV round-trip."""
+        original = [Task(task_id="csv-id-99", name="T", input_data={})]
+        dest = tmp_path / "ids.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].task_id == "csv-id-99"
+
+    def test_roundtrip_multiple_metadata_fields(self, tmp_path: Path) -> None:
+        """Multiple metadata columns all survive the round-trip."""
+        original = [
+            Task(
+                name="T",
+                input_data={"goal": "g"},
+                metadata={"lang": "en", "domain": "science"},
+            )
+        ]
+        dest = tmp_path / "multi_meta.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].metadata.get("lang") == "en"
+        assert loaded[0].metadata.get("domain") == "science"
+
+    def test_roundtrip_preserves_metadata_json_scalars_and_sparse_keys(
+        self, tmp_path: Path
+    ) -> None:
+        """Generated CSV distinguishes JSON values, strings, and missing cells."""
+        original = [
+            Task(
+                name="first",
+                input_data={"q": "x"},
+                metadata={
+                    "truth": True,
+                    "nothing": None,
+                    "json_text": "true",
+                    "empty_text": "",
+                },
+            ),
+            Task(
+                name="second",
+                input_data={"q": "y"},
+                metadata={"only_second": 2},
+            ),
+        ]
+        dest = tmp_path / "metadata-types.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].metadata == original[0].metadata
+        assert loaded[1].metadata == original[1].metadata
+
+    def test_roundtrip_distinguishes_empty_text_from_none(self, tmp_path: Path) -> None:
+        """Empty optional text remains empty while None remains absent."""
+        original = [
+            Task(name="empty", description="", input_data={"q": "x"}),
+            Task(name="none", description=None, input_data={"q": "y"}),
+        ]
+        dest = tmp_path / "empty-text.csv"
+
+        loader = CSVTaskLoader()
+        loader.save(original, dest)
+        loaded = loader.load(dest)
+
+        assert loaded[0].description == ""
+        assert loaded[1].description is None
+
+    @pytest.mark.parametrize("metadata_key", ["name", "input"])
+    def test_roundtrip_preserves_metadata_keys_that_match_task_columns(
+        self, tmp_path: Path, metadata_key: str
+    ) -> None:
+        """Canonical metadata storage avoids collisions with CSV task columns."""
+        task = Task(
+            name="real name",
+            input_data={"q": "real input"},
+            metadata={metadata_key: "conflicting value"},
+        )
+
+        path = tmp_path / "collision.csv"
+        loader = CSVTaskLoader()
+        loader.save([task], path)
+
+        assert loader.load(path)[0].metadata == task.metadata
+
+
+class TestCSVReservedColumnFidelity:
+    """Free-text reserved columns must survive verbatim: a name or
+    description that happens to be valid JSON ("true", "123") must not be
+    coerced into a bool/number, while structured columns (tags,
+    expectation, timeout_seconds) are parsed."""
+
+    def test_json_looking_text_columns_stay_strings(self, tmp_path: Path) -> None:
+        _write_csv(
+            tmp_path / "t.csv",
+            [
+                {
+                    "task_id": "001",
+                    "name": "123",
+                    "description": "true",
+                    "category": "null",
+                    "input": '{"q": "x"}',
+                }
+            ],
+            ["task_id", "name", "description", "category", "input"],
+        )
+
+        task = CSVTaskLoader().load(tmp_path / "t.csv")[0]
+
+        assert task.task_id == "001"
+        assert task.name == "123"
+        assert task.description == "true"
+        assert task.category == "null"
+
+    def test_structured_columns_are_parsed(self, tmp_path: Path) -> None:
+        _write_csv(
+            tmp_path / "t.csv",
+            [
+                {
+                    "name": "n",
+                    "tags": '["smoke", "regression"]',
+                    "timeout_seconds": "42.5",
+                    "input": '{"q": "x"}',
+                }
+            ],
+            ["name", "tags", "timeout_seconds", "input"],
+        )
+
+        task = CSVTaskLoader().load(tmp_path / "t.csv")[0]
+
+        assert task.tags == ["smoke", "regression"]
+        assert task.timeout_seconds == 42.5
+
+    @pytest.mark.parametrize("tags", ["not-json", '""'])
+    def test_invalid_structured_columns_raise_with_location(
+        self, tmp_path: Path, tags: str
+    ) -> None:
+        _write_csv(
+            tmp_path / "invalid-tags.csv",
+            [{"input": "prompt", "name": "n", "tags": tags}],
+            ["input", "name", "tags"],
+        )
+
+        with pytest.raises(ValueError, match=r"invalid-tags\.csv:2:"):
+            CSVTaskLoader().load(tmp_path / "invalid-tags.csv")
+
+    def test_save_load_round_trip_preserves_tags_and_expectation(self, tmp_path: Path) -> None:
+        from tracelens.core.task import TaskExpectation
+
+        original = Task(
+            task_id="rt-1",
+            name="round trip",
+            description="d",
+            input_data={"q": "x"},
+            tags=["a", "b"],
+            expectation=TaskExpectation(expected_output={"answer": "42"}),
+        )
+
+        loader = CSVTaskLoader()
+        loader.save([original], tmp_path / "out.csv")
+        loaded = loader.load(tmp_path / "out.csv")[0]
+
+        assert loaded.tags == ["a", "b"]
+        assert loaded.expectation is not None
+        assert loaded.expectation.expected_output == {"answer": "42"}
+
+
+class TestTaskFieldsDeriveFromModel:
+    def test_csv_header_covers_every_reserved_field(self, tmp_path: Path) -> None:
+        import csv as _csv
+
+        loader = CSVTaskLoader()
+        loader.save(
+            [Task(name="n", description="d", input_data={"q": 1})],
+            tmp_path / "o.csv",
+        )
+        with open(tmp_path / "o.csv", newline="", encoding="utf-8") as fh:
+            header = set(next(_csv.reader(fh)))
+
+        expected = set(Task.model_fields) - {"input_data", "metadata"}
+        assert expected <= header
+        assert "metadata" in header

@@ -62,13 +62,15 @@ gate (`make verify`) and the full testing tiers.
 - `tracelens[http]` installs `httpx` for `HTTPAPIAdapter`.
 - `tracelens[llm]` installs the OpenAI and Anthropic SDKs for custom
   `LLMProvider` subclasses.
+- `tracelens[datasets]` installs Hugging Face `datasets` for the optional
+  `HFDatasetLoader`.
 - `tracelens[dev]` installs pytest, ruff, mypy, and type stubs for
   contributors.
 
 Extras compose normally:
 
 ```bash
-uv pip install "tracelens[http,llm]"
+uv pip install "tracelens[http,llm,datasets]"
 ```
 
 ## CI Installation

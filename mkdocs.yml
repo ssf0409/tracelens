@@ -73,6 +73,7 @@ nav:
   - Get Started:
       - Is TraceLens For You?: scenarios.md
       - TraceLens vs Adjacent Tools: comparison.md
+      - Loading Tasks from External Sources: task-sources.md
       - Getting Started (5 min): getting-started.md
       - Build Your First Eval: quickstart.md
       - Installation: installation.md

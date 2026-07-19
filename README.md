@@ -37,7 +37,8 @@ cd tracelens
 uv pip install -e ".[dev]"
 ```
 
-See [Installation](https://ssf0409.github.io/tracelens/installation/) for extras (`[llm]`, `[http]`) and CI setup.
+See [Installation](https://ssf0409.github.io/tracelens/installation/) for extras
+(`[llm]`, `[http]`, `[datasets]`) and CI setup.
 
 ## 5-Minute Demo
 
@@ -122,7 +123,7 @@ The full, searchable docs live at **<https://ssf0409.github.io/tracelens/>**. Hi
 | [TraceLens vs Adjacent Tools](docs/comparison.md) | [Accuracy Best Practices](docs/accuracy.md) | [Human-Eval Calibration](docs/human-eval.md) |
 | [Installation](docs/installation.md) | [Multi-Level Evaluation](docs/evaluation-levels.md) | [CI/CD Integration](docs/ci-cd-integration.md) |
 
-Also: [Build Your First Eval](docs/quickstart.md) · [User Guide](docs/user-guide.md) · [Evaluation Recipes](docs/evaluation-recipes.md) · [API Reference](https://ssf0409.github.io/tracelens/reference/) · [Examples](examples/) · [Roadmap](ROADMAP.md) · [Contributor Testing](docs/contributor-testing.md) · [Releasing](docs/releasing.md).
+Also: [Build Your First Eval](docs/quickstart.md) · [User Guide](docs/user-guide.md) · [Loading Task Data](docs/task-sources.md) · [Evaluation Recipes](docs/evaluation-recipes.md) · [API Reference](https://ssf0409.github.io/tracelens/reference/) · [Examples](examples/) · [Roadmap](ROADMAP.md) · [Contributor Testing](docs/contributor-testing.md) · [Releasing](docs/releasing.md).
 
 ## Contributing
 

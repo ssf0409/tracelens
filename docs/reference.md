@@ -1,8 +1,8 @@
 # API Reference
 
 Auto-generated from docstrings. Everything below is importable from the package
-root (`from tracelens import ...`) and covered by the stability policy — submodule
-paths may move, so import from the root for anything you depend on long-term.
+root (`from tracelens import ...`) and covered by the stability policy unless a
+section explicitly documents an optional subpackage API.
 
 !!! tip
     New here? Read [Core Concepts & Glossary](concepts.md) first for the mental
@@ -14,6 +14,8 @@ paths may move, so import from the root for anything you depend on long-term.
 ::: tracelens.Task
 ::: tracelens.TaskLoader
 ::: tracelens.JSONTaskLoader
+::: tracelens.JSONLTaskLoader
+::: tracelens.CSVTaskLoader
 ::: tracelens.EvalSet
 ::: tracelens.Transcript
 ::: tracelens.TranscriptStep
@@ -25,6 +27,13 @@ paths may move, so import from the root for anything you depend on long-term.
 ::: tracelens.TrialBatch
 ::: tracelens.TrialStatus
 ::: tracelens.InfraError
+
+## Optional data sources
+
+Optional integrations are imported from `tracelens.loaders` and require their
+corresponding package extra.
+
+::: tracelens.loaders.HFDatasetLoader
 
 ## Execution
 
