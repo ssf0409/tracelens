@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v8
       - name: Set up Python
         run: uv python install 3.13
       # Pinned to the lockfile so the type-check is reproducible and matches the
