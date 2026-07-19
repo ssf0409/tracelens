@@ -8,6 +8,13 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-19
+
+Reliability and data-portability release: CI gates now distinguish agent
+regressions from harness noise, long runs retry and resume safely, and new
+project scaffolding plus JSONL, CSV, and optional Hugging Face loaders shorten
+the path from local data to a reproducible evaluation.
+
 ### Added
 
 - **`tracelens init`.** New CLI command that scaffolds a runnable starter
@@ -57,7 +64,6 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   explicit `task_id`s — auto-generated ids change every process.
   Pre-0.4 bare-batch checkpoints still load, with a loud warning that their
   identity can't be verified.
-
 - **JSONL and CSV task loaders.** `JSONLTaskLoader` and `CSVTaskLoader`
   (top-level exports) load eval sets from `.jsonl`/`.csv` files or
   directories and save them back, with JSON-compatible round-trips (CSV
@@ -128,16 +134,6 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   checkpoint now raises `CheckpointError` with the offending path and a
   recovery hint (the CLI prints the error and exits 2 — the misconfigured-run contract) instead of an
   unhandled `JSONDecodeError`.
-
-### Removed
-
-- **`Task.max_retries`.** Dead configuration — the runner never read it.
-  Retry policy is an execution concern and lives in
-  `RunnerConfig.max_infra_retries`. Eval-set JSON containing the old field
-  still loads; the value is ignored.
-
-### Fixed
-
 - **`RunnerConfig.fail_fast` is honored.** The field was previously accepted
   and silently ignored. When enabled, the first trial whose execution fails —
   final status `FAILED`, `INFRA_ERROR` (after `max_infra_retries` is
@@ -148,6 +144,13 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   Trials that execute but fail grading, and teardown errors on otherwise
   successful trials, do not trip it. The runner logs how many work items
   were left unrun.
+
+### Removed
+
+- **`Task.max_retries`.** Dead configuration — the runner never read it.
+  Retry policy is an execution concern and lives in
+  `RunnerConfig.max_infra_retries`. Eval-set JSON containing the old field
+  still loads; the value is ignored.
 
 ## [0.3.0] - 2026-06-10
 
