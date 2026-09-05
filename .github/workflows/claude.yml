@@ -48,8 +48,18 @@ jobs:
           # or https://code.claude.com/docs/en/cli-reference for available options
           # claude_args: '--allowed-tools Bash(gh pr *)'
 
+      - name: Require completed Claude execution
+        id: verify-claude
+        env:
+          CLAUDE_CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+        run: |
+          if [ "$CLAUDE_CONCLUSION" != "success" ]; then
+            echo "::error::Claude did not complete. Check the action logs for workflow validation skips; workflow edits require maintainer review and merge before execution."
+            exit 1
+          fi
+
       - name: Summarize Claude failure safely
-        if: ${{ failure() && steps.claude.outcome == 'failure' }}
+        if: ${{ failure() && (steps.claude.outcome == 'failure' || steps.verify-claude.outcome == 'failure') }}
         env:
           CLAUDE_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         run: python3 .github/scripts/claude_diagnostics.py

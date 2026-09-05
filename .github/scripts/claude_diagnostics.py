@@ -17,7 +17,7 @@ HTTP_HINTS = {
 
 def failure_summary(messages: list[Any]) -> str:
     result_state = "unavailable"
-    error_text: list[str] = []
+    error_text: list[object] = []
     statuses: set[int] = set()
     for record in messages:
         if not isinstance(record, dict):

@@ -127,7 +127,7 @@ jobs:
       - name: Install ruff
         run: pip install "ruff>=0.1"
       - name: ruff check
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ .github/scripts/
 
   # ------------------------------------------------------------------
   # typecheck: strict mypy check for the public typed package promise.

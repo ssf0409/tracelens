@@ -149,3 +149,56 @@ def test_unknown_failure_never_prints_arbitrary_fields(tmp_path):
     assert "Result: failed" in result.stdout
     assert "No recognized API error" in result.stdout
     assert "SECRET" not in result.stdout
+
+
+@pytest.mark.parametrize("text", ["OAuth access token is invalid", "OAuth token is invalid"])
+def test_invalid_oauth_hint(tmp_path, text):
+    messages = [
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "result": f"API Error: 401 {text}. PRIVATE",
+        }
+    ]
+    result = run_diagnostics(tmp_path, json.dumps(messages))
+    assert "OAuth token invalid" in result.stdout
+    assert "PRIVATE" not in result.stdout
+
+
+def test_empty_output_and_malformed_assistant_are_safe(tmp_path):
+    messages = [
+        {"type": "assistant", "error": "SECRET", "message": []},
+        {
+            "type": "assistant",
+            "error": True,
+            "message": {"api_error_status": "401", "content": "SECRET"},
+        },
+    ]
+    result = run_diagnostics(tmp_path, json.dumps(messages))
+    assert "Result: unavailable" in result.stdout
+    assert "No recognized API error" in result.stdout
+    assert "HTTP" not in result.stdout
+    assert "SECRET" not in result.stdout
+
+
+def test_summary_appends_to_existing_step_summary(tmp_path):
+    (tmp_path / "summary.md").write_text("Existing summary\n")
+    result = run_diagnostics(tmp_path, "[]")
+    assert (tmp_path / "summary.md").read_text() == "Existing summary\n" + result.stdout
+
+
+def test_unset_action_outputs_are_handled_without_traceback(tmp_path):
+    env = {**os.environ}
+    env.pop("CLAUDE_EXECUTION_FILE", None)
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "Execution diagnostics unavailable" in result.stdout
+    assert result.stderr == ""
