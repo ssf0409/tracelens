@@ -82,7 +82,9 @@ Expected:
 > to make the swing visible. The `tracelens run --baseline-check` gate instead
 > excludes INFRA_ERROR (and grader-crash) trials from comparison samples
 > entirely — a task whose trials all OOM shows up in the gate summary as
-> `skipped (no gradable trials)`, not as a SEVERE regression.
+> `skipped (no gradable trials)`, not as a SEVERE regression. Such a
+> baseline-backed task makes the CLI gate `UNEVALUABLE` (exit 2): fix the
+> infrastructure and rerun before treating the check as passed.
 
 ### 3. Rerun under the original config to confirm the regression is noise
 

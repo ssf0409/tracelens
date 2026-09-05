@@ -468,6 +468,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         checked = 0
         skipped: list[str] = []
         no_gradable: list[str] = []
+        no_comparable_metrics: list[str] = []
         blocking = 0
         for task_summary in report.task_summaries:
             baseline = baseline_manager.get_baseline(task_summary.task_id)
@@ -498,6 +499,16 @@ def cmd_run(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 continue
+            current_metrics = {name for result in current_results for name in result}
+            if not baseline.metrics.keys() & current_metrics:
+                no_comparable_metrics.append(task_summary.task_id)
+                print(
+                    f"[tracelens] warning: no comparable metrics for task "
+                    f"'{task_summary.task_id}'; store a baseline for at least "
+                    f"one CLI metric: {', '.join(sorted(current_metrics))}",
+                    file=sys.stderr,
+                )
+                continue
             checked += 1
             current_spec = decision_spec or _spec_from_trials(task_trials)
             reg_report = detector.compare_with_specs(
@@ -523,17 +534,26 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         # A gate that prints nothing on success is indistinguishable from
         # a gate that never ran — always say what was checked.
-        no_gradable_part = (
-            f"{len(no_gradable)} skipped (no gradable trials), "
-            if no_gradable
-            else ""
-        )
-        print(
-            f"[tracelens] Baseline check: {checked} checked, "
-            f"{len(skipped)} skipped (no baseline), "
-            f"{no_gradable_part}"
-            f"{blocking} blocking regression(s)"
-        )
+        unevaluable = checked == 0 or bool(no_gradable) or bool(no_comparable_metrics)
+        summary = [f"{checked} checked", f"{len(skipped)} skipped (no baseline)"]
+        if no_gradable:
+            summary.append(f"{len(no_gradable)} skipped (no gradable trials)")
+        if no_comparable_metrics:
+            summary.append(f"{len(no_comparable_metrics)} skipped (no comparable metrics)")
+        summary.append(f"{blocking} blocking regression(s)")
+        if unevaluable:
+            summary.append("UNEVALUABLE")
+        print(f"[tracelens] Baseline check: {', '.join(summary)}")
+
+        # Missing evidence invalidates the check even if another task regressed.
+        if unevaluable:
+            print(
+                "Error: baseline check is unevaluable; verify the eval set, "
+                "run count, and matching baseline metrics; fix any infra/grader "
+                "failures listed above and rerun. This is not a passing gate.",
+                file=sys.stderr,
+            )
+            return 2
 
         if skipped and args.require_baselines:
             print(

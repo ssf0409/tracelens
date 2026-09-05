@@ -202,9 +202,13 @@ tracelens run \
 ```
 
 Gate semantics: a misconfigured check (missing `--baselines-file`, or the
-file doesn't exist) exits 2 before the eval runs; exit 1 means a blocking
-regression. Tasks without baselines are warned and counted in the printed
-gate summary; `--require-baselines` makes them fail instead. Noise-aware
+file doesn't exist) exits 2 before the eval runs. After execution, exit 2
+also marks an unevaluable gate: no tasks checked, or any baseline-backed task
+with no gradable trials or no comparable CLI metrics. This takes precedence
+over policy failures; otherwise exit 1 means a blocking regression or missing
+required baseline. Exit 0 means an evaluable gate passed. Tasks without
+baselines are warned and counted; `--require-baselines` makes them fail
+instead, and zero matching baselines always makes the gate unevaluable. Noise-aware
 comparison activates when both sides carry a `DecisionSpec` — via
 `--decision-spec` or adapter-stamped transcripts, plus
 `TaskBaseline.decision_spec`; tune the band with `--noise-band`.
