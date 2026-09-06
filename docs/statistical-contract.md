@@ -160,15 +160,104 @@ current trials against the stored baseline mean:
   `infra_config_mismatch`.
 - Samples are gradable trials only; `TIMEOUT` is included as a failure.
 
-### Run-versus-run comparison (planned, issue #28)
+### Run-versus-run comparison (`tracelens compare`, issue #28)
 
-The paired task-level design above is the contract `tracelens compare` must
-implement: the per-task statistic under both runs, paired resampling of
-tasks, an explicit policy for unmatched or changed tasks, an explicit
-estimand (which grader, which metric, which direction is better), and a
-three-way verdict: significant change, practically meaningful change against
-a stated threshold, or insufficient evidence. Non-significance is not
-evidence of equivalence.
+`tracelens compare BASELINE-trials.json CANDIDATE-trials.json` decides whether
+a candidate run is better, worse, or indistinguishable from a baseline run of
+the same eval set. The estimand and the sampling unit are fixed here; the
+command implements them and records them in its output.
+
+**Inputs.** Two `--save-trials` artifacts. Aggregate results files do not
+contain per-trial samples and are rejected with a message naming the required
+input. Each artifact's provenance decides comparability
+([Run provenance](reproducibility.md#run-provenance)):
+
+- `incompatible` (task content changed, tasks added or removed, or different
+  graders) makes the comparison **unevaluable** (exit 2). The default never
+  drops unmatched tasks silently; `--unmatched-tasks exclude` compares the
+  shared, unchanged tasks and reports the excluded ones by id and count. A
+  grader difference is never overridden: a different ruler is a different
+  measurement.
+- `unknown` (an artifact without provenance) aligns tasks by id only. The
+  output labels the comparison as such; `--require-provenance` makes it
+  unevaluable instead.
+- The candidate side of the provenance (adapter identity, `DecisionSpec`
+  diff) is printed as "what changed" next to "what moved". It supports
+  attribution, not proof of cause.
+
+**Estimand.** One metric with one direction, chosen explicitly:
+
+- `pass_rate` (default; higher is better): a trial's value is 1 if it
+  passed, else 0.
+- `mean_score` (higher is better): a trial's value is its
+  `aggregate_score`.
+- `<grader_id>.<metric_name>`: the named outcome metric, with
+  `--direction higher|lower` stating which way is better (a latency budget
+  metric, for example, is `lower`).
+
+With several graders, `pass_rate` and `mean_score` follow the trial-level
+rule (all graders passed; mean of grader scores); `--grader ID` restricts
+both to that grader's outcome. Direction is normalised so that a positive
+effect is always an improvement.
+
+**Trial validity.** Only gradable trials contribute (`Trial.is_gradable`:
+`COMPLETED`, `FAILED`, or `TIMEOUT` without a grader crash). Infra errors,
+grader crashes, and never-run trials are excluded and counted per run; for
+`pass_rate` a `TIMEOUT` counts as a failure, as the report does. A trial with
+no value for the selected metric (a missing outcome metric, or no score) is
+excluded and counted. Unavailable evidence is never a zero delta.
+
+**Sampling unit and statistic.** The unit is the task, matched across runs:
+
+1. For each shared task `t` and each run, the task statistic `θ_A(t)` /
+   `θ_B(t)` is the mean of the trial values of that task in that run.
+   Repeated trials of one task are averaged into it; they are not
+   independent samples of the suite, and equal `run_index` values do not pair
+   trials across runs.
+2. The paired difference is `d_t = θ_B(t) − θ_A(t)`, direction-normalised.
+3. The effect is `Δ = mean_t d_t` over the `T` shared tasks with a value on
+   both sides. It equals the difference of the two suite means over the same
+   task set, so heterogeneous task difficulty cancels instead of widening the
+   interval.
+4. The interval is a percentile bootstrap over the `T` paired differences:
+   `B` resamples of size `T` with replacement, multiplicity preserved, and
+   the `alpha/2` and `1 − alpha/2` percentiles of the resample means.
+   `confidence`, `B`, and `seed` are inputs; the same inputs and seed
+   reproduce the result exactly, and task order never matters.
+5. The p-value is a paired sign-flip permutation test: under the null of no
+   within-task difference, each `d_t` is equally likely to carry either sign,
+   and the two-sided p-value is the fraction of `B` random sign assignments
+   (counting the observed one) whose mean is at least as extreme as `|Δ|`.
+   The assignments are drawn with the same `seed`.
+
+**Verdict.** Given the practical threshold `τ` (`--threshold`, an absolute
+delta on the metric's scale; default 0.03) and the interval `[lo, hi]`:
+
+| Evidence | Verdict | Exit |
+|---|---|---|
+| `T < 2`, or no task has a value on both sides | insufficient evidence | 2 |
+| interval excludes 0 and `Δ ≤ −τ` | regression | 1 |
+| interval excludes 0 and `Δ ≥ τ` | improvement | 0 |
+| interval excludes 0 and `|Δ| < τ` | significant but below the practical threshold | 0 |
+| interval includes 0 and lies inside `(−τ, τ)` | equivalent within the threshold | 0 |
+| interval includes 0 and reaches beyond `±τ` | inconclusive: more runs or tasks needed | 2 |
+
+Significance (the interval excludes 0), practical relevance (`|Δ|` against
+`τ`), and evidence (the interval's extent against `τ`) are three separate
+readings, and the output reports all three. Non-significance is never
+equivalence: only an interval inside `(−τ, τ)` supports "no meaningful
+change". Exit codes follow the CLI contract (0 success, 1 negative result, 2
+unevaluable). `--observe` makes every *evaluated* comparison exit 0, for
+dashboards and exploratory runs; incompatible, empty, or aggregate-only inputs
+still exit 2.
+
+**Output.** The terminal summary and the `--output` JSON carry the same
+fields: the method (`paired task bootstrap`), the unit, the metric and its
+direction, the grader selection, per-run trial counts (gradable, and excluded
+by reason), task counts (shared, and excluded by reason), `Δ`, `[lo, hi]`,
+`confidence`, `B`, `seed`, the p-value, `τ`, the verdict, the exit code, the
+per-task `d_t` with each side's trial count (largest movers first), the
+compatibility report, and the candidate diff.
 
 ## Availability
 
@@ -212,7 +301,7 @@ are never compared across silently different populations.
 | Suite pass@k, suite pass^k, and `TrialBatch.pass_rate` counted harness failures as agent failures (all trials in the denominator) | harness failures excluded and reported separately | #46 (fixed) |
 | A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
 | The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
-| `compare_metrics` resamples two arms independently | paired task-level resampling for run comparison | #28 |
+| No run-versus-run command; `compare_metrics` resamples two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 |
 
 ## Related pages
 
