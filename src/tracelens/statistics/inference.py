@@ -153,8 +153,21 @@ def bootstrap_ci(
         seed: Random seed for reproducibility
 
     Returns:
-        Tuple of (point_estimate, lower_bound, upper_bound)
+        Tuple of (point_estimate, lower_bound, upper_bound). Empty input
+        yields ``(0.0, 0.0, 0.0)``; a single value yields a degenerate
+        interval equal to that value.
+
+    Raises:
+        ValueError: If ``confidence`` is not strictly between 0 and 1, or
+            ``n_bootstrap`` is less than 1.
     """
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(
+            f"confidence must be strictly between 0 and 1, got {confidence!r}"
+        )
+    if n_bootstrap < 1:
+        raise ValueError(f"n_bootstrap must be at least 1, got {n_bootstrap!r}")
+
     values = np.asarray(values)
     n = len(values)
 

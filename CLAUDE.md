@@ -132,6 +132,10 @@ reports) — a spike there means the grading harness broke, not the agent.
 
 ## Statistical Analysis
 
+Estimator definitions, sampling units, and trial-validity rules live in
+`docs/statistical-contract.md`. Any change to them updates that page in the
+same PR.
+
 ### pass@k (Capability)
 
 "What's the probability of at least one success in k attempts?"

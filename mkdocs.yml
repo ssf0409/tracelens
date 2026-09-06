@@ -81,6 +81,7 @@ nav:
       - Core Concepts & Glossary: concepts.md
       - pass@k vs pass^k: pass-at-k-vs-pass-hat-k.md
       - Statistical Comparison: statistical-comparison.md
+      - Statistical Contract: statistical-contract.md
       - Reproducibility & DecisionSpec: reproducibility.md
       - Accuracy Best Practices: accuracy.md
       - Evaluation Recipes: evaluation-recipes.md

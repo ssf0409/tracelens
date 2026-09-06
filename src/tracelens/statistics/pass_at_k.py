@@ -6,10 +6,17 @@ given n total samples with c correct.
 This is a capability metric - it answers "can the agent do this at all?"
 Higher k values give the agent more chances, so pass@k increases with k.
 
+Suite-level numbers treat the *task* as the sampling unit: per-task pass@k
+is computed once and the suite value is the mean over tasks. Bootstrap
+confidence intervals resample tasks with replacement, preserving repeated
+draws. See ``docs/statistical-contract.md`` for the full contract.
+
 Reference: Chen et al., "Evaluating Large Language Models Trained on Code"
 """
 
 import numpy as np
+
+from tracelens.statistics.inference import bootstrap_ci
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:
@@ -46,6 +53,33 @@ def pass_at_k(n: int, c: int, k: int) -> float:
     return float(1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1)))
 
 
+def _per_task_pass_at_k(
+    results_per_task: dict[str, list[bool]],
+    k: int,
+) -> dict[str, float]:
+    """Per-task pass@k scores keyed by task_id, in sorted task_id order.
+
+    Tasks with ``n >= k`` samples use the unbiased estimator. A task with
+    ``0 < n < k`` samples falls back to its empirical pass rate ``c / n``;
+    the statistical contract calls for "unavailable" instead, and that
+    change is tracked separately (issue #46). Tasks without samples are
+    omitted.
+
+    Sorting by task_id gives every caller a canonical order, so seeded
+    resampling does not depend on dict insertion order.
+    """
+    scores: dict[str, float] = {}
+    for task_id in sorted(results_per_task):
+        results = results_per_task[task_id]
+        n = len(results)
+        c = sum(results)
+        if n >= k:
+            scores[task_id] = pass_at_k(n, c, k)
+        elif n > 0:
+            scores[task_id] = c / n
+    return scores
+
+
 def pass_at_k_estimator(
     results_per_task: dict[str, list[bool]],
     k: int,
@@ -70,21 +104,7 @@ def pass_at_k_estimator(
         >>> pass_at_k_estimator(results, k=3)
         0.9...  # High probability task1 passes, lower for task2
     """
-    if not results_per_task:
-        return 0.0
-
-    scores = []
-
-    for task_id, results in results_per_task.items():
-        n = len(results)
-        c = sum(results)
-
-        if n >= k:
-            scores.append(pass_at_k(n, c, k))
-        elif n > 0:
-            # Not enough samples, use empirical estimate
-            scores.append(c / n if n > 0 else 0.0)
-
+    scores = list(_per_task_pass_at_k(results_per_task, k).values())
     return float(np.mean(scores)) if scores else 0.0
 
 
@@ -130,39 +150,42 @@ class PassAtKAnalyzer:
         k: int,
         confidence: float = 0.95,
         n_bootstrap: int = 1000,
+        seed: int | None = None,
     ) -> tuple[float, float]:
-        """Compute bootstrap confidence interval for pass@k.
+        """Compute a bootstrap confidence interval for suite pass@k.
 
-        Uses bootstrap resampling over tasks to estimate the confidence
-        interval for pass@k.
+        The sampling unit is the task. Per-task pass@k scores are computed
+        once (in sorted task_id order), then resampled with replacement
+        ``n_bootstrap`` times; a task drawn twice contributes twice. The
+        interval is the percentile interval of the resampled suite means.
 
         Args:
             results_per_task: Dict mapping task_id to list of pass/fail booleans
             k: k value for pass@k
             confidence: Confidence level (default 0.95 for 95% CI)
-            n_bootstrap: Number of bootstrap samples
+            n_bootstrap: Number of bootstrap resamples
+            seed: Seed for the resampling generator. The same inputs and
+                seed always yield the same interval, and the order in which
+                tasks appear in ``results_per_task`` does not affect it.
 
         Returns:
-            Tuple of (lower_bound, upper_bound)
+            Tuple of (lower_bound, upper_bound). With no tasks this is
+            ``(0.0, 0.0)``, a legacy placeholder for "unavailable" (issue
+            #46). With a single task the interval degenerates to that
+            task's score; it carries no uncertainty information.
+
+        Raises:
+            ValueError: If ``confidence`` is not strictly between 0 and 1,
+                or ``n_bootstrap`` is less than 1.
         """
-        if not results_per_task:
-            return 0.0, 0.0
-
-        task_ids = list(results_per_task.keys())
-        bootstrap_scores = []
-
-        rng = np.random.default_rng()
-
-        for _ in range(n_bootstrap):
-            # Bootstrap resample tasks
-            sampled_ids = rng.choice(task_ids, size=len(task_ids), replace=True)
-            sampled_results = {tid: results_per_task[tid] for tid in sampled_ids}
-            bootstrap_scores.append(pass_at_k_estimator(sampled_results, k))
-
-        alpha = (1 - confidence) / 2
-        lower = float(np.percentile(bootstrap_scores, alpha * 100))
-        upper = float(np.percentile(bootstrap_scores, (1 - alpha) * 100))
-
+        scores = list(_per_task_pass_at_k(results_per_task, k).values())
+        _, lower, upper = bootstrap_ci(
+            scores,
+            confidence=confidence,
+            n_bootstrap=n_bootstrap,
+            statistic="mean",
+            seed=seed,
+        )
         return lower, upper
 
     def analyze_with_ci(
@@ -170,13 +193,16 @@ class PassAtKAnalyzer:
         results_per_task: dict[str, list[bool]],
         confidence: float = 0.95,
         n_bootstrap: int = 1000,
+        seed: int | None = None,
     ) -> dict[str, dict[str, float]]:
         """Compute pass@k with confidence intervals.
 
         Args:
             results_per_task: Dict mapping task_id to list of pass/fail booleans
             confidence: Confidence level (default 0.95)
-            n_bootstrap: Number of bootstrap samples
+            n_bootstrap: Number of bootstrap resamples
+            seed: Seed for the resampling generator (see
+                :meth:`compute_confidence_interval`)
 
         Returns:
             Dict mapping "pass@k" to {"value": ..., "lower": ..., "upper": ...}
@@ -186,7 +212,7 @@ class PassAtKAnalyzer:
         for k in self.k_values:
             value = pass_at_k_estimator(results_per_task, k)
             lower, upper = self.compute_confidence_interval(
-                results_per_task, k, confidence, n_bootstrap
+                results_per_task, k, confidence, n_bootstrap, seed=seed
             )
             result[f"pass@{k}"] = {
                 "value": value,
