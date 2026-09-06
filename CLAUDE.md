@@ -78,6 +78,8 @@ src/tracelens/
 │   └── generator.py     # ReportGenerator - markdown, JSON, HTML, CI summary
 └── cli/
     ├── main.py          # run / report / sample / calibrate / reconcile
+    ├── config.py        # tracelens.yaml run configuration (run --config)
+    ├── init.py          # Scaffold: eval/, tracelens.yaml, CI workflow
     ├── sample.py        # Human review worksheet generation
     └── calibrate.py     # Human-vs-grader reconciliation
 ```
@@ -192,6 +194,15 @@ tracelens run \
 
 tracelens report --results reports/results.json --format markdown
 ```
+
+`tracelens run --config tracelens.yaml` reads the same settings from a file
+(`tracelens init` writes one). Precedence: built-in defaults, then the file,
+then explicit flags; booleans have `--no-` forms. Paths in the file resolve
+relative to the file, dotted imports come from `run.import_root` (default:
+the file's directory), and the file is safe-loaded and validated strictly:
+unknown or duplicate keys, wrong types, and missing required settings exit 2
+before any agent call. Schema: `docs/user-guide.md`, "Run configuration
+file".
 
 Exit codes across all commands: 0 = success or gate passed; 1 = negative
 result (blocked gate, unmet `--require-baselines`, calibration below

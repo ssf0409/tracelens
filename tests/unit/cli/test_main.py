@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tracelens.cli.calibrate import cmd_calibrate
+from tracelens.cli.config import ConfigError, resolve_run_settings
 from tracelens.cli.main import build_parser
 
 
@@ -25,7 +26,8 @@ class TestBuildParser:
         assert args.graders == ["my.Grader1", "my.Grader2"]
 
     def test_run_defaults(self):
-        """Run command has sensible defaults."""
+        """Omitted run flags stay out of the namespace so they cannot shadow a
+        --config value; the resolver supplies the built-in defaults."""
         parser = build_parser()
         args = parser.parse_args([
             "run",
@@ -33,14 +35,20 @@ class TestBuildParser:
             "--adapter", "my.Adapter",
             "--graders", "my.Grader",
         ])
-        assert args.num_runs == 1
-        assert args.max_concurrency == 5
-        assert args.timeout == 300.0
-        assert args.baseline_check is False
-        assert args.fail_on_regression == "moderate"
-        assert args.output is None
-        assert args.report is None
-        assert args.max_infra_retries == 0
+        assert vars(args) == {
+            "command": "run", "debug": False, "config": None,
+            "eval_set": "tasks.json", "adapter": "my.Adapter", "graders": ["my.Grader"],
+        }
+        resolved, import_root = resolve_run_settings(args)
+        assert import_root is None
+        assert resolved.num_runs == 1
+        assert resolved.max_concurrency == 5
+        assert resolved.timeout == 300.0
+        assert resolved.baseline_check is False
+        assert resolved.fail_on_regression == "moderate"
+        assert resolved.output is None
+        assert resolved.report is None
+        assert resolved.max_infra_retries == 0
 
     def test_run_with_all_options(self):
         """Run command accepts all optional args."""
@@ -98,10 +106,12 @@ class TestBuildParser:
             parser.parse_args([])
 
     def test_missing_required_args(self):
-        """Missing required args raises SystemExit."""
+        """A run with neither flags nor a config file is rejected by the
+        resolver (a usage error naming both spellings), not by argparse."""
         parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["run"])
+        args = parser.parse_args(["run"])
+        with pytest.raises(ConfigError, match=r"--eval-set \(run.eval_set\)"):
+            resolve_run_settings(args)
 
 
 class TestCalibrateParser:

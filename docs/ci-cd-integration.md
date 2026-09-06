@@ -27,9 +27,10 @@ dependency set is the one you tested locally:
   run: uv sync --frozen
 ```
 
-`tracelens init` generates a workflow for projects that do not (yet) list
-TraceLens as a dependency; it creates an environment and installs TraceLens
-pinned to the release that generated it. See `eval/README.md` in the
+`tracelens init` generates a `tracelens.yaml` and a workflow that runs
+`tracelens run --config tracelens.yaml`. For projects that do not (yet) list
+TraceLens as a dependency, the workflow creates an environment and installs
+TraceLens pinned to the release that generated it. See `eval/README.md` in the
 generated scaffold.
 
 ## Project Contract
@@ -46,6 +47,13 @@ tracelens run \
 
 That means CI-facing adapters and graders should read configuration from the
 task input, checked-in config files, or environment variables.
+
+The same run can live in a committed `tracelens.yaml` and be invoked as
+`tracelens run --config tracelens.yaml`: flags on the command line override
+the file, paths in the file resolve relative to it, and adapters import from
+the file's directory unless `run.import_root` says otherwise. The
+[run configuration file](user-guide.md#run-configuration-file) reference
+lists every key.
 
 Minimal adapter shape:
 

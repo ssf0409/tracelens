@@ -64,13 +64,10 @@ To start inside your own project:
 
 ```bash
 tracelens init .
-tracelens run \
-  --eval-set eval/tasks.json \
-  --adapter eval.adapter.StarterAdapter \
-  --graders eval.grader.StarterGrader
+tracelens run --config tracelens.yaml
 ```
 
-`tracelens init` writes user-owned starter files under `eval/` plus a GitHub Actions workflow. It refuses to overwrite generated files unless you pass `--force`.
+`tracelens init` writes user-owned starter files under `eval/`, a `tracelens.yaml` holding the run settings, and a GitHub Actions workflow that runs the same command on every pull request. Flags on the command line override the file. It refuses to overwrite generated files unless you pass `--force`.
 
 ## What an eval looks like
 

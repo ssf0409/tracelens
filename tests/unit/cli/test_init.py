@@ -1,8 +1,28 @@
-"""Tests for the `tracelens init` scaffold templates (issue #49)."""
+"""Tests for the `tracelens init` scaffold templates (issues #49, #35)."""
+
+from pathlib import Path
 
 import yaml
 
-from tracelens.cli.init import render_readme, render_workflow, tracelens_requirement
+from tracelens.cli.config import load_run_config
+from tracelens.cli.init import (
+    CONFIG_TEMPLATE,
+    render_readme,
+    render_workflow,
+    tracelens_requirement,
+)
+
+
+def enable_gate_block(config_text: str) -> str:
+    """Do what eval/README.md step 4.2 says: uncomment the ``baseline:`` block."""
+    lines = config_text.splitlines(keepends=True)
+    start = lines.index("  # baseline:\n")
+    lines[start] = "  baseline:\n"
+    for i in range(start + 1, len(lines)):
+        if not lines[i].startswith("  #   "):
+            break
+        lines[i] = "    " + lines[i][len("  #   "):]
+    return "".join(lines)
 
 
 def _triggers(workflow: dict) -> dict:
@@ -30,11 +50,15 @@ class TestWorkflowTemplate:
         assert 'python -c "import tracelens"' in text  # only when missing
         assert ".venv/bin/tracelens run" in text
 
-    def test_gate_flags_are_present_as_a_commented_block(self):
-        text = render_workflow()
-        assert "#   --baseline-check" in text
-        assert "#   --baselines-file eval/baselines.json" in text
-        assert "#   --fail-on-regression moderate" in text
+    def test_run_step_is_the_documented_config_command(self):
+        data = yaml.safe_load(render_workflow())
+        steps = {s.get("name"): s for s in data["jobs"]["eval"]["steps"]}
+        run = steps["Run TraceLens starter eval"]["run"].strip()
+        assert run == ".venv/bin/tracelens run --config tracelens.yaml"
+
+    def test_gate_lives_in_the_config_not_the_workflow(self):
+        assert "--baseline-check" not in render_workflow()
+        assert "  # baseline:\n  #   enabled: true\n" in CONFIG_TEMPLATE
 
     def test_summary_and_artifact_steps_tolerate_missing_files(self):
         data = yaml.safe_load(render_workflow())
@@ -66,6 +90,38 @@ class TestRequirementPin:
         assert 'uv pip install "tracelens==9.9.9"' in render_workflow("tracelens==9.9.9")
 
 
+class TestConfigTemplate:
+    def test_parses_into_the_run_the_readme_describes(self, tmp_path: Path):
+        path = tmp_path / "tracelens.yaml"
+        path.write_text(CONFIG_TEMPLATE)
+        config = load_run_config(path)
+        base = tmp_path.resolve()
+        assert config.import_root == base
+        assert config.values == {
+            "eval_set": str(base / "eval/tasks.json"),
+            "adapter": "eval.adapter.StarterAdapter",
+            "graders": ["eval.grader.StarterGrader"],
+            "num_runs": 1,
+            "output": str(base / "eval/results/results.json"),
+            "report": str(base / "eval/results/report.md"),
+            "html_report": str(base / "eval/results/report.html"),
+            "save_trials": str(base / "eval/results/trials.json"),
+        }
+
+    def test_uncommenting_the_gate_block_enables_the_documented_gate(self, tmp_path: Path):
+        path = tmp_path / "tracelens.yaml"
+        path.write_text(enable_gate_block(CONFIG_TEMPLATE))
+        values = load_run_config(path).values
+        assert values["baseline_check"] is True
+        assert values["baselines_file"] == str(tmp_path.resolve() / "eval/baselines.json")
+        assert values["fail_on_regression"] == "moderate"
+
+    def test_documents_the_command_and_keeps_secrets_out(self):
+        assert "tracelens run --config tracelens.yaml" in CONFIG_TEMPLATE
+        assert "environment variables" in CONFIG_TEMPLATE
+        assert "key" not in CONFIG_TEMPLATE.lower().replace("every key", "").replace("api key", "x")
+
+
 class TestReadmeTemplate:
     def test_walkthrough_sections_and_gate_recipe(self):
         text = render_readme()
@@ -76,7 +132,10 @@ class TestReadmeTemplate:
             "## 4. Enable the regression gate",
         ):
             assert heading in text
+        assert "tracelens run --config tracelens.yaml" in text
+        assert "--eval-set eval/tasks.json" not in text  # one documented command
         assert "from tracelens import BaselineManager, TaskBaseline" in text
+        assert "uncomment the `baseline:` block" in text
         assert "--baseline-check --baselines-file eval/baselines.json --fail-on-regression moderate" in text
         assert "Prove that it blocks" in text
         assert "0 = gate passed, 1 = blocked, 2 = misconfigured or unevaluable" in text

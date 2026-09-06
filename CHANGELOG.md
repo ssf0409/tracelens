@@ -10,6 +10,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **`tracelens run --config tracelens.yaml`.** A project-owned run
+  configuration file holds exactly what the `run` flags hold (eval set,
+  adapter and graders, run counts, outputs, and the baseline gate).
+  Precedence is built-in defaults, then the file, then flags given
+  explicitly, so an omitted flag never resets a file value, and booleans
+  override in both directions (`--progress` / `--no-progress`,
+  `--baseline-check` / `--no-baseline-check`, `--require-baselines` /
+  `--no-require-baselines`). Paths in the file resolve relative to the
+  file; adapters and graders import from `run.import_root` (default: the
+  file's directory) so the command works from any directory; and the file
+  is parsed strictly with the safe YAML loader, so unknown keys, duplicate
+  keys, wrong types, unsafe constructs, and missing required settings exit
+  2 before any agent call. `tracelens init` now writes `tracelens.yaml`,
+  and the generated README and workflow run the same
+  `tracelens run --config tracelens.yaml`, so enabling the regression gate
+  is one edit to the config file. (#35)
 - **Actionable CLI errors and discoverable outputs.** `tracelens --debug` (or
   `TRACELENS_DEBUG=1`) adds the full traceback to input and configuration
   errors, which are otherwise one or two lines on stderr with the next
@@ -29,6 +45,11 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **PyYAML is a core dependency** (`pyyaml>=6.0`), used only through the
+  safe loader for `--config`. Flag-only `tracelens run` invocations are
+  unchanged, except that `--eval-set`, `--adapter`, and `--graders` are now
+  required only when no config file provides them; a run missing any of
+  them still exits 2, naming both the flag and the config key. (#35)
 - **One exit-code contract for every command.** 0 = success or gate passed;
   1 = a negative result (blocked gate, unmet `--require-baselines`,
   calibration below threshold); 2 = a usage, configuration, or input error,
