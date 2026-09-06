@@ -10,6 +10,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **Positioning and contributor guidance aligned with what is actually
+  demonstrated.** The README and docs home lead with what TraceLens is
+  (repo-owned local regression checks, inspectable artifacts, no backend,
+  explicit uncertainty) and carry a "What is demonstrated today" table that
+  separates the tested mechanism from the not-yet-published downstream
+  evidence; the adjacent-tools page acknowledges that hosted platforms also
+  run evaluations, experiments, and CI checks and names no vendor features;
+  fingerprint explanations no longer claim exact reproducibility or causal
+  attribution (`DecisionSpec` docstrings included); `CONTRIBUTING.md`
+  describes the current extras (`[datasets]`, `[docs]`, PyYAML in core),
+  the `make verify` gate, where things live, and three small first issues
+  (#74, #75, #76). (#53)
 - **The documented user journey runs in CI from a built wheel.**
   `tests/journey/test_user_journey.py` drives real `tracelens` processes
   through the documented workflow in a scratch project (an existing

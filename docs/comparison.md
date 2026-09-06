@@ -1,8 +1,13 @@
 # TraceLens vs Adjacent Tools
 
-TraceLens is for local, inspectable, CI-ready agent evaluation. It is not trying
-to replace hosted tracing dashboards, prompt playgrounds, or full observability
-platforms.
+TraceLens is for local, inspectable, CI-ready agent evaluation. It is not a
+hosted platform: there is no account, no server, and no dashboard service; the
+evidence is files in your repository. It is not trying to replace hosted
+evaluation and observability platforms, prompt playgrounds, or domain
+benchmark suites.
+
+This page describes categories, not vendors, and does not track any vendor's
+feature list; check a product's current documentation for specifics.
 
 Use this page to decide whether TraceLens is the right tool for the job in
 front of you.
@@ -28,10 +33,10 @@ specific domain.
 | Local evals in a repo | Strong fit. Runs in Python, writes JSON/markdown/HTML artifacts. |
 | CI regression gates | Strong fit. Baselines and severity thresholds are first-class. |
 | Nondeterministic agents | Strong fit. pass@k and pass^k separate capability from reliability. |
-| Reproducibility | Strong fit. `DecisionSpec` records model, prompt, tool, and infra fingerprints. |
+| Attribution | Strong fit. `DecisionSpec` fingerprints the declared configuration and every run records what was measured, so a comparison can say what changed. That is evidence for attribution, not proof of identical execution or of cause. |
 | Harness reliability | Strong fit. Infra and grader errors are tracked separately from agent failures. |
 | Human calibration | Good fit. Worksheet sampling and reconciliation are built in. |
-| Hosted tracing UI | Not the goal. Export TraceLens outputs into a tracing system if needed. |
+| Hosted platform | Not the goal. TraceLens has no backend; export its artifacts into a platform if you want a shared UI. |
 | Prompt playground | Not the goal. Pair TraceLens with your prompt workflow. |
 | Provider matrix | Not the goal. Bring your own adapter or `LLMProvider` subclass. |
 | Domain truth | Not the goal. Downstream projects own labels, graders, thresholds, and rollout policy. |
@@ -40,19 +45,28 @@ specific domain.
 
 This is a capability comparison, not a vendor ranking.
 
-### Hosted Tracing And Observability
+### Hosted Evaluation And Observability Platforms
 
-Tools in this category are strongest when you need live traces, production
-dashboards, request search, team collaboration, or online debugging.
+Platforms in this category are not tracing-only. Besides live traces,
+production dashboards, request search, and team collaboration, they commonly
+host datasets, run evaluations and repeated experiments over them with
+built-in or custom evaluators, compare experiment results, and plug into test
+runners or CI. Treat "they only do tracing" as false.
 
-TraceLens is different: it focuses on repeatable eval suites, local artifacts,
-statistical reliability, and CI gating. It can consume or emit data that fits
-an observability workflow, but it is not a hosted backend.
+TraceLens differs in where the evidence lives and what is required, not in
+whether evaluation exists: tasks, baselines, run artifacts, and decisions are
+files in your repository; nothing needs an account or a server; and the
+decision output (a gate status, a comparison verdict) carries its trial
+validity, availability, and uncertainty explicitly so a reviewer can check it
+from the repository alone.
 
-Pick TraceLens if the question is "should this agent change land?"
+Pick TraceLens if the question is "should this agent change land, and can a
+reviewer verify the answer from the repository?"
 
-Pick a hosted tracing tool if the question is "what happened in production for
-this user request?"
+Pick a hosted platform if the question is "what happened in production for
+this request?", or if the team needs a shared UI to browse traces, datasets,
+and experiments together. Many teams use both: the platform for exploration,
+TraceLens for the gate.
 
 ### Prompt Management And Experimentation
 
@@ -101,7 +115,7 @@ need the same abstraction.
 | A regression gate for an agent PR | TraceLens baselines + CI summary |
 | Capability vs reliability over repeated runs | TraceLens pass@k + pass^k |
 | A human calibration loop for LLM judges | TraceLens sample + reconcile |
-| A live hosted trace explorer | Hosted observability/tracing tool |
+| A live hosted trace explorer, or shared dataset and experiment UI | Hosted evaluation/observability platform |
 | Prompt playground and prompt version UI | Prompt-management tool |
 | Standardized domain leaderboard | Benchmark suite |
 | RAG-specific metrics out of the box | RAG eval framework or a TraceLens recipe |

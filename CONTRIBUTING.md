@@ -17,13 +17,47 @@ proposing a broad new abstraction.
 
 ## First PR Path
 
-1. Pick a scoped issue from the
-   GitHub `good first issue` label.
+1. Pick a scoped issue from the GitHub `good first issue` label. Three that
+   are genuinely small, each with concrete acceptance criteria in the issue:
+   - [#74](https://github.com/ssf0409/tracelens/issues/74) — stop the
+     hello-world test rewriting the checked-in sample reports (one example,
+     one test, one doc note).
+   - [#75](https://github.com/ssf0409/tracelens/issues/75) — `tracelens
+     report --format ci`, re-rendering the one-line CI summary from a saved
+     results file (one CLI branch, tests, one doc paragraph).
+   - [#76](https://github.com/ssf0409/tracelens/issues/76) — show
+     `provenance_version` in the adapter and grader examples and the
+     scaffold templates (docs and two template strings).
+
+   Statistical design (estimators, comparison semantics, gate policy) is
+   owner-level work and is never labelled a first issue; it starts from the
+   [statistical contract](docs/statistical-contract.md) and a maintainer
+   discussion.
 2. Comment on the issue with the approach you plan to take.
 3. Keep the PR to one behavior change. If you discover a larger architecture
    cleanup, call it out in the PR body instead of expanding silently.
 4. Add or update tests for every behavior change.
 5. Run `make verify` before requesting review.
+
+## Where things live
+
+The full tree is in [CLAUDE.md](CLAUDE.md); the short version:
+
+- `core/` — `Task`, `Transcript`, `Trial`, `Outcome`, `DecisionSpec`, and run
+  provenance.
+- `execution/` — the runner (concurrency, timeouts, retries, checkpoints) and
+  adapters; `loaders/` — JSON, JSONL, and CSV task loaders in core, Hugging
+  Face behind the `[datasets]` extra.
+- `statistics/` — pass@k, pass^k, bootstrap intervals, and the paired run
+  comparison; every estimator follows
+  [docs/statistical-contract.md](docs/statistical-contract.md), which changes
+  in the same PR as the estimator.
+- `baselines/` and `reporting/gate.py` — baselines and the CI gate decision;
+  `reporting/` — Markdown, JSON, HTML, the CI summary, and failure inspection.
+- `calibration/` — human-review sampling and grader-versus-human
+  reconciliation.
+- `cli/` — `run`, `report`, `compare`, `inspect`, `sample`, `reconcile`,
+  `init`, and the `tracelens.yaml` config.
 
 ## Development setup
 
@@ -42,21 +76,25 @@ pip install -e ".[dev]"
 
 ### Optional dependency groups
 
-- `.[llm]` — Convenience bundle of `openai` + `anthropic` SDKs for users who subclass `LLMProvider` directly. Not required by the core test suite.
-- `.[http]` — `httpx`. Required for `HTTPAPIAdapter`.
-- `.[dev]` — dev tools (pytest, ruff, mypy, httpx).
+The core install (`pydantic`, `numpy`, `scipy`, `jsonschema`, `pyyaml`) is all
+the CLI needs, including `tracelens.yaml`, the JSON/JSONL/CSV loaders, and the
+calibration commands (`sample`, `reconcile`). Extras:
 
-The test suite does not require the `[llm]` extra — tracelens no longer ships a built-in third-party provider wrapper, so there are no optional-dep-gated tests.
+- `.[llm]` — Convenience bundle of `openai` + `anthropic` SDKs for users who subclass `LLMProvider` directly. Never required by the tests.
+- `.[http]` — `httpx`. Required for `HTTPAPIAdapter`.
+- `.[datasets]` — `datasets`, for the optional Hugging Face task loader. A separate CI job runs the suite with it installed.
+- `.[dev]` — dev tools (pytest, pytest-asyncio, pytest-cov, ruff, mypy, httpx, type stubs).
+- `.[docs]` — MkDocs Material and mkdocstrings for the documentation site.
 
 ### Running the verification gate
 
 ```bash
-pytest -q                          # all tests
-ruff check src/ tests/             # lint
-mypy src/tracelens/                 # type check (strict mode)
+make verify   # uv lock --check -> ruff -> mypy (strict) -> pytest with the 90 % coverage floor
 ```
 
-All three must pass before opening a PR.
+That is exactly what CI runs. The individual commands are in
+[CLAUDE.md](CLAUDE.md) under "Testing". Documentation changes must also pass
+`make docs` (`mkdocs build --strict`).
 
 For changes that affect packaging, console scripts, public imports, examples,
 or downstream dependency behavior, also run the relevant environment checks in
@@ -95,7 +133,7 @@ checkout.
 These guide reviews; deviations should be justified in the PR description:
 
 1. **Grade outcomes, not paths.** If a new grader needs to inspect intermediate steps, think hard about whether you can grade the final artifact instead.
-2. **Explicit reproducibility.** Anything that affects agent behavior — model, prompt, tool availability, *infrastructure* — belongs in `DecisionSpec`.
+2. **Explicit provenance.** Anything declared to affect agent behavior — model, prompt, tool availability, *infrastructure* — belongs in `DecisionSpec`; what was measured (task content, graders, settings) is recorded on every run as provenance. Both are evidence for attributing a change, never proof of cause or of identical execution, and the docs must say so.
 3. **Policies, not booleans.** Graders carry a policy (GATE / WARN / TRACK), not a hard-coded `is_critical` flag.
 4. **No silent fallbacks.** If a dependency is missing or a call fails, raise loudly with context.
 

@@ -8,7 +8,12 @@ TraceLens is a friendly evaluation and regression-testing framework for AI agent
 
 ## Why TraceLens
 
-Agents are non-deterministic. Unit tests are not enough. TraceLens helps teams capture agent traces, grade outcomes, compare against baselines, and block regressions in CI.
+Agents are non-deterministic, so "the tests pass" says little about whether an agent change is safe to ship. TraceLens gives a Python team a regression check that lives in its own repository:
+
+- **Repo-owned, local, no backend.** Tasks, adapters, graders, baselines, and a `tracelens.yaml` are files you commit; runs write JSON, Markdown, and HTML artifacts next to them. Nothing needs an account or a server, and CI is a plain job running the same command you run locally.
+- **Inspectable evidence.** Every run keeps its trials, transcripts, grader feedback, and provenance (which task content, graders, and settings produced the numbers, and which candidate was under test). `tracelens inspect` explains a failure from those files.
+- **Explicit uncertainty.** pass@k and pass^k separate capability from reliability, intervals come from a task-level bootstrap, numbers that were not measured are reported as unavailable rather than zero, and a gate that cannot be evaluated says so instead of passing.
+- **Harness failures stay separate from agent failures.** Infra errors and grader crashes are counted on their own, so a broken eval never looks like a regression.
 
 Use it when you need to answer questions like:
 
@@ -17,7 +22,20 @@ Use it when you need to answer questions like:
 - Did a prompt, model, tool, or infra change regress a baseline?
 - Can CI block unsafe or lower-quality agent behavior before it ships?
 
-It supports both **subjective** evaluation (LLM-as-judge for quality) and **objective** evaluation (schema validity, tool-use constraints, latency, budget, or domain-specific metrics) — and keeps harness failures separate from agent failures so a broken eval never looks like a regression.
+It supports both **subjective** evaluation (LLM-as-judge for quality) and **objective** evaluation (schema validity, tool-use constraints, latency, budget, or domain-specific metrics).
+
+### What is demonstrated today
+
+Each claim above rests on a different kind of evidence; here is which:
+
+| Claim | What it rests on |
+|---|---|
+| The documented workflow works from a fresh install | A CI job installs a freshly built wheel into a clean environment and drives `init`, `run --config`, baselines, the gate, an intentional regression, `inspect`, `compare`, a targeted rerun, an infra outage, a grader crash, malformed input, and checkpoint/resume through the console script. |
+| The statistics do what the contract says | Hand-derived and independent-reference tests against the statistical contract (task-level bootstrap with multiplicity, order-independent pass^k, paired run comparison). |
+| Integrations behave at their boundaries | Tests exercise the JSON/JSONL/CSV loaders, the HTTP adapter, the optional Hugging Face loader, the generated GitHub workflow, and `tracelens.yaml`. |
+| TraceLens caught a real regression in a real project | **Not yet published.** The examples and the scaffold use simulated agents. A sanitized downstream case study is the open half of issue #33; until it exists, treat "catches regressions" as a tested mechanism, not an observed result. |
+
+Hosted evaluation and observability platforms also run datasets, experiments, and CI checks; the difference is where the evidence lives and what is required, not whether evaluation exists. See [TraceLens vs Adjacent Tools](docs/comparison.md).
 
 ## Install
 
