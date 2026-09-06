@@ -350,15 +350,73 @@ class TrialBatch(BaseModel):
         """Reconstruct a TrialBatch from a dict produced by to_dict()."""
         return cls.model_validate(data)
 
-    def get_pass_results_by_task(self) -> dict[str, list[bool]]:
-        """Get pass/fail results grouped by task.
+    def _trials_by_task_in_run_order(self) -> dict[str, list[Trial]]:
+        """Group trials by task, ordered by ``run_index``.
 
-        Returns dict mapping task_id to list of boolean pass results.
-        Useful for computing pass@k.
+        The runner appends trials in completion order, which under
+        concurrency or after a checkpoint resume differs from run order.
+        Every per-task sequence handed to the statistics layer is rebuilt
+        from ``run_index`` so that reported numbers never depend on timing.
+
+        Raises:
+            ValueError: If two trials share the same ``(task_id, run_index)``
+                or a ``run_index`` is negative. Both make the run sequence
+                ambiguous, so they are rejected rather than silently merged.
         """
-        results: dict[str, list[bool]] = {}
+        grouped: dict[str, dict[int, Trial]] = {}
         for trial in self.trials:
-            if trial.task_id not in results:
-                results[trial.task_id] = []
-            results[trial.task_id].append(trial.passed)
-        return results
+            if trial.run_index < 0:
+                raise ValueError(
+                    f"Negative run_index {trial.run_index} for task "
+                    f"{trial.task_id!r} (trial {trial.trial_id})"
+                )
+            per_task = grouped.setdefault(trial.task_id, {})
+            if trial.run_index in per_task:
+                raise ValueError(
+                    f"Duplicate run_index {trial.run_index} for task "
+                    f"{trial.task_id!r}: trials "
+                    f"{per_task[trial.run_index].trial_id} and {trial.trial_id}. "
+                    "Give each trial of a task a distinct run_index "
+                    "(EvaluationRunner does this automatically)."
+                )
+            per_task[trial.run_index] = trial
+        return {
+            task_id: [per_task[i] for i in sorted(per_task)]
+            for task_id, per_task in grouped.items()
+        }
+
+    def get_pass_results_by_task(self) -> dict[str, list[bool]]:
+        """Get pass/fail results grouped by task, in ``run_index`` order.
+
+        Returns dict mapping task_id to a list of boolean pass results
+        ordered by ``run_index`` regardless of the order trials were
+        appended. Missing run indices are simply absent from the list;
+        use :meth:`get_pass_sequences_by_task` when gaps matter (pass^k).
+        Useful for computing pass@k.
+
+        Raises:
+            ValueError: If two trials share the same ``(task_id, run_index)``.
+        """
+        return {
+            task_id: [t.passed for t in trials]
+            for task_id, trials in self._trials_by_task_in_run_order().items()
+        }
+
+    def get_pass_sequences_by_task(self) -> dict[str, list[bool | None]]:
+        """Pass/fail sequences indexed by ``run_index``, with ``None`` for gaps.
+
+        Position ``i`` of each list is the outcome of ``run_index == i``; a
+        run index with no trial yields ``None``. Consecutive-window
+        statistics (pass^k) consume this shape so that runs on either side
+        of a missing run are never treated as consecutive observations.
+
+        Raises:
+            ValueError: If two trials share the same ``(task_id, run_index)``.
+        """
+        sequences: dict[str, list[bool | None]] = {}
+        for task_id, trials in self._trials_by_task_in_run_order().items():
+            seq: list[bool | None] = [None] * (trials[-1].run_index + 1)
+            for trial in trials:
+                seq[trial.run_index] = trial.passed
+            sequences[task_id] = seq
+        return sequences

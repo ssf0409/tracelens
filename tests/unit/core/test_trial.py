@@ -338,3 +338,55 @@ class TestInfraErrorClassification:
         batch = TrialBatch()
         assert batch.infra_error_rate == 0.0
         assert batch.infra_error_count == 0
+
+
+class TestTrialBatchRunOrder:
+    """Issue #45: per-task sequences follow run_index, not insertion order."""
+
+    @staticmethod
+    def _trial(task_id: str, run_index: int, passed: bool) -> Trial:
+        trial = Trial(task_id=task_id, run_index=run_index)
+        trial.add_outcome(Outcome(
+            trial_id=trial.trial_id,
+            grader_id="g",
+            passed=passed,
+            score=1.0 if passed else 0.0,
+        ))
+        return trial
+
+    def test_pass_results_follow_run_index_not_completion_order(self):
+        # run_index outcomes 0=T, 1=T, 2=F, 3=F, appended in completion order 0, 2, 3, 1
+        batch = TrialBatch(trials=[
+            self._trial("a", 0, True),
+            self._trial("a", 2, False),
+            self._trial("a", 3, False),
+            self._trial("a", 1, True),
+        ])
+        assert batch.get_pass_results_by_task() == {"a": [True, True, False, False]}
+        assert batch.get_pass_sequences_by_task() == {"a": [True, True, False, False]}
+
+    def test_sequences_mark_missing_runs_with_none(self):
+        batch = TrialBatch(trials=[self._trial("a", 0, True), self._trial("a", 2, True)])
+        assert batch.get_pass_sequences_by_task() == {"a": [True, None, True]}
+        # The plain result list stays gap-blind (pass@k does not care).
+        assert batch.get_pass_results_by_task() == {"a": [True, True]}
+
+    def test_duplicate_run_index_is_rejected(self):
+        batch = TrialBatch(trials=[self._trial("a", 0, True), self._trial("a", 0, False)])
+        with pytest.raises(ValueError, match="Duplicate run_index 0"):
+            batch.get_pass_results_by_task()
+        with pytest.raises(ValueError, match="Duplicate run_index 0"):
+            batch.get_pass_sequences_by_task()
+
+    def test_negative_run_index_is_rejected(self):
+        batch = TrialBatch(trials=[self._trial("a", -1, True)])
+        with pytest.raises(ValueError, match="Negative run_index"):
+            batch.get_pass_sequences_by_task()
+
+    def test_tasks_are_independent(self):
+        batch = TrialBatch(trials=[
+            self._trial("b", 1, False),
+            self._trial("a", 0, True),
+            self._trial("b", 0, True),
+        ])
+        assert batch.get_pass_results_by_task() == {"b": [True, False], "a": [True]}

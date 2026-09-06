@@ -295,15 +295,16 @@ class TestInfraErrorReporting:
     def _batch_with_infra_errors(self):
         from tracelens.core.outcome import Outcome
         from tracelens.core.trial import Trial, TrialBatch, TrialStatus
+        # Distinct run indices per task: duplicates are rejected (#45).
         trials = [
-            Trial(task_id="t1", status=TrialStatus.COMPLETED, outcomes=[
+            Trial(task_id="t1", run_index=0, status=TrialStatus.COMPLETED, outcomes=[
                 Outcome(trial_id="x", grader_id="g", passed=True, score=1.0),
             ]),
-            Trial(task_id="t1", status=TrialStatus.INFRA_ERROR),
-            Trial(task_id="t2", status=TrialStatus.COMPLETED, outcomes=[
+            Trial(task_id="t1", run_index=1, status=TrialStatus.INFRA_ERROR),
+            Trial(task_id="t2", run_index=0, status=TrialStatus.COMPLETED, outcomes=[
                 Outcome(trial_id="y", grader_id="g", passed=False, score=0.1),
             ]),
-            Trial(task_id="t2", status=TrialStatus.INFRA_ERROR),
+            Trial(task_id="t2", run_index=1, status=TrialStatus.INFRA_ERROR),
         ]
         return TrialBatch(trials=trials)
 
@@ -360,3 +361,50 @@ class TestInfraErrorReporting:
 
         assert restored.infra_error_count == 2
         assert restored.infra_error_rate == 0.5
+
+
+class TestReportRunOrderIndependence:
+    """Issue #45: identical (task, run_index, outcome) data give identical reports."""
+
+    @staticmethod
+    def _batch_in_order(order: list[int]) -> TrialBatch:
+        outcomes = {0: True, 1: True, 2: False, 3: False}
+        batch = TrialBatch()
+        for run_index in order:
+            trial = Trial(
+                task_id="t", run_index=run_index, total_runs=4, status=TrialStatus.COMPLETED
+            )
+            trial.add_outcome(Outcome(
+                trial_id=trial.trial_id,
+                grader_id="g",
+                passed=outcomes[run_index],
+                score=1.0 if outcomes[run_index] else 0.0,
+            ))
+            batch.add_trial(trial)
+        return batch
+
+    def test_pass_hat_k_ignores_completion_order(self):
+        gen = ReportGenerator(k_values=[1], consistency_k_values=[2])
+        in_order = gen.build_report(self._batch_in_order([0, 1, 2, 3]))
+        reordered = gen.build_report(self._batch_in_order([0, 2, 3, 1]))
+
+        # run_index order T T F F -> windows TT, TF, FF -> 1/3.
+        # Completion order T F F T would have given 0.
+        assert in_order.reliability["pass^2"] == pytest.approx(1 / 3)
+        assert reordered.reliability["pass^2"] == pytest.approx(1 / 3)
+        assert reordered.pass_at_k == in_order.pass_at_k
+        assert reordered.task_summaries[0].to_dict() == in_order.task_summaries[0].to_dict()
+
+    def test_missing_run_does_not_bridge_windows(self):
+        batch = TrialBatch()
+        for run_index, passed in [(0, True), (2, True)]:  # run 1 missing
+            trial = Trial(task_id="t", run_index=run_index, status=TrialStatus.COMPLETED)
+            trial.add_outcome(Outcome(
+                trial_id=trial.trial_id, grader_id="g", passed=passed, score=1.0
+            ))
+            batch.add_trial(trial)
+        report = ReportGenerator(k_values=[1], consistency_k_values=[2]).build_report(batch)
+        # No complete window of 2: the task is ineligible, so suite pass^2 is 0.0
+        # rather than the 1.0 that treating runs 0 and 2 as consecutive would give.
+        assert report.reliability["pass^2"] == 0.0
+        assert report.task_summaries[0].pass_rate == 1.0

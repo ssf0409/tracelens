@@ -199,7 +199,7 @@ are never compared across silently different populations.
 | Behaviour today | Contract says | Resolved by |
 |---|---|---|
 | pass@k bootstrap de-duplicated repeated task draws and had no seed | multiplicity preserved, seedable, order-independent | #44 (fixed) |
-| pass^k uses trial insertion (completion) order | `run_index` order; windows never span gaps | #45 |
+| pass^k used trial insertion (completion) order and could not see gaps | `run_index` order; windows never span gaps; duplicate run indices raise | #45 (fixed) |
 | pass@k with `n < k` falls back to the empirical rate `c / n`; pass^k silently drops such tasks from the suite mean | unavailable, with eligible/total counts | #46 |
 | Suite pass@k, suite pass^k, and `TrialBatch.pass_rate` count harness failures as agent failures (all trials in the denominator) | harness failures excluded and reported separately | #46 |
 | A reliability metric with no eligible task renders as `0.0` | `N/A` with reason | #46 |
