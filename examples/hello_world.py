@@ -21,8 +21,10 @@ Then render the generated JSON report::
     tracelens report --results examples/reports/hello_world_report.json --format markdown
 """
 
+import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from tracelens import (
@@ -189,9 +191,18 @@ def _relative_to_cwd(path: Path) -> str:
         return str(path)
 
 
-def _write_reports(report: ReportData, generator: ReportGenerator) -> tuple[Path, Path]:
-    reports_dir = Path(__file__).parent / "reports"
-    reports_dir.mkdir(exist_ok=True)
+def _write_reports(
+    report: ReportData,
+    generator: ReportGenerator,
+    output_dir: Path | None = None,
+) -> tuple[Path, Path]:
+    if output_dir is None:
+        env_dir = os.getenv("TRACELENS_SAMPLE_REPORTS_DIR")
+        reports_dir = Path(env_dir) if env_dir else Path(__file__).parent / "reports"
+    else:
+        reports_dir = output_dir
+
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = reports_dir / "hello_world_report.json"
     json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n")
@@ -206,6 +217,15 @@ def _write_reports(report: ReportData, generator: ReportGenerator) -> tuple[Path
 # 4. Run it.
 # ---------------------------------------------------------------------------
 async def main() -> None:
+    parser = argparse.ArgumentParser(description="TraceLens hello-world example")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Optional directory to write generated sample reports (defaults to examples/reports/)",
+    )
+    args = parser.parse_args()
+
     eval_set = build_eval_set()
     adapter = SimpleAdapter(my_agent)
     grader = ExactMatchGrader("hello.exact_match")
@@ -218,7 +238,7 @@ async def main() -> None:
     batch = await runner.run(eval_set)
     generator = ReportGenerator(k_values=[1, 3], consistency_k_values=[2, 3])
     report = generator.build_report(batch)
-    report_json, report_markdown = _write_reports(report, generator)
+    report_json, report_markdown = _write_reports(report, generator, output_dir=args.output_dir)
 
     print("\ntracelens hello-world")
     print("--------------------")

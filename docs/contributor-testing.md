@@ -58,6 +58,8 @@ uv run --frozen --extra http python examples/http_agent_eval.py
 uv run --frozen python examples/noise_aware_regression.py
 ```
 
+Note: Running `python examples/hello_world.py` directly without `--output-dir` regenerates the checked-in sample reports under `examples/reports/` (`hello_world_report.json` and `hello_world_report.md`). Only commit changes to these sample reports when deliberately updating illustrative report artifacts. Automated integration tests pass `--output-dir <tmp_path>` so that running the test suite will not rewrite these checked-in files.
+
 ## Built Artifact Smoke
 
 Use this when a change could affect what users install from PyPI:

@@ -6,19 +6,20 @@ import sys
 from pathlib import Path
 
 
-def test_hello_world_generates_sample_report_artifacts() -> None:
+def test_hello_world_generates_sample_report_artifacts(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    reports_dir = tmp_path / "reports"
 
     result = subprocess.run(
-        [sys.executable, "examples/hello_world.py"],
+        [sys.executable, "examples/hello_world.py", "--output-dir", str(reports_dir)],
         cwd=repo_root,
         check=True,
         capture_output=True,
         text=True,
     )
 
-    report_json = repo_root / "examples" / "reports" / "hello_world_report.json"
-    report_md = repo_root / "examples" / "reports" / "hello_world_report.md"
+    report_json = reports_dir / "hello_world_report.json"
+    report_md = reports_dir / "hello_world_report.md"
 
     assert "tracelens hello-world" in result.stdout
     assert result.stdout.count("add-2-2") == 1
