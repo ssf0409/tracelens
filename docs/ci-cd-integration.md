@@ -145,19 +145,30 @@ Notes:
 
 - `--baseline-check` requires `--baselines-file`, and the file must exist —
   a missing flag or file exits 2 before the eval runs, so a misconfigured
-  gate can never pass vacuously. Exit 1 means the gate blocked on a
-  regression; exit 2 means the gate itself was misconfigured.
+  gate can never pass vacuously. Exit 0 means an evaluable gate passed;
+  exit 1 means it blocked on a regression or missing required baselines;
+  exit 2 means the gate was misconfigured or could not be evaluated.
 - Tasks with no stored baseline are skipped with a stderr warning and
   counted in the gate summary line (`N checked, M skipped (no baseline),
   K blocking regression(s)`). Add `--require-baselines` to fail instead
-  when any task lacks a baseline.
+  when any task lacks a baseline. At least one task must have a comparable
+  baseline: an empty suite, zero runs, or no matching baselines exits 2.
 - Trials that failed for harness reasons (`INFRA_ERROR` status or a
   grader crash) are excluded from the baseline comparison — they surface
   via `infra_error_rate` / `grader_error_rate` and a per-task exclusion
   note instead of dragging pass-rate samples to zero. A task with no
-  gradable trials left is counted as `skipped (no gradable trials)`.
+  gradable trials left is counted as `skipped (no gradable trials)` and
+  makes the gate `UNEVALUABLE` (exit 2), even if another task passed or
+  regressed. Fix the harness failure and rerun before relying on the gate.
+  Partial trial loss remains allowed when each baseline-backed task retains
+  at least one gradable sample; this does not imply adequate statistical
+  power. Agent failures and runner timeouts remain comparison observations.
 - The current CLI compares task-level `pass_rate` and `mean_score` against
-  baselines. Store those metric names when you want CLI blocking.
+  baselines. Each baseline-backed task must share at least one of these
+  metrics, otherwise it is counted as `skipped (no comparable metrics)` and
+  the gate exits 2. An unevaluable check takes precedence over exit 1, while
+  still printing any observed regressions and exclusion counts. Diagnostic
+  output files requested with `--output` / `--save-trials` are still written.
 - Pass `--decision-spec run_spec.json` (or stamp `DecisionSpec` on
   transcripts in your adapter) and store each baseline with its
   `decision_spec` to enable infra-noise-aware comparison: sub-noise-band

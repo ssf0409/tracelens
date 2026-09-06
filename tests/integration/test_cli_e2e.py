@@ -6,7 +6,9 @@ codes, checkpoint resume, and ``tracelens report`` rendering — without
 mocking any internals.
 """
 
+import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -683,26 +685,253 @@ class FlakyInfraAdapter(AgentAdapter):
         raise ConnectionError("connection refused")
 
 
-def test_infra_error_trials_do_not_trigger_baseline_regression(
-    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("require_baselines", [False, True])
+@pytest.mark.parametrize(
+    "adapter,grader",
+    [
+        ("tests.integration.test_cli_e2e.FlakyInfraAdapter", GRADER),
+        (ADAPTER, "tests.integration.test_cli_e2e.CrashingGrader"),
+    ],
+)
+def test_harness_failure_makes_baseline_gate_unevaluable(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    adapter: str, grader: str, require_baselines: bool,
 ) -> None:
-    """A task whose trials all failed for infra reasons must be skipped
-    (visibly), not scored as a pass-rate collapse that blocks CI."""
+    """Missing harness evidence is neither a regression nor a passing gate."""
     baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.1})
+    output = tmp_path / "results.json"
+    trials = tmp_path / "trials.json"
 
     exit_code = _run_cli(
         "run",
         "--eval-set", str(tasks_file),
-        "--adapter", "tests.integration.test_cli_e2e.FlakyInfraAdapter",
-        "--graders", GRADER,
+        "--adapter", adapter,
+        "--graders", grader,
         "--baseline-check",
         "--baselines-file", str(baselines),
+        "--output", str(output),
+        "--save-trials", str(trials),
+        *(["--require-baselines"] if require_baselines else []),
     )
 
     captured = capsys.readouterr()
-    assert exit_code == 0
+    assert exit_code == 2
     assert "no gradable trials" in captured.err
     assert "2 skipped (no gradable trials)" in captured.out
+    assert "unevaluable" in captured.out.lower()
+    assert "rerun" in captured.err.lower()
+    assert "t-pass" in captured.err and "t-fail" in captured.err
+    assert "REGRESSION DETECTED" not in captured.out
+    assert json.loads(output.read_text())["total_trials"] == 2
+    assert len(TrialBatch.from_dict(json.loads(trials.read_text())).trials) == 2
+
+
+class CrashingGrader(ValueGrader):
+    """A broken grading harness, not a negative agent observation."""
+
+    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
+        raise ValueError("invalid grading rubric")
+
+
+class SomeTasksInfraAdapter(EchoAdapter):
+    async def run(self, task: Task) -> Transcript:
+        if task.task_id == "t-pass":
+            raise ConnectionError("connection refused")
+        return await super().run(task)
+
+
+class SomeTasksCrashingGrader(ValueGrader):
+    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
+        if task.task_id == "t-pass":
+            raise ValueError("invalid grading rubric")
+        return super().compute_metrics(transcript, task)
+
+
+class PartialInfraAdapter(EchoAdapter):
+    """Each task loses one trial but still has a valid comparison sample."""
+
+    def __init__(self) -> None:
+        self.seen: set[str] = set()
+
+    async def run(self, task: Task) -> Transcript:
+        if task.task_id not in self.seen:
+            self.seen.add(task.task_id)
+            raise ConnectionError("transient outage")
+        return await super().run(task)
+
+
+class SlowAdapter(EchoAdapter):
+    async def run(self, task: Task) -> Transcript:
+        await asyncio.sleep(60)
+        return await super().run(task)
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    ["tests.integration.test_cli_e2e.DiskFullAdapter", "tests.integration.test_cli_e2e.SlowAdapter"],
+)
+def test_agent_execution_failures_remain_regression_observations(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], adapter: str
+) -> None:
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.9})
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", adapter,
+        "--graders", GRADER, "--timeout", "0.01",
+        "--baseline-check", "--baselines-file", str(baselines),
+    ) == 1
+
+    captured = capsys.readouterr()
+    assert "2 checked" in captured.out
+    assert "REGRESSION DETECTED" in captured.out
+    assert "unevaluable" not in captured.out.lower()
+
+
+@pytest.mark.parametrize(
+    "adapter,grader",
+    [
+        ("tests.integration.test_cli_e2e.FlakyInfraAdapter", GRADER),
+        (ADAPTER, "tests.integration.test_cli_e2e.CrashingGrader"),
+    ],
+)
+def test_non_gated_harness_failures_keep_observational_exit_behavior(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str], adapter: str, grader: str
+) -> None:
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", adapter,
+        "--graders", grader,
+    ) == 0
+    assert "Baseline check:" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("regression", [False, True])
+@pytest.mark.parametrize(
+    "adapter,grader",
+    [
+        ("tests.integration.test_cli_e2e.SomeTasksInfraAdapter", GRADER),
+        (ADAPTER, "tests.integration.test_cli_e2e.SomeTasksCrashingGrader"),
+    ],
+)
+def test_other_task_results_cannot_hide_an_unevaluable_task(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    adapter: str, grader: str, regression: bool,
+) -> None:
+    baselines = _write_pass_baseline(
+        tmp_path, {"t-pass": 0.9, "t-fail": 0.9 if regression else 0.1}
+    )
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file),
+        "--adapter", adapter, "--graders", grader,
+        "--baseline-check", "--baselines-file", str(baselines),
+    ) == 2
+
+    captured = capsys.readouterr()
+    assert "1 checked" in captured.out
+    assert "1 skipped (no gradable trials)" in captured.out
+    assert "unevaluable" in captured.out.lower()
+    assert ("REGRESSION DETECTED" in captured.out) == regression
+
+
+@pytest.mark.parametrize("retry", [False, True])
+def test_partial_trial_loss_keeps_gradable_task_comparisons(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], retry: bool
+) -> None:
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.1})
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file),
+        "--adapter", "tests.integration.test_cli_e2e.PartialInfraAdapter",
+        "--graders", GRADER, "--num-runs", "1" if retry else "2",
+        "--max-infra-retries", "1" if retry else "0",
+        "--baseline-check", "--baselines-file", str(baselines),
+        "--require-baselines",
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert "2 checked" in captured.out
+    assert ("excluded 1" in captured.err) == (not retry)
+    assert "REGRESSION DETECTED" not in captured.out
+
+
+@pytest.mark.parametrize("case", ["empty-suite", "zero-runs", "empty-baselines", "unrelated-baselines"])
+def test_baseline_gate_requires_at_least_one_comparison(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str
+) -> None:
+    baseline_values = {"t-pass": 0.9, "t-fail": 0.1}
+    if case == "empty-suite":
+        tasks_file.write_text('{"tasks": []}')
+    elif case == "empty-baselines":
+        baseline_values = {}
+    elif case == "unrelated-baselines":
+        baseline_values = {"foreign-task": 0.9}
+    baselines = _write_pass_baseline(tmp_path, baseline_values)
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER, "--graders", GRADER,
+        "--num-runs", "0" if case == "zero-runs" else "1",
+        "--baseline-check", "--baselines-file", str(baselines),
+    ) == 2
+
+    captured = capsys.readouterr()
+    assert "0 checked" in captured.out
+    assert "unevaluable" in captured.out.lower()
+    assert "rerun" in captured.err.lower()
+
+
+@pytest.mark.parametrize("metric", [None, "domain_quality"])
+def test_task_without_comparable_baseline_metrics_invalidates_gate(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    metric: str | None,
+) -> None:
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9})
+    manager = BaselineManager(baselines)
+    baseline = TaskBaseline(task_id="t-fail")
+    if metric is not None:
+        baseline.add_metric(metric, 0.9)
+    manager.set_baseline(baseline)
+    manager.save()
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER, "--graders", GRADER,
+        "--baseline-check", "--baselines-file", str(baselines),
+    ) == 2
+
+    captured = capsys.readouterr()
+    assert "1 checked" in captured.out
+    assert "no comparable metrics" in captured.out
+    assert "t-fail" in captured.err
+    assert "pass_rate" in captured.err and "mean_score" in captured.err
+
+
+@pytest.mark.parametrize(
+    "adapter,grader,expected",
+    [
+        (ADAPTER, GRADER, 0),
+        (ADAPTER, GRADER, 1),
+        ("tests.integration.test_cli_e2e.FlakyInfraAdapter", GRADER, 2),
+        (ADAPTER, "tests.integration.test_cli_e2e.CrashingGrader", 2),
+    ],
+)
+def test_baseline_exit_contract_in_real_cli_process(
+    tasks_file: Path, tmp_path: Path, adapter: str, grader: str, expected: int
+) -> None:
+    baselines = _write_pass_baseline(
+        tmp_path, {"t-pass": 0.9, "t-fail": 0.9 if expected == 1 else 0.1}
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "tracelens.cli.main", "run",
+         "--eval-set", str(tasks_file), "--adapter", adapter, "--graders", grader,
+         "--baseline-check", "--baselines-file", str(baselines)],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True, text=True, timeout=30,
+    )
+
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Baseline check:" in result.stdout
 
 
 def test_corrupt_baselines_file_errors_before_running(

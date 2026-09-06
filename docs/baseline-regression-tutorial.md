@@ -211,8 +211,11 @@ If you run evals through the CLI, `tracelens run --baseline-check
 --baselines-file eval/baselines/baselines.json --fail-on-regression moderate`
 does this end to end. Exit codes: 0 = gate passed, 1 = gate blocked (a blocking
 regression, or `--require-baselines` with tasks missing baselines), 2 =
-misconfigured gate (no `--baselines-file`, or a missing/unparseable file —
-checked before the eval runs). The gate always prints a summary line
+misconfigured or unevaluable gate. Missing/unparseable baseline files are
+rejected before execution. After execution, zero checked tasks or any
+baseline-backed task with no gradable trials or comparable CLI metrics
+makes the gate `UNEVALUABLE` (exit 2), even if another task regressed.
+The gate always prints a summary line
 (`N checked, M skipped (no baseline), B blocking regression(s)`) plus per-task
 warnings for missing baselines.
 
