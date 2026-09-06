@@ -193,6 +193,14 @@ are never compared across silently different populations.
   never changes a reported number.
 - The method, effective sample unit, sample counts, `confidence`, `B`, and
   `seed` are recorded alongside any interval or verdict that is persisted.
+- Every run records a `RunProvenance` envelope: per-task content hashes,
+  grader identities, runner settings, and the candidate fingerprint. A
+  run-versus-run comparison is defined only over runs whose measurement side
+  is compatible (`check_compatibility`); tasks are aligned by content, never
+  by id alone, and a missing envelope makes compatibility *unknown*, not
+  assumed. The baseline gate applies the same rule per task through
+  `TaskBaseline.task_hash`. See
+  [Run provenance](reproducibility.md#run-provenance).
 
 ## Known deviations in the current code
 

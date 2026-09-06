@@ -9,6 +9,13 @@ from tracelens.baselines.comparison import RegressionSeverity
 from tracelens.baselines.manager import BaselineManager, TaskBaseline
 from tracelens.core.decision_spec import DecisionSpec, InfraConfig
 from tracelens.core.outcome import Outcome
+from tracelens.core.provenance import (
+    CandidateSpec,
+    ComponentIdentity,
+    MeasurementSetup,
+    RunnerSettings,
+    RunProvenance,
+)
 from tracelens.core.transcript import Transcript
 from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 from tracelens.reporting.gate import (
@@ -245,3 +252,103 @@ def test_gate_without_task_argument_uses_all_tasks(tmp_path):
     )
     assert gate.status in (GateStatus.PASSED, GateStatus.BLOCKED)
     assert pytest.approx(gate.noise_band) == 0.03
+
+
+class TestTaskContentIdentity:
+    """Issue #51: a baseline is compared only with the task content it was stored for."""
+
+    @staticmethod
+    def _manager_with_hashes(tmp_path: Path, hashes: dict[str, str]) -> BaselineManager:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        for task_id, task_hash in hashes.items():
+            baseline = TaskBaseline(task_id=task_id, task_hash=task_hash)
+            baseline.add_metric("pass_rate", 1.0, std=0.05, sample_size=10)
+            manager.set_baseline(baseline)
+        manager.save()
+        return manager
+
+    @staticmethod
+    def _provenance_for(task_hashes: dict[str, str]) -> RunProvenance:
+        return RunProvenance(
+            run_id="r",
+            measurement=MeasurementSetup(
+                eval_set_hash="e" * 64,
+                task_hashes=task_hashes,
+                runner=RunnerSettings(
+                    num_runs=1, max_concurrency=1, timeout_seconds=1.0, max_infra_retries=0
+                ),
+            ),
+            candidate=CandidateSpec(adapter=ComponentIdentity(class_path="x.A")),
+        )
+
+    def test_changed_task_content_makes_the_gate_unevaluable(self, tmp_path):
+        gate = evaluate_gate(
+            _batch(*_runs("t1", [True, True])),
+            self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
+            task_hashes={"t1": "b" * 64},
+        )
+        assert gate.status is GateStatus.UNEVALUABLE and gate.exit_code == 2
+        task = gate.tasks[0]
+        assert task.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
+        assert task.reason == (
+            "task content changed since the baseline was stored "
+            "(aaaaaaaaaaaa -> bbbbbbbbbbbb); re-store the baseline for this task"
+        )
+        assert gate.skipped_task_content_changed == 1 and gate.checked == 0
+        assert (
+            "1 task(s) whose content changed since their baseline was stored: t1"
+            in gate.reasons
+        )
+        assert "1 skipped (task content changed)" in gate.summary_line()
+
+    def test_matching_content_is_compared_normally(self, tmp_path):
+        gate = evaluate_gate(
+            _batch(*_runs("t1", [True, True])),
+            self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
+            task_hashes={"t1": "a" * 64},
+        )
+        assert gate.status is GateStatus.PASSED and gate.warnings == []
+
+    def test_unhashed_baseline_is_compared_with_a_warning(self, tmp_path):
+        gate = evaluate_gate(
+            _batch(*_runs("t1", [True, True])),
+            _manager(tmp_path, {"t1": {"pass_rate": 1.0}}),
+            task_hashes={"t1": "a" * 64},
+        )
+        assert gate.status is GateStatus.PASSED
+        assert gate.warnings == [
+            "1 baseline(s) carry no task_hash, so a change to their task content cannot "
+            "be detected: t1; re-store them from a results file that records provenance"
+        ]
+
+    def test_without_current_hashes_nothing_changes(self, tmp_path):
+        gate = evaluate_gate(
+            _batch(*_runs("t1", [True, True])),
+            self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
+        )
+        assert gate.status is GateStatus.PASSED and gate.warnings == []
+
+    def test_hashes_default_to_the_batch_provenance(self, tmp_path):
+        batch = _batch(*_runs("t1", [True, True]))
+        batch.provenance = self._provenance_for({"t1": "b" * 64})
+        gate = evaluate_gate(batch, self._manager_with_hashes(tmp_path, {"t1": "a" * 64}))
+        assert gate.tasks[0].outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
+
+    def test_content_change_makes_the_gate_unevaluable_even_with_a_regression(self, tmp_path):
+        manager = self._manager_with_hashes(tmp_path, {"t1": "a" * 64, "t2": "c" * 64})
+        gate = evaluate_gate(
+            _batch(*_runs("t1", [True, True]), *_runs("t2", [False, False])),
+            manager,
+            task_hashes={"t1": "b" * 64, "t2": "c" * 64},
+        )
+        assert gate.status is GateStatus.UNEVALUABLE and gate.exit_code == 2
+        assert gate.blocking_regressions == 1 and gate.skipped_task_content_changed == 1
+
+    def test_round_trip_keeps_the_new_count(self, tmp_path):
+        gate = evaluate_gate(
+            _batch(*_runs("t1", [True, True])),
+            self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
+            task_hashes={"t1": "b" * 64},
+        )
+        assert GateResult.from_dict(json.loads(json.dumps(gate.to_dict()))) == gate
+        assert GateResult.from_dict({"status": "passed"}).skipped_task_content_changed == 0

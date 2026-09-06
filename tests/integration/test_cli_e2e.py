@@ -1178,6 +1178,23 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     assert cmd_run(build_parser().parse_args(run)) == 0
     assert json.loads(results.read_text())["gate"]["status"] == "passed"
 
+    # The README's baseline snippet stored each task's content hash, so a
+    # task edited after baselining is not compared by id: the gate refuses
+    # (unevaluable, exit 2) until that baseline is re-stored.
+    stored = json.loads((project / "eval/baselines.json").read_text())
+    assert all(entry["task_hash"] for entry in stored.values())
+    tasks_json = project / "eval/tasks.json"
+    tasks = json.loads(tasks_json.read_text())
+    tasks["tasks"][0]["input_data"]["question"] = "What is the capital of Spain?"
+    tasks_json.write_text(json.dumps(tasks, indent=2))
+    capsys.readouterr()
+    assert cmd_run(build_parser().parse_args(run)) == 2
+    data = json.loads(results.read_text())
+    assert data["gate"]["status"] == "unevaluable"
+    assert data["gate"]["skipped_task_content_changed"] == 1
+    captured = capsys.readouterr()
+    assert "task content changed" in captured.out + captured.err
+
 
 # --- Issue #50: JSONL and CSV eval sets through the CLI ----------------------
 
@@ -1466,3 +1483,39 @@ def test_config_gate_outcomes_in_a_real_process(
     assert "Baseline check:" in result.stdout
     gate = json.loads((tmp_path / "out/results.json").read_text())["gate"]
     assert gate["status"] == scenario and gate["exit_code"] == expected
+
+
+# --- Issue #51: run provenance in saved artifacts -----------------------------
+
+
+def test_results_and_trials_carry_provenance_and_report_rerenders_it(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "results.json"
+    trials = tmp_path / "trials.json"
+    md = tmp_path / "report.md"
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--num-runs", "2", "--output", str(out), "--save-trials", str(trials),
+        "--report", str(md),
+    ) == 0
+    results = json.loads(out.read_text())
+    prov = results["provenance"]
+    assert prov["schema_version"] == 1
+    assert prov["measurement"]["eval_set_name"] == "tasks"
+    assert set(prov["measurement"]["task_hashes"]) == {"t-pass", "t-fail"}
+    assert prov["measurement"]["graders"] == [
+        {"class_path": GRADER, "name": "value_grader", "version": None}
+    ]
+    assert prov["measurement"]["runner"]["num_runs"] == 2
+    assert prov["candidate"]["adapter"]["class_path"] == ADAPTER
+    assert prov["candidate"]["decision_spec_fingerprint"] is None
+    hashes = prov["measurement"]["task_hashes"]
+    assert all(s["task_hash"] == hashes[s["task_id"]] for s in results["task_summaries"])
+    assert json.loads(trials.read_text())["provenance"] == prov
+    assert "## Run Provenance" in md.read_text()
+
+    capsys.readouterr()
+    args = build_parser().parse_args(["report", "--results", str(out), "--format", "json"])
+    assert cmd_report(args) == 0
+    assert json.loads(capsys.readouterr().out)["provenance"] == prov

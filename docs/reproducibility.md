@@ -232,6 +232,106 @@ spec when one isn't passed, and promotion refreshes the stored spec (archiving
 the previous one in `previous_versions`) so it can't drift from the fingerprint.
 The stored spec is what enables the infra-noise-aware comparison below.
 
+## Run provenance
+
+A fingerprint says which *candidate* ran. A comparison also needs to know that
+both runs measured the same thing. Every `EvaluationRunner.run()` therefore
+records a `RunProvenance` envelope on the batch (`batch.provenance`), and
+`tracelens run` writes it into the results JSON (`provenance`), the trials JSON,
+and the Markdown and HTML reports ("Run Provenance"). Illustrative shape:
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "…",
+  "tracelens_version": "…",
+  "started_at": "…",
+  "completed_at": "…",
+  "measurement": {
+    "eval_set_name": "tasks",
+    "eval_set_hash": "…",
+    "task_hashes": {"math-add": "…", "math-divide": "…"},
+    "graders": [{"class_path": "eval.grader.MyGrader", "name": "quality", "version": "rubric-v4"}],
+    "runner": {"num_runs": 3, "max_concurrency": 5, "timeout_seconds": 300.0,
+               "max_infra_retries": 0, "infra_exception_types": ["…"]}
+  },
+  "candidate": {
+    "adapter": {"class_path": "eval.adapter.MyAdapter", "name": null, "version": null},
+    "decision_spec_fingerprint": "…",
+    "decision_spec": {"…": "…"}
+  }
+}
+```
+
+The two halves answer different questions:
+
+- **`measurement`** is the instrument: which task content ran (a SHA-256
+  content hash per task and one for the set), which graders, and the runner
+  settings. Two runs are *comparable* only when this side matches.
+- **`candidate`** is the thing under test: the adapter's identity and the
+  `DecisionSpec` fingerprint. This side is *expected* to differ between the two
+  runs of a comparison; recording it lets a report say what changed.
+
+Hashing rule: a value is serialized as JSON with sorted keys and hashed with
+SHA-256. A task's hash covers every `Task` field, so a task whose input,
+expectation, metadata, tags, difficulty, category, or timeout changed gets a
+new hash even if its id did not; the eval-set hash covers the tasks sorted by
+id, so task order never matters. Checkpoint identity uses the same hash.
+Identities are declared class paths plus an optional `provenance_version`
+string attribute an adapter or grader class may define:
+
+```python
+class MyGrader(CodeGrader):
+    provenance_version = "rubric-v4"   # bump when the rubric changes
+```
+
+Nothing else is serialized: no object state, no credentials, and no prompt
+text unless the `DecisionSpec` itself stores it.
+
+**Comparing two runs.** `check_compatibility(a, b)` takes two envelopes (either
+may be `None`) and returns a `CompatibilityReport`:
+
+```python
+import json
+
+from tracelens import TrialBatch, check_compatibility
+
+a = TrialBatch.from_dict(json.load(open("baseline-trials.json")))
+b = TrialBatch.from_dict(json.load(open("candidate-trials.json")))
+report = check_compatibility(a.provenance, b.provenance)
+print(report.summary_line())
+# Measurement compatibility: compatible; 40 shared task(s), same graders; candidate changed (model)
+```
+
+- `compatible`: same task content, same graders. Runner-setting and TraceLens
+  version differences are listed in `report.notes`, not treated as
+  incompatibility.
+- `incompatible`: `report.reasons` names the tasks whose content changed, were
+  added, or were removed (`report.tasks.changed`, `only_in_a`, `only_in_b`), or
+  the grader difference. Tasks are never matched on id alone.
+- `unknown`: one side has no provenance (an artifact written before it was
+  recorded, or by another producer). Nothing is assumed.
+
+`report.candidate_changed` and `report.candidate_diff` (from
+`DecisionSpec.diff`) describe the thing under test. They support *attributing*
+an outcome change to a declared difference; they are not proof that two runs
+executed identical code, nor proof of cause. The planned `tracelens compare`
+(issue #28) builds on this check.
+
+**Baselines.** The results JSON carries each task's hash as
+`task_summaries[].task_hash`. Store it on the baseline
+(`TaskBaseline(task_id=..., task_hash=...)`, `update_baseline(...,
+task_hash=...)`, or `promote(..., task_hash=...)`) and `tracelens run
+--baseline-check` compares that task only while its content still matches. A
+task edited after baselining makes the gate *unevaluable* (exit 2, task
+outcome `task_content_changed`) until its baseline is re-stored; baselines
+without a hash are compared as before, with a warning that names them.
+
+**Legacy artifacts and versions.** Files written before provenance existed
+load with `provenance=None`; nothing is invented for them. An envelope whose
+`schema_version` this TraceLens does not know is rejected with a clear error
+rather than misread.
+
 ## Infra-noise-aware regression
 
 Because `InfraConfig` is part of the fingerprint, the regression detector can tell

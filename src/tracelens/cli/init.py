@@ -182,7 +182,8 @@ request on a regression.
    results = json.loads(Path("eval/results/results.json").read_text())
    manager = BaselineManager("eval/baselines.json")
    for task in results["task_summaries"]:
-       baseline = TaskBaseline(task_id=task["task_id"])
+       # task_hash lets the gate refuse to compare a task whose content changed
+       baseline = TaskBaseline(task_id=task["task_id"], task_hash=task.get("task_hash"))
        baseline.add_metric(
            "pass_rate", task["pass_rate"], std=0.05, sample_size=task["num_trials"]
        )

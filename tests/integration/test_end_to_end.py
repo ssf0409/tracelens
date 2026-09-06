@@ -98,7 +98,8 @@ class TestEndToEnd:
 
         # Markdown rendering
         md = gen.render_markdown(report)
-        assert "Math Suite" not in md  # It's "Evaluation Report" not suite name
+        assert md.startswith("# Evaluation Report")  # the title is not the suite name
+        assert "- **Eval set**: Math Suite, 3 task(s)" in md  # provenance names it
         assert "add-1" in md
         assert "add-wrong" in md
 

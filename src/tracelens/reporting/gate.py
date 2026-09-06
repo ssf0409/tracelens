@@ -26,7 +26,7 @@ counted as excluded.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -40,6 +40,7 @@ from tracelens.baselines.comparison import (
 )
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.decision_spec import DecisionSpec
+from tracelens.core.provenance import short_hash
 from tracelens.core.trial import Trial, TrialBatch
 
 
@@ -59,6 +60,7 @@ class TaskGateOutcome(StrEnum):
     NO_BASELINE = "no_baseline"
     NO_GRADABLE_TRIALS = "no_gradable_trials"
     NO_COMPARABLE_METRICS = "no_comparable_metrics"
+    TASK_CONTENT_CHANGED = "task_content_changed"
 
 
 EXIT_CODES: dict[GateStatus, int] = {
@@ -216,6 +218,7 @@ class GateResult:
     skipped_no_baseline: int = 0
     skipped_no_gradable: int = 0
     skipped_no_comparable_metrics: int = 0
+    skipped_task_content_changed: int = 0
     blocking_regressions: int = 0
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -245,6 +248,10 @@ class GateResult:
             parts.append(
                 f"{self.skipped_no_comparable_metrics} skipped (no comparable metrics)"
             )
+        if self.skipped_task_content_changed:
+            parts.append(
+                f"{self.skipped_task_content_changed} skipped (task content changed)"
+            )
         parts.append(f"{self.blocking_regressions} blocking regression(s)")
         if self.status is GateStatus.UNEVALUABLE:
             parts.append("UNEVALUABLE")
@@ -261,6 +268,7 @@ class GateResult:
             "skipped_no_baseline": self.skipped_no_baseline,
             "skipped_no_gradable": self.skipped_no_gradable,
             "skipped_no_comparable_metrics": self.skipped_no_comparable_metrics,
+            "skipped_task_content_changed": self.skipped_task_content_changed,
             "blocking_regressions": self.blocking_regressions,
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
@@ -280,6 +288,7 @@ class GateResult:
             skipped_no_baseline=int(data.get("skipped_no_baseline", 0)),
             skipped_no_gradable=int(data.get("skipped_no_gradable", 0)),
             skipped_no_comparable_metrics=int(data.get("skipped_no_comparable_metrics", 0)),
+            skipped_task_content_changed=int(data.get("skipped_task_content_changed", 0)),
             blocking_regressions=int(data.get("blocking_regressions", 0)),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),
@@ -296,6 +305,7 @@ def evaluate_gate(
     require_baselines: bool = False,
     decision_spec: DecisionSpec | None = None,
     task_ids: Sequence[str] | None = None,
+    task_hashes: Mapping[str, str] | None = None,
 ) -> GateResult:
     """Compare a run against stored baselines and decide the gate.
 
@@ -310,6 +320,11 @@ def evaluate_gate(
             adapter-stamped transcripts per task.
         task_ids: Tasks to consider, in order. Defaults to every task in the
             batch, sorted.
+        task_hashes: Content hash per task for the current run. Defaults to
+            the batch's recorded provenance. A baseline that stores a
+            ``task_hash`` is compared only when it matches; a task whose
+            content changed since its baseline is never silently compared
+            by id, it makes the gate unevaluable until re-baselined.
 
     Returns:
         A :class:`GateResult` with one :class:`TaskGateResult` per task.
@@ -319,6 +334,11 @@ def evaluate_gate(
     for trial in batch.trials:
         trials_by_task.setdefault(trial.task_id, []).append(trial)
     ordered = list(task_ids) if task_ids is not None else sorted(trials_by_task)
+    if task_hashes is None:
+        task_hashes = (
+            batch.provenance.measurement.task_hashes if batch.provenance is not None else {}
+        )
+    unhashed_baselines: list[str] = []
 
     tasks: list[TaskGateResult] = []
     warnings: list[str] = []
@@ -336,6 +356,21 @@ def evaluate_gate(
                 excluded_trials=excluded,
             ))
             continue
+        current_hash = task_hashes.get(task_id)
+        if baseline.task_hash and current_hash and baseline.task_hash != current_hash:
+            tasks.append(TaskGateResult(
+                task_id=task_id,
+                outcome=TaskGateOutcome.TASK_CONTENT_CHANGED,
+                reason=(
+                    "task content changed since the baseline was stored "
+                    f"({short_hash(baseline.task_hash)} -> {short_hash(current_hash)}); "
+                    "re-store the baseline for this task"
+                ),
+                excluded_trials=excluded,
+            ))
+            continue
+        if current_hash and not baseline.task_hash:
+            unhashed_baselines.append(task_id)
         if not current_results:
             tasks.append(TaskGateResult(
                 task_id=task_id,
@@ -388,13 +423,27 @@ def evaluate_gate(
     no_baseline = [t for t in tasks if t.outcome is TaskGateOutcome.NO_BASELINE]
     no_gradable = [t for t in tasks if t.outcome is TaskGateOutcome.NO_GRADABLE_TRIALS]
     no_comparable = [t for t in tasks if t.outcome is TaskGateOutcome.NO_COMPARABLE_METRICS]
+    content_changed = [
+        t for t in tasks if t.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
+    ]
     blocking = [t for t in checked if t.blocking]
+    if unhashed_baselines:
+        warnings.append(
+            f"{len(unhashed_baselines)} baseline(s) carry no task_hash, so a change to "
+            "their task content cannot be detected: " + ", ".join(unhashed_baselines)
+            + "; re-store them from a results file that records provenance"
+        )
 
     reasons: list[str] = []
-    if not checked or no_gradable or no_comparable:
+    if not checked or no_gradable or no_comparable or content_changed:
         status = GateStatus.UNEVALUABLE
         if not checked:
             reasons.append("no task could be compared against a baseline")
+        if content_changed:
+            reasons.append(
+                f"{len(content_changed)} task(s) whose content changed since their "
+                "baseline was stored: " + ", ".join(t.task_id for t in content_changed)
+            )
         if no_gradable:
             reasons.append(
                 f"{len(no_gradable)} task(s) with no gradable trials: "
@@ -438,6 +487,7 @@ def evaluate_gate(
         skipped_no_baseline=len(no_baseline),
         skipped_no_gradable=len(no_gradable),
         skipped_no_comparable_metrics=len(no_comparable),
+        skipped_task_content_changed=len(content_changed),
         blocking_regressions=len(blocking),
         reasons=reasons,
         warnings=warnings,

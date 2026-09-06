@@ -71,6 +71,12 @@ from tracelens.core.grader import (
     LLMGrader,
 )
 from tracelens.core.outcome import GradeLevel, Outcome
+from tracelens.core.provenance import (
+    Compatibility,
+    CompatibilityReport,
+    RunProvenance,
+    check_compatibility,
+)
 from tracelens.core.task import (
     EvalSet,
     JSONTaskLoader,
@@ -229,6 +235,10 @@ __all__ = [
     # --- Reporting ---
     "ReportGenerator",
     "ReportData",
+    "RunProvenance",
+    "CompatibilityReport",
+    "Compatibility",
+    "check_compatibility",
     "TaskSummary",
     # --- Statistics ---
     "pass_at_k",

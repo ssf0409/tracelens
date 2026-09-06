@@ -197,7 +197,7 @@ every output: the exit code, the summary on stdout, and a `gate` object in the
 | `not_requested` | 0 | The run had no `--baseline-check`. | Nothing; no gate was evaluated. |
 | `passed` | 0 | At least one task was compared and nothing blocked. | Merge. |
 | `blocked` | 1 | A regression at or above `--fail-on-regression`, or `--require-baselines` with a task that has no baseline. | Read the regression table, decide whether the change is acceptable, then fix the agent or promote the baseline. |
-| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials or no comparable metric. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons, then rerun. |
+| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials, no comparable metric, or content that changed since its baseline was stored. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons (re-store the baseline of an edited task), then rerun. |
 
 A misconfigured gate (missing `--baselines-file`, an unreadable baselines
 file, or a gate-only flag without `--baseline-check`) also exits 2, before
@@ -221,6 +221,7 @@ The `gate` object in `results.json` (abridged):
   "skipped_no_baseline": 0,
   "skipped_no_gradable": 0,
   "skipped_no_comparable_metrics": 0,
+  "skipped_task_content_changed": 0,
   "blocking_regressions": 1,
   "reasons": ["1 blocking regression(s) at threshold 'moderate': t-fail (severe)"],
   "tasks": [
@@ -241,8 +242,14 @@ The `gate` object in `results.json` (abridged):
 ```
 
 Each task's `outcome` is one of `checked`, `no_baseline`,
-`no_gradable_trials`, or `no_comparable_metrics`, with a `reason` when it
-was not checked. To look at a saved decision again:
+`no_gradable_trials`, `no_comparable_metrics`, or `task_content_changed`,
+with a `reason` when it was not checked. The last one means the task's
+content hash (recorded in the run's [provenance](reproducibility.md#run-provenance)
+and as `task_summaries[].task_hash`) no longer matches the `task_hash` stored
+on its baseline: a task edited after baselining is never compared by id
+alone. Re-store that baseline to clear it; baselines without a `task_hash`
+are compared as before, with a warning naming them. To look at a saved
+decision again:
 
 ```bash
 tracelens report --results eval/results/results.json --format markdown
@@ -338,6 +345,13 @@ baseline.add_metric(
 manager.set_baseline(baseline)
 manager.save()
 ```
+
+When the values come from a results file, also store the task's content hash
+(`TaskBaseline(..., task_hash=summary["task_hash"])` from
+`task_summaries[]`, or `update_baseline(..., task_hash=...)`). The gate then
+compares that task only while its content still matches and refuses, rather
+than silently matching on id, once the task is edited; see
+[Run provenance](reproducibility.md#run-provenance).
 
 Use canary baselines for protected floors that must not auto-promote:
 

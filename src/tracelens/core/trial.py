@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from tracelens.core.outcome import Outcome
+from tracelens.core.provenance import RunProvenance
 from tracelens.core.transcript import Transcript
 
 
@@ -271,6 +272,12 @@ class TrialBatch(BaseModel):
     # Execution tracking
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+    # What was measured (task content, graders, runner settings) and which
+    # candidate was under test; recorded by ``EvaluationRunner``. ``None``
+    # for batches built by hand or loaded from artifacts written before
+    # provenance existed: nothing is invented for them.
+    provenance: RunProvenance | None = None
 
     @property
     def total_count(self) -> int:
