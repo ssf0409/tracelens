@@ -18,6 +18,7 @@ spec.loader.exec_module(module)
 ReleaseError = module.ReleaseError
 prepare = module.prepare
 parse_version = module.parse_version
+split_unreleased = module.split_unreleased
 
 CHANGELOG = """\
 # Changelog
@@ -112,6 +113,16 @@ class TestCommandLine:
         assert self._run("--version", "0.5.0", "--date", "yesterday", cwd=tmp_path).returncode == 2
         assert self._run("--version", "0.5.0", "--changelog", "missing.md", cwd=tmp_path).returncode == 2
 
-    def test_real_changelog_is_releasable_right_now(self):
-        result = self._run("--version", "0.5.0", "--check", cwd=SCRIPT.parents[1])
-        assert result.returncode == 0, result.stderr
+    def test_real_changelog_is_well_formed_in_every_release_state(self):
+        # With entries under [Unreleased] a check succeeds; right after a
+        # release the section is empty and the only acceptable refusal is
+        # "nothing to release". Anything else means the changelog is broken.
+        repo = SCRIPT.parents[1]
+        _, unreleased, tail = split_unreleased((repo / "CHANGELOG.md").read_text(encoding="utf-8"))
+        assert tail.startswith("## ["), "a dated section must follow [Unreleased]"
+        result = self._run("--version", "999.0.0", "--check", cwd=repo)
+        if unreleased.strip():
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.startswith("ok: 999.0.0 would release")
+        else:
+            assert result.returncode == 1 and "nothing to release" in result.stderr
