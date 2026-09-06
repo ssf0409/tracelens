@@ -10,6 +10,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **pass^k no longer depends on trial completion order.** The runner appends
+  trials as they finish, and `TrialBatch.get_pass_results_by_task()` returned
+  them in that order, so the consecutive-window pass^k changed with
+  concurrency timing and checkpoint resumes: run-index outcomes
+  `[T, T, F, F]` reported pass^2 = 1/3 when trials finished in order and 0
+  when they finished in order 0, 2, 3, 1. Results are now ordered by
+  `run_index`. New `TrialBatch.get_pass_sequences_by_task()` returns
+  run-indexed sequences with `None` for missing runs; `pass_to_k`,
+  `pass_to_k_estimator`, and `ConsistencyAnalyzer` accept them, a window
+  that would span a gap is not counted, and a task with no complete window
+  is ineligible at that `k`. Reports use these sequences for pass^k. Two
+  trials sharing a `(task_id, run_index)` now raise `ValueError` instead of
+  producing an ambiguous sequence, and `pass_to_k` rejects `k < 1`. The
+  `consistency.py` docstring examples that claimed
+  `pass_to_k([T, T, F, T, T], 3) == 0.333` are corrected to `0.0`. pass@k
+  is order-invariant and unaffected. (#45)
 - **pass@k bootstrap intervals preserve repeated task draws.**
   `PassAtKAnalyzer.compute_confidence_interval` and `analyze_with_ci`
   resampled task IDs with replacement but collected them into a dict keyed

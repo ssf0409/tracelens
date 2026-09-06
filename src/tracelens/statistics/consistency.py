@@ -1,63 +1,120 @@
 """pass^k (consistency) metric implementation.
 
-pass^k measures the probability that ALL of k consecutive samples pass.
-Higher values indicate more reliable/consistent performance.
+pass^k is the fraction of windows of k consecutive runs in which every run
+passed. Higher values indicate more reliable/consistent performance.
 
 This is a reliability metric - it answers "is the agent consistent?"
-Higher k values require more consecutive successes, so pass^k decreases with k.
+Higher k values require longer streaks, so pass^k decreases with k.
+
+Two properties matter for reading it correctly:
+
+- It is a *consecutive-window* statistic over the run sequence, not
+  ``pass_rate ** k`` and not an estimate of the probability that k
+  independent attempts all succeed. Order matters: ``[T, T, F, F]`` and
+  ``[T, F, T, F]`` have the same pass rate but different pass^2.
+- The sequence must therefore be in ``run_index`` order, never in the order
+  trials happened to finish. ``TrialBatch.get_pass_sequences_by_task``
+  provides run-ordered sequences with ``None`` marking a missing run; a
+  window that would span a gap is not counted.
+
+See ``docs/statistical-contract.md`` for the full contract.
 """
+
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+PassSequence = Sequence[bool | None]
+"""Pass/fail outcomes in run order; ``None`` marks a missing or excluded run."""
 
-def pass_to_k(results: list[bool], k: int) -> float:
-    """Calculate pass^k (consistency) metric.
 
-    Measures the proportion of k-length windows where all samples pass.
-    A sliding window approach is used.
+def _window_counts(results: PassSequence, k: int) -> tuple[int, int]:
+    """Return ``(consistent_windows, complete_windows)`` for length-k windows.
+
+    A window is *complete* when none of its entries is ``None``. Only
+    complete windows are counted, in the numerator and denominator alike,
+    so runs on either side of a gap are never treated as consecutive.
+    """
+    n = len(results)
+    if n < k:
+        return 0, 0
+    consistent = 0
+    complete = 0
+    for i in range(n - k + 1):
+        window = results[i : i + k]
+        if any(r is None for r in window):
+            continue
+        complete += 1
+        if all(window):
+            consistent += 1
+    return consistent, complete
+
+
+def _check_k(k: int) -> None:
+    if k < 1:
+        raise ValueError(f"k must be at least 1, got {k!r}")
+
+
+def pass_to_k(results: PassSequence, k: int) -> float:
+    """Calculate pass^k (consistency) for one run sequence.
+
+    ``results`` must be in run order (``run_index`` ascending). ``None``
+    marks a run that is missing or excluded; windows that would include it
+    are not counted.
 
     Args:
-        results: List of pass/fail booleans from multiple runs
-        k: Number of consecutive passes required
+        results: Pass/fail booleans in run order, ``None`` for a missing run
+        k: Number of consecutive passes required (at least 1)
 
     Returns:
-        Proportion of k-length windows where all samples pass (0.0 to 1.0)
+        Fraction of complete k-length windows in which every run passed
+        (0.0 to 1.0). Returns 0.0 when no complete window exists (fewer
+        than k runs, or a gap in every window). The statistical contract
+        treats that case as "unavailable"; the explicit N/A representation
+        is tracked in issue #46.
+
+    Raises:
+        ValueError: If ``k`` is less than 1.
 
     Example:
         >>> pass_to_k([True, True, True, True, True], 3)
-        1.0  # All windows of 3 pass
+        1.0  # all 3 windows pass
 
         >>> pass_to_k([True, True, False, True, True], 3)
-        0.333...  # Only 1 of 3 windows passes
+        0.0  # windows TTF, TFT, FTT: none is all-pass
+
+        >>> pass_to_k([True, True, False, True, True], 2)
+        0.5  # windows TT, TF, FT, TT: 2 of 4 pass
+
+        >>> pass_to_k([True, True, None, True, True], 2)
+        1.0  # windows spanning the gap are not counted; TT and TT remain
     """
-    if len(results) < k:
-        return 0.0
-
-    n_windows = len(results) - k + 1
-    consistent_windows = 0
-
-    for i in range(n_windows):
-        if all(results[i:i + k]):
-            consistent_windows += 1
-
-    return consistent_windows / n_windows
+    _check_k(k)
+    consistent, complete = _window_counts(results, k)
+    return consistent / complete if complete else 0.0
 
 
 def pass_to_k_estimator(
-    results_per_task: dict[str, list[bool]],
+    results_per_task: Mapping[str, PassSequence],
     k: int,
 ) -> float:
-    """Compute pass^k (consistency) across multiple tasks.
+    """Compute suite pass^k: the mean of per-task pass^k over eligible tasks.
 
-    For each task with enough samples, computes pass^k.
-    Returns the average pass^k across all eligible tasks.
+    A task is eligible when its run sequence contains at least one complete
+    window of length k (at least k runs, with no gap inside the window).
+    Ineligible tasks are dropped from the mean; explicit eligible/total
+    counts are tracked in issue #46.
 
     Args:
-        results_per_task: Dict mapping task_id to list of pass/fail booleans
-        k: Number of consecutive passes required
+        results_per_task: Dict mapping task_id to its pass/fail sequence in
+            run order (``None`` for a missing run)
+        k: Number of consecutive passes required (at least 1)
 
     Returns:
-        Average pass^k across all tasks with >= k samples
+        Mean pass^k over eligible tasks, or 0.0 when no task is eligible.
+
+    Raises:
+        ValueError: If ``k`` is less than 1.
 
     Example:
         >>> results = {
@@ -65,17 +122,14 @@ def pass_to_k_estimator(
         ...     "task2": [True, True, False, True, True],
         ... }
         >>> pass_to_k_estimator(results, k=3)
-        0.666...  # task1: 1.0, task2: 0.333
+        0.5  # task1: 1.0, task2: 0.0 (no all-pass window of 3)
     """
-    if not results_per_task:
-        return 0.0
-
+    _check_k(k)
     scores = []
-
-    for task_id, results in results_per_task.items():
-        if len(results) >= k:
-            scores.append(pass_to_k(results, k))
-
+    for results in results_per_task.values():
+        consistent, complete = _window_counts(results, k)
+        if complete:
+            scores.append(consistent / complete)
     return float(np.mean(scores)) if scores else 0.0
 
 
@@ -83,10 +137,12 @@ class ConsistencyAnalyzer:
     """Analyzer for pass^k consistency metrics.
 
     Computes pass^k for multiple k values and provides reliability scoring.
+    All methods take run-ordered sequences (see :data:`PassSequence`), as
+    produced by ``TrialBatch.get_pass_sequences_by_task``.
 
     Example:
         analyzer = ConsistencyAnalyzer(k_values=[2, 3, 5])
-        results = analyzer.analyze(pass_results_by_task)
+        results = analyzer.analyze(pass_sequences_by_task)
         print(results)  # {"pass^2": 0.8, "pass^3": 0.6, "pass^5": 0.3}
     """
 
@@ -100,12 +156,13 @@ class ConsistencyAnalyzer:
 
     def analyze(
         self,
-        results_per_task: dict[str, list[bool]],
+        results_per_task: Mapping[str, PassSequence],
     ) -> dict[str, float]:
         """Compute pass^k for multiple k values.
 
         Args:
-            results_per_task: Dict mapping task_id to list of pass/fail booleans
+            results_per_task: Dict mapping task_id to its run-ordered
+                pass/fail sequence
 
         Returns:
             Dict mapping "pass^k" to computed value
@@ -117,7 +174,7 @@ class ConsistencyAnalyzer:
 
     def compute_reliability_score(
         self,
-        results_per_task: dict[str, list[bool]],
+        results_per_task: Mapping[str, PassSequence],
     ) -> float:
         """Compute overall reliability score.
 
@@ -126,7 +183,8 @@ class ConsistencyAnalyzer:
         reliable/consistent performance.
 
         Args:
-            results_per_task: Dict mapping task_id to list of pass/fail booleans
+            results_per_task: Dict mapping task_id to its run-ordered
+                pass/fail sequence
 
         Returns:
             Weighted reliability score (0.0 to 1.0)
@@ -149,7 +207,7 @@ class ConsistencyAnalyzer:
 
     def compute_stability_metrics(
         self,
-        results_per_task: dict[str, list[bool]],
+        results_per_task: Mapping[str, PassSequence],
     ) -> dict[str, float]:
         """Compute additional stability metrics.
 
@@ -157,23 +215,22 @@ class ConsistencyAnalyzer:
             Dict with:
             - "pass^k" values for each k
             - "reliability_score": weighted combination
-            - "failure_rate": proportion of failed trials
-            - "longest_streak": average longest passing streak per task
+            - "failure_rate": failed share of observed runs (gaps not counted)
+            - "avg_longest_streak": mean longest passing streak per task (a gap breaks it)
         """
         metrics = self.analyze(results_per_task)
         metrics["reliability_score"] = self.compute_reliability_score(results_per_task)
 
-        # Compute failure rate
-        all_results = []
-        for results in results_per_task.values():
-            all_results.extend(results)
-
-        if all_results:
-            metrics["failure_rate"] = 1.0 - (sum(all_results) / len(all_results))
+        # Failure rate over observed runs only.
+        observed = [
+            r for results in results_per_task.values() for r in results if r is not None
+        ]
+        if observed:
+            metrics["failure_rate"] = 1.0 - (sum(observed) / len(observed))
         else:
             metrics["failure_rate"] = 1.0
 
-        # Compute average longest streak
+        # Average longest streak; False and None both reset the streak.
         streaks = []
         for results in results_per_task.values():
             longest = 0
