@@ -9,7 +9,9 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
+import traceback
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -52,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tracelens",
         description="Evaluation framework for AI agents",
+        epilog=(
+            "Exit codes: 0 = success (or the gate passed); 1 = a negative result "
+            "(a blocked gate, a calibration below threshold); 2 = a usage, "
+            "configuration, or input error, or a gate that could not be "
+            "evaluated. Set TRACELENS_DEBUG=1 or pass --debug for tracebacks."
+        ),
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Print full tracebacks for input and configuration errors",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -316,6 +328,36 @@ def _print_gate_diagnostics(gate: GateResult) -> None:
             )
 
 
+def debug_enabled(args: argparse.Namespace) -> bool:
+    """Whether tracebacks should accompany expected-error messages."""
+    return bool(getattr(args, "debug", False)) or bool(os.environ.get("TRACELENS_DEBUG"))
+
+
+def usage_error(
+    message: str,
+    *,
+    hint: str | None = None,
+    exc: BaseException | None = None,
+    debug: bool = False,
+) -> int:
+    """Print a concise usage/input error to stderr and return exit code 2.
+
+    Expected errors (a missing file, an unimportable class, an invalid value)
+    are reported in one or two lines. The traceback is printed only with
+    ``--debug`` / ``TRACELENS_DEBUG=1`` so a misconfiguration never looks like
+    a crash, while a genuine programming failure stays diagnosable.
+    """
+    print(f"Error: {message}", file=sys.stderr)
+    if hint:
+        print(f"  {hint}", file=sys.stderr)
+    if exc is not None:
+        if debug:
+            traceback.print_exception(exc, file=sys.stderr)
+        else:
+            print("  (run with --debug for the full traceback)", file=sys.stderr)
+    return 2
+
+
 def _write_output(path: str, content: str) -> None:
     """Write one output file, creating parent directories."""
     target = Path(path)
@@ -323,8 +365,26 @@ def _write_output(path: str, content: str) -> None:
     target.write_text(content)
 
 
+def _validate_run_parameters(args: argparse.Namespace) -> str | None:
+    """Return a usage-error message for an impossible run configuration."""
+    if args.num_runs < 1:
+        return f"--num-runs must be at least 1 (got {args.num_runs})"
+    if args.max_concurrency < 1:
+        return f"--max-concurrency must be at least 1 (got {args.max_concurrency})"
+    if args.timeout <= 0:
+        return f"--timeout must be a positive number of seconds (got {args.timeout})"
+    if args.max_infra_retries < 0:
+        return f"--max-infra-retries cannot be negative (got {args.max_infra_retries})"
+    return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute the 'run' subcommand."""
+    debug = debug_enabled(args)
+    invalid = _validate_run_parameters(args)
+    if invalid:
+        return usage_error(invalid)
+
     # Gate preflight — a misconfigured baseline check must fail before any
     # eval time is spent, never silently skip (exit 2 = usage error, so CI
     # can tell "misconfigured gate" apart from "gate blocked" exit 1).
@@ -418,32 +478,34 @@ def cmd_run(args: argparse.Namespace) -> int:
             metadata_fields=args.metadata_fields,
         )
     except EvalSetLoadError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
+        return usage_error(str(exc), exc=exc, debug=debug)
     eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
 
-    # Load adapter and graders
+    # Load adapter and graders (usage error -> exit 2, before any agent call)
+    import_hint = (
+        "Use a dotted path (package.module.ClassName) and run from the project "
+        "root so the module is importable; the class must accept no constructor "
+        "arguments."
+    )
     try:
         adapter_cls = load_class(args.adapter)
         adapter: AgentAdapter = adapter_cls()
-    except (ImportError, AttributeError) as exc:
-        print(
-            f"Error: could not load adapter '{args.adapter}': {exc}",
-            file=sys.stderr,
+    except (ImportError, AttributeError, TypeError) as exc:
+        return usage_error(
+            f"could not load adapter '{args.adapter}': {exc}",
+            hint=import_hint, exc=exc, debug=debug,
         )
-        return 1
 
     graders = []
     for grader_path in args.graders:
         try:
             grader_cls = load_class(grader_path)
             graders.append(grader_cls())
-        except (ImportError, AttributeError) as exc:
-            print(
-                f"Error: could not load grader '{grader_path}': {exc}",
-                file=sys.stderr,
+        except (ImportError, AttributeError, TypeError) as exc:
+            return usage_error(
+                f"could not load grader '{grader_path}': {exc}",
+                hint=import_hint, exc=exc, debug=debug,
             )
-            return 1
 
     # Build runner config
     def _print_progress(done: int, total: int) -> None:
@@ -496,18 +558,27 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Write outputs (always, even when the gate blocks: the artifacts are
     # the evidence). A write failure is a clear error, never a traceback.
+    written: list[tuple[str, str]] = []
     try:
         if args.output:
             _write_output(args.output, json.dumps(report.to_dict(), indent=2, default=str))
+            written.append(("results", args.output))
         if args.report:
             _write_output(args.report, gen.render_markdown(report))
+            written.append(("report", args.report))
         if args.html_report:
             _write_output(args.html_report, gen.render_html(report))
+            written.append(("html report", args.html_report))
         if args.save_trials:
             _write_output(args.save_trials, json.dumps(batch.to_dict(), indent=2))
+            written.append(("trials", args.save_trials))
     except OSError as exc:
-        print(f"Error: could not write output file: {exc}", file=sys.stderr)
-        return 2
+        return usage_error(f"could not write output file: {exc}", exc=exc, debug=debug)
+    # Say where the artifacts went (stderr: stdout stays the summary only).
+    for label, path in written:
+        print(f"[tracelens] wrote {label}: {path}", file=sys.stderr)
+    if args.checkpoint:
+        print(f"[tracelens] checkpoint: {args.checkpoint}", file=sys.stderr)
 
     # CI summary to stdout, including the gate lines when a gate ran
     print(gen.render_ci_summary(report))
@@ -535,26 +606,23 @@ def cmd_report(args: argparse.Namespace) -> int:
     including its recorded baseline gate decision. Input problems (missing
     file, invalid JSON, not a results document) exit 2.
     """
+    debug = debug_enabled(args)
     try:
         data = json.loads(Path(args.results).read_text())
-    except FileNotFoundError:
-        print(f"Error: results file not found: {args.results}", file=sys.stderr)
-        return 2
+    except FileNotFoundError as exc:
+        return usage_error(f"results file not found: {args.results}", exc=exc, debug=debug)
     except json.JSONDecodeError as exc:
-        print(
-            f"Error: invalid JSON in results file {args.results}: {exc}",
-            file=sys.stderr,
+        return usage_error(
+            f"invalid JSON in results file {args.results}: {exc}", exc=exc, debug=debug
         )
-        return 2
     try:
         report = ReportData.from_dict(data)
     except ValueError as exc:
-        print(
-            f"Error: {args.results} is not a TraceLens results file ({exc}); "
-            "pass the JSON written by 'tracelens run --output'",
-            file=sys.stderr,
+        return usage_error(
+            f"{args.results} is not a TraceLens results file ({exc})",
+            hint="Pass the JSON written by 'tracelens run --output'.",
+            exc=exc, debug=debug,
         )
-        return 2
     gen = ReportGenerator()
 
     if args.format == "markdown":

@@ -105,8 +105,8 @@ def test_cmd_sample_handles_malformed_json(tmp_path: Path) -> None:
         trials=str(bad), size=2, strategy="diverse", seed=0,
         excerpt_chars=280, output=None,
     )
-    # Should return an error code, not raise an unhandled exception.
-    assert cmd_sample(args) == 1
+    # A usage/input error: exit 2, not an unhandled exception.
+    assert cmd_sample(args) == 2
 
 
 def test_cmd_reconcile_from_self_contained_worksheet(tmp_path: Path) -> None:

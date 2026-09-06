@@ -193,6 +193,13 @@ tracelens run \
 tracelens report --results reports/results.json --format markdown
 ```
 
+Exit codes across all commands: 0 = success or gate passed; 1 = negative
+result (blocked gate, unmet `--require-baselines`, calibration below
+threshold); 2 = usage/configuration/input error (before any agent call) or an
+unevaluable gate. `tracelens --debug ...` or `TRACELENS_DEBUG=1` adds
+tracebacks to input errors; written artifact paths are listed on stderr, and
+stdout carries only the result.
+
 `--eval-set` accepts `.json`, `.jsonl`, and `.csv` files (format inferred from
 the suffix; directories need `--eval-set-format`); `--input-field` and
 `--metadata-fields` map foreign JSONL/CSV columns. Eval-set load failures

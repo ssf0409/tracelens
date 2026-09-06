@@ -68,9 +68,16 @@ def add_calibrate_parser(
 
 def cmd_calibrate(args: argparse.Namespace) -> int:
     """Execute the 'calibrate' / 'reconcile' subcommand."""
-    # Load annotations
-    with open(args.annotations) as f:
-        annotations_data = json.load(f)
+    # Load annotations (input problems are usage errors: exit 2)
+    try:
+        with open(args.annotations) as f:
+            annotations_data = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: annotations file not found: {args.annotations}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"Error: invalid JSON in {args.annotations}: {exc}", file=sys.stderr)
+        return 2
 
     analyzer = CalibrationAnalyzer(threshold=args.threshold)
 
@@ -86,7 +93,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
                 f"--results / --transcripts.",
                 file=sys.stderr,
             )
-            return 1
+            return 2
         return _emit_calibration(result, args)
 
     annotations = AnnotationSet.from_json_list(annotations_data)
@@ -96,8 +103,15 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
     if args.results:
         # Load pre-computed results
-        with open(args.results) as f:
-            results_data = json.load(f)
+        try:
+            with open(args.results) as f:
+                results_data = json.load(f)
+        except FileNotFoundError:
+            print(f"Error: results file not found: {args.results}", file=sys.stderr)
+            return 2
+        except json.JSONDecodeError as exc:
+            print(f"Error: invalid JSON in {args.results}: {exc}", file=sys.stderr)
+            return 2
         for task_id, outcome_data in results_data.items():
             grader_outcomes[task_id] = Outcome(**outcome_data)
     elif args.transcripts:
@@ -106,17 +120,27 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
                 "Error: --transcripts requires --grader and --samples",
                 file=sys.stderr,
             )
-            return 1
+            return 2
         # Grade transcripts on the fly
-        grader_cls = load_class(args.grader)
+        try:
+            grader_cls = load_class(args.grader)
+        except (ImportError, AttributeError) as exc:
+            print(f"Error: could not load grader '{args.grader}': {exc}", file=sys.stderr)
+            return 2
         grader_id = args.grader.rsplit(".", 1)[-1]
         grader = grader_cls(grader_id)
 
-        with open(args.transcripts) as f:
-            transcripts_data = json.load(f)
-
-        loader = JSONTaskLoader()
-        tasks = loader.load(args.samples)
+        try:
+            with open(args.transcripts) as f:
+                transcripts_data = json.load(f)
+            loader = JSONTaskLoader()
+            tasks = loader.load(args.samples)
+        except FileNotFoundError as exc:
+            print(f"Error: file not found: {exc.filename}", file=sys.stderr)
+            return 2
+        except json.JSONDecodeError as exc:
+            print(f"Error: invalid JSON in --transcripts/--samples input: {exc}", file=sys.stderr)
+            return 2
         task_map = {t.task_id: t for t in tasks}
 
         async def _grade_all() -> dict[str, Outcome]:
