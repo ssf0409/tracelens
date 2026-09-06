@@ -58,7 +58,8 @@ src/tracelens/
 │   ├── pass_at_k.py     # pass@k - capability ceiling
 │   ├── consistency.py   # pass^k - reliability measurement
 │   ├── inference.py     # Bootstrap CI, significance testing
-│   └── latency.py       # Latency aggregation helpers
+│   ├── latency.py       # Latency aggregation helpers
+│   └── run_comparison.py # compare_runs - paired task bootstrap (tracelens compare)
 ├── baselines/
 │   ├── manager.py       # BaselineManager - store/retrieve/promote baselines
 │   └── comparison.py    # RegressionDetector - detect regressions
@@ -81,6 +82,7 @@ src/tracelens/
     ├── main.py          # run / report / sample / calibrate / reconcile
     ├── config.py        # tracelens.yaml run configuration (run --config)
     ├── init.py          # Scaffold: eval/, tracelens.yaml, CI workflow
+    ├── compare.py       # tracelens compare - two saved runs, paired task bootstrap
     ├── sample.py        # Human review worksheet generation
     └── calibrate.py     # Human-vs-grader reconciliation
 ```
@@ -216,6 +218,18 @@ the file's directory), and the file is safe-loaded and validated strictly:
 unknown or duplicate keys, wrong types, and missing required settings exit 2
 before any agent call. Schema: `docs/user-guide.md`, "Run configuration
 file".
+
+`tracelens compare baseline-trials.json candidate-trials.json` implements the
+contract's run-versus-run section (`tracelens.statistics.run_comparison`):
+tasks aligned by content via provenance (incompatible runs exit 2;
+`--unmatched-tasks exclude` compares shared tasks; legacy artifacts align by
+id and are labelled), one statistic per task and run (`--metric pass_rate |
+mean_score | <grader_id>.<metric_name>`, `--direction`, `--grader`), paired
+differences with a task bootstrap and sign-flip p-value, and a verdict against
+`--threshold`: improvement / equivalent / below-threshold exit 0, regression
+1, inconclusive or insufficient evidence 2 (`--observe` forces 0). The stdout
+summary and `--output` JSON share every field. Fixtures for the tests live in
+`tests/fixtures/compare/` (regenerate with `generate.py`).
 
 Exit codes across all commands: 0 = success or gate passed; 1 = negative
 result (blocked gate, unmet `--require-baselines`, calibration below

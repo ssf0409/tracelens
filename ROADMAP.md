@@ -143,7 +143,8 @@ to read first.
 
 Turn comparison and diagnosis into decision output.
 
-- `tracelens compare` *(proposed; tracked as issue #28)*: A/B two saved runs
+- `tracelens compare` *(issue #28; shipped as a paired task bootstrap,
+  slice-level regressions still to come)*: A/B two saved runs
   with bootstrap significance, noise-band awareness, and slice-level
   regressions, printing the decision-spec diff — "here is what changed" —
   next to "here is what moved". When the diff shows exactly one changed

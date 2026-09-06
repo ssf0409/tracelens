@@ -228,7 +228,8 @@ excluded and counted. Unavailable evidence is never a zero delta.
    within-task difference, each `d_t` is equally likely to carry either sign,
    and the two-sided p-value is the fraction of `B` random sign assignments
    (counting the observed one) whose mean is at least as extreme as `|Δ|`.
-   The assignments are drawn with the same `seed`.
+   The assignments are drawn with the same `seed`; when `2^T ≤ B` all
+   assignments are enumerated instead and the p-value is exact.
 
 **Verdict.** Given the practical threshold `τ` (`--threshold`, an absolute
 delta on the metric's scale; default 0.03) and the interval `[lo, hi]`:
@@ -254,7 +255,8 @@ still exit 2.
 **Output.** The terminal summary and the `--output` JSON carry the same
 fields: the method (`paired task bootstrap`), the unit, the metric and its
 direction, the grader selection, per-run trial counts (gradable, and excluded
-by reason), task counts (shared, and excluded by reason), `Δ`, `[lo, hi]`,
+by reason), task counts (shared, and excluded by reason), `Δ` (with the raw
+candidate-minus-baseline delta for lower-is-better metrics), `[lo, hi]`,
 `confidence`, `B`, `seed`, the p-value, `τ`, the verdict, the exit code, the
 per-task `d_t` with each side's trial count (largest movers first), the
 compatibility report, and the candidate diff.
@@ -301,7 +303,7 @@ are never compared across silently different populations.
 | Suite pass@k, suite pass^k, and `TrialBatch.pass_rate` counted harness failures as agent failures (all trials in the denominator) | harness failures excluded and reported separately | #46 (fixed) |
 | A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
 | The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
-| No run-versus-run command; `compare_metrics` resamples two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 |
+| No run-versus-run command; `compare_metrics` resampled two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 (fixed) |
 
 ## Related pages
 

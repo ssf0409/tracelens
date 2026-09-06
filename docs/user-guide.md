@@ -254,6 +254,19 @@ path.json` / `--max-infra-retries N` for long runs. See
 `tracelens report --results results.json --format markdown` re-renders a saved
 run.
 
+`tracelens compare baseline-trials.json candidate-trials.json` decides whether
+a second run of the same eval set is better, worse, or indistinguishable, from
+the two `--save-trials` files. It pairs each task's statistic across the runs,
+bootstraps over tasks, and reports a verdict against `--threshold` (default
+0.03): exit 0 for improvement, equivalence, or a significant-but-negligible
+change; 1 for a regression; 2 when the runs are not comparable (changed task
+content, different graders) or the evidence is insufficient or inconclusive.
+`--metric pass_rate|mean_score|<grader_id>.<metric_name>`, `--direction lower`
+for metrics like latency, `--unmatched-tasks exclude` to compare only shared
+tasks, `--observe` to always exit 0, and `--output compare.json` for the
+record. See [Comparing Versions](comparing-versions.md) and the
+[statistical contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28).
+
 ### Run configuration file
 
 Commit the run settings instead of repeating flags in every README and CI
@@ -321,9 +334,9 @@ without parsing text:
 
 | Exit code | Meaning | Examples |
 |-----------|---------|----------|
-| `0` | Success, or the gate passed | a run completed; `reconcile` found the grader calibrated |
-| `1` | A negative result | the baseline gate blocked; `--require-baselines` unmet; Pearson r below `--threshold` |
-| `2` | A usage, configuration, or input error, or a gate that could not be evaluated | missing or unreadable input file, invalid JSON, an unimportable adapter or grader, `--num-runs 0`, a gate with no gradable trials, `init` refusing to overwrite without `--force` |
+| `0` | Success, or the gate passed | a run completed; `reconcile` found the grader calibrated; `compare` found no regression |
+| `1` | A negative result | the baseline gate blocked; `--require-baselines` unmet; Pearson r below `--threshold`; `compare` found a regression |
+| `2` | A usage, configuration, or input error, or a gate that could not be evaluated | missing or unreadable input file, invalid JSON, an unimportable adapter or grader, `--num-runs 0`, a gate with no gradable trials, `init` refusing to overwrite without `--force`, a `compare` of runs that are not comparable or whose evidence is inconclusive |
 
 Input and configuration problems are reported before any agent call, as one
 or two lines on stderr: the message names the file (and the line, where the

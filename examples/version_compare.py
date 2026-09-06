@@ -4,13 +4,17 @@ This is the canonical "did v2 actually get better, or is it noise?" workflow:
 
 1. Run the SAME eval set against two configurations (here: two prompt versions).
 2. Stamp each run with a `DecisionSpec` so the result is attributable to a
-   specific model + prompt fingerprint.
-3. Use `compare_metrics` (bootstrap CI + effect size + permutation p-value) to
-   decide whether the difference is statistically real, not run-to-run jitter.
+   specific model + prompt fingerprint (the runs' provenance records it).
+3. Use `compare_runs` -- the paired task bootstrap behind `tracelens compare`
+   -- to decide whether the difference is real, practically meaningful, or
+   just noise, with the task as the sampling unit.
 
 No API keys: the "agent" is simulated so the example is runnable and
 reproducible (seeded). Swap `make_agent(...)` for your real adapter and the
-comparison machinery below is identical.
+comparison machinery below is identical. Save both runs with
+`tracelens run --save-trials` and the same decision is one command:
+
+    tracelens compare v1-trials.json v2-trials.json --metric mean_score --threshold 0.05
 
 Run:  python examples/version_compare.py
 """
@@ -29,14 +33,18 @@ from tracelens import (
     SimpleAdapter,
     Task,
     Transcript,
+    TrialBatch,
+    compare_runs,
 )
-from tracelens.statistics.inference import compare_metrics
 
 random.seed(7)  # reproducible distributions across trials
 
 TASKS = EvalSet(
     name="support-replies",
-    tasks=[Task(name=f"ticket-{i}", input_data={"ticket": f"issue {i}"}) for i in range(6)],
+    tasks=[
+        Task(task_id=f"ticket-{i}", name=f"ticket-{i}", input_data={"ticket": f"issue {i}"})
+        for i in range(6)
+    ],
 )
 
 
@@ -65,16 +73,14 @@ def spec_for(version: str, prompt_text: str) -> DecisionSpec:
     )
 
 
-async def run_version(quality_mean: float, spec: DecisionSpec) -> tuple[object, list[float]]:
+async def run_version(quality_mean: float, spec: DecisionSpec) -> TrialBatch:
     runner = EvaluationRunner(
         SimpleAdapter(make_agent(quality_mean)),
         [ReplyQualityGrader("reply_quality")],
         RunnerConfig(num_runs=10, max_concurrency=1),  # concurrency=1 keeps the seed reproducible
         decision_spec=spec,
     )
-    batch = await runner.run(TASKS)
-    scores = [o.score for trial in batch.trials for o in trial.outcomes]
-    return batch, scores
+    return await runner.run(TASKS)
 
 
 async def main() -> None:
@@ -83,34 +89,28 @@ async def main() -> None:
         "v2", "Reply concisely, cite the relevant policy, and propose concrete next steps."
     )
 
-    b1, s1 = await run_version(0.66, v1_spec)  # v1: weaker prompt
-    b2, s2 = await run_version(0.82, v2_spec)  # v2: improved prompt
+    b1 = await run_version(0.66, v1_spec)  # v1: weaker prompt
+    b2 = await run_version(0.82, v2_spec)  # v2: improved prompt
 
     print("version comparison")
     print("------------------")
-    for label, batch, scores, spec in [("v1", b1, s1, v1_spec), ("v2", b2, s2, v2_spec)]:
-        mean_q = sum(scores) / len(scores)
+    for label, batch, spec in [("v1", b1, v1_spec), ("v2", b2, v2_spec)]:
+        scores = [o.score for trial in batch.trials for o in trial.outcomes]
         print(
             f"  {label} [{spec.fingerprint_short}]  "
-            f"pass_rate={batch.pass_rate:.0%}  mean_quality={mean_q:.3f}  n={len(scores)}"
+            f"pass_rate={batch.pass_rate:.0%}  mean_quality={sum(scores) / len(scores):.3f}  "
+            f"n={len(scores)}"
         )
 
-    res = compare_metrics(s1, s2, confidence=0.95, compute_p_value=True)
-    if res.is_significant and res.delta > 0:
-        verdict = "v2 is significantly BETTER"
-    elif res.is_significant and res.delta < 0:
-        verdict = "v2 is significantly WORSE"
-    else:
-        verdict = "no significant difference (within noise)"
-
-    print()
-    print(
-        f"  quality delta (v2 - v1) = {res.delta:+.3f}  "
-        f"95% CI [{res.ci_lower:+.3f}, {res.ci_upper:+.3f}]  "
-        f"cohens_d={res.cohens_d:.2f}  p={res.p_value:.3f}"
+    # The task is the sampling unit: each task's mean quality under v1 and v2
+    # is paired, and the interval comes from resampling tasks, so the six
+    # tickets' different difficulties cancel instead of looking like noise.
+    result = compare_runs(
+        b1, b2, metric="mean_score", threshold=0.05, seed=0,
+        baseline_label="v1", candidate_label="v2",
     )
-    print(f"  -> {verdict}")
-    print(f"  fingerprints differ: {v1_spec.fingerprint != v2_spec.fingerprint}")
+    print()
+    print("\n".join(result.summary_lines()))
 
 
 if __name__ == "__main__":

@@ -109,6 +109,19 @@ In the example above, `0.90` vs `0.80` *looks* like a clear win, but the differe
 
 If you've discarded raw trials and only kept summary stats, use `compare_to_baseline_summary(baseline_mean, baseline_std, baseline_n, current_mean, current_std, current_n, confidence=0.95)`. It returns the same `ComparisonResult`, but the CI comes from a Welch's t-test approximation rather than the bootstrap. Prefer `compare_metrics` with raw values whenever you have them.
 
+### Two runs of the same eval set: `compare_runs`
+
+`compare_metrics` resamples its two lists independently, so it is the wrong
+tool for two runs of the *same tasks*: the values are paired by task, repeated
+trials of a task are not independent samples, and between-task difficulty would
+be counted as noise. For that case use `compare_runs(baseline_batch,
+candidate_batch, metric=..., threshold=...)`, the function behind
+`tracelens compare`. It aligns tasks by content through the runs' provenance,
+pairs each task's statistic, bootstraps over tasks, adds a sign-flip p-value,
+and returns a `RunComparison` with a verdict and exit code. The full definition
+is in the [statistical contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28);
+the walkthrough is [Comparing Versions](comparing-versions.md).
+
 ---
 
 ## 3. Effect size
