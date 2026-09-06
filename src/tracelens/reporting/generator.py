@@ -155,6 +155,10 @@ class ReportGenerator:
     ) -> ReportData:
         """Build a ReportData from a TrialBatch."""
         pass_results = batch.get_pass_results_by_task()
+        # pass^k is a consecutive-window statistic: feed it run-indexed
+        # sequences (None marks a missing run) so completion order and gaps
+        # cannot change the reported reliability.
+        pass_sequences = batch.get_pass_sequences_by_task()
         task_ids = sorted(pass_results.keys())
 
         # Suite-level stats
@@ -176,7 +180,9 @@ class ReportGenerator:
 
             # Per-task pass@k
             task_pass_at_k = self._pass_at_k.analyze({task_id: passes})
-            task_reliability = self._consistency.analyze({task_id: passes})
+            task_reliability = self._consistency.analyze(
+                {task_id: pass_sequences[task_id]}
+            )
 
             task_summaries.append(TaskSummary(
                 task_id=task_id,
@@ -192,7 +198,7 @@ class ReportGenerator:
 
         # Suite-level pass@k and reliability
         suite_pass_at_k = self._pass_at_k.analyze(pass_results)
-        suite_reliability = self._consistency.analyze(pass_results)
+        suite_reliability = self._consistency.analyze(pass_sequences)
 
         report = ReportData(
             total_trials=batch.total_count,

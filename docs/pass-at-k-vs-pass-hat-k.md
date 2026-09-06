@@ -25,7 +25,9 @@ time." That is the whole intuition.
 > TraceLens estimates both from observed trials rather than a fixed `p`.
 > `pass_at_k(n, c, k)` uses the unbiased Chen et al. estimator over `n` trials
 > with `c` passes; `pass_to_k(results, k)` is the proportion of length-`k`
-> sliding windows in which every trial passed.
+> sliding windows in which every trial passed. Windows follow `run_index`
+> order, never the order trials happened to finish, and a window never spans
+> a missing run (`None` in the sequence).
 
 ---
 
