@@ -207,8 +207,10 @@ request on a regression.
 
 3. Prove that it blocks: make `starter_agent` return a wrong answer, run
    `tracelens run --config tracelens.yaml`, and confirm it exits 1 with
-   `BLOCKED` in `eval/results/report.md`. Revert the change; the same command
-   exits 0 again.
+   `BLOCKED` in `eval/results/report.md`. To see the failure itself, run
+   `tracelens inspect eval/results/trials.json --failures --eval-set eval/tasks.json`:
+   it prints the wrong answer next to the task and the grader's verdict.
+   Revert the change; the same command exits 0 again.
 
 Exit codes: 0 = gate passed, 1 = blocked, 2 = misconfigured or unevaluable
 (for example a task with no gradable trials). The decision is recorded in

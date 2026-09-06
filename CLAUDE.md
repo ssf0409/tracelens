@@ -77,12 +77,14 @@ src/tracelens/
 │   ├── budgets.py       # Latency/token/tool-call/trace consistency graders
 │   └── validators.py    # JSON schema, regex, contains, constraint graders
 ├── reporting/
-│   └── generator.py     # ReportGenerator - markdown, JSON, HTML, CI summary
+│   ├── generator.py     # ReportGenerator - markdown, JSON, HTML, CI summary
+│   └── inspect.py       # Failure inspection views: text, HTML, JSON
 └── cli/
     ├── main.py          # run / report / sample / calibrate / reconcile
     ├── config.py        # tracelens.yaml run configuration (run --config)
     ├── init.py          # Scaffold: eval/, tracelens.yaml, CI workflow
     ├── compare.py       # tracelens compare - two saved runs, paired task bootstrap
+    ├── inspect.py       # tracelens inspect - explain failed trials from a trials file
     ├── sample.py        # Human review worksheet generation
     └── calibrate.py     # Human-vs-grader reconciliation
 ```
@@ -230,6 +232,17 @@ differences with a task bootstrap and sign-flip p-value, and a verdict against
 1, inconclusive or insufficient evidence 2 (`--observe` forces 0). The stdout
 summary and `--output` JSON share every field. Fixtures for the tests live in
 `tests/fixtures/compare/` (regenerate with `generate.py`).
+
+`tracelens inspect trials.json [--failures|--all|--kind ...] [--task-id ...]
+[--grader ...] [--eval-set ...] [--html ...] [--json ...]` explains trials
+from a `--save-trials` file (`tracelens.reporting.inspect`): one kind per
+trial (agent failure / infra error / grader error / not run / passed, harness
+causes first), expected versus actual (with `--eval-set`), grader verdicts and
+feedback, transcript steps; every absent field reads `missing`, output is
+bounded (400 chars per field, 20 steps) with omitted counts, `--full` lifts
+the bounds. Exit 0 whenever the file was read; 2 for input errors. Targeted
+reruns: `tracelens run --task-id ID ...` (`run.task_ids` in the config) runs
+only those tasks; provenance and checkpoint identity then cover the subset.
 
 Exit codes across all commands: 0 = success or gate passed; 1 = negative
 result (blocked gate, unmet `--require-baselines`, calibration below

@@ -1519,3 +1519,54 @@ def test_results_and_trials_carry_provenance_and_report_rerenders_it(
     args = build_parser().parse_args(["report", "--results", str(out), "--format", "json"])
     assert cmd_report(args) == 0
     assert json.loads(capsys.readouterr().out)["provenance"] == prov
+
+
+# --- Issue #52: targeted reruns with --task-id --------------------------------
+
+
+def test_task_id_runs_only_the_selected_tasks(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "results.json"
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--task-id", "t-fail", "--output", str(out),
+    ) == 0
+    captured = capsys.readouterr()
+    assert "[tracelens] running 1 of 2 task(s): t-fail" in captured.err
+    results = json.loads(out.read_text())
+    assert results["total_tasks"] == 1 and results["task_summaries"][0]["task_id"] == "t-fail"
+    assert set(results["provenance"]["measurement"]["task_hashes"]) == {"t-fail"}
+
+
+def test_unknown_task_id_is_a_usage_error_before_running(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--task-id", "t-nope",
+    ) == 2
+    err = capsys.readouterr().err
+    assert "--task-id not in the eval set: t-nope" in err
+    assert "Known task ids: t-fail, t-pass" in err
+    assert EchoAdapter.run_count == 0
+
+
+def test_task_ids_from_the_config_file(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = tmp_path / "tracelens.yaml"
+    config.write_text(
+        "run:\n"
+        f"  eval_set: {tasks_file.name}\n"
+        f"  adapter: {ADAPTER}\n"
+        f"  graders: [{GRADER}]\n"
+        f"  import_root: {Path(__file__).resolve().parents[2]}\n"
+        "  task_ids: [t-pass]\n"
+        "  outputs:\n"
+        "    results: results.json\n"
+    )
+    assert _run_cli("run", "--config", str(config)) == 0
+    assert "[tracelens] running 1 of 2 task(s): t-pass" in capsys.readouterr().err
+    results = json.loads((tmp_path / "results.json").read_text())
+    assert [s["task_id"] for s in results["task_summaries"]] == ["t-pass"]

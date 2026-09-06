@@ -241,6 +241,12 @@ The `gate` object in `results.json` (abridged):
 }
 ```
 
+To see *why* a blocked task regressed, read its trials rather than its
+numbers: `tracelens inspect eval/results/trials.json --task-id <id>
+--eval-set eval/tasks.json` shows the failing trials' expected versus actual
+output, grader feedback, and transcript steps
+([Debugging a Failed Evaluation](inspecting-failures.md)).
+
 Each task's `outcome` is one of `checked`, `no_baseline`,
 `no_gradable_trials`, `no_comparable_metrics`, or `task_content_changed`,
 with a `reason` when it was not checked. The last one means the task's

@@ -133,7 +133,8 @@ class TestReadmeTemplate:
         ):
             assert heading in text
         assert "tracelens run --config tracelens.yaml" in text
-        assert "--eval-set eval/tasks.json" not in text  # one documented command
+        assert "--adapter eval.adapter.StarterAdapter" not in text  # one documented run command
+        assert "tracelens inspect eval/results/trials.json --failures" in text
         assert "from tracelens import BaselineManager, TaskBaseline" in text
         assert "uncomment the `baseline:` block" in text
         assert "--baseline-check --baselines-file eval/baselines.json --fail-on-regression moderate" in text
