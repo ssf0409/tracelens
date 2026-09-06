@@ -15,6 +15,7 @@ import numpy as np
 from tracelens._version import __version__
 from tracelens.baselines.comparison import RegressionReport
 from tracelens.baselines.manager import BaselineManager
+from tracelens.core.provenance import RunProvenance
 from tracelens.core.trial import TrialBatch
 from tracelens.reporting.gate import GateResult, GateStatus, TaskGateOutcome
 from tracelens.statistics.availability import MetricValue
@@ -41,6 +42,10 @@ class TaskSummary:
     pass_at_k: dict[str, float | None] = field(default_factory=dict)
     reliability: dict[str, float | None] = field(default_factory=dict)
     gradable_trials: int | None = None
+    # Content hash of the task from the run's provenance; ``None`` when the
+    # batch carried none. Store it on a baseline so the gate can tell a
+    # changed task from a regressed one.
+    task_hash: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +57,7 @@ class TaskSummary:
             "std_score": self.std_score,
             "pass_at_k": self.pass_at_k,
             "reliability": self.reliability,
+            "task_hash": self.task_hash,
         }
 
 
@@ -112,6 +118,11 @@ class ReportData:
     # run had no gate. Rendered in every format and round-tripped via JSON.
     gate: GateResult | None = None
 
+    # What was measured and which candidate was under test, copied from
+    # ``TrialBatch.provenance``. ``None`` for legacy artifacts and hand-built
+    # batches; rendered in Markdown and HTML and round-tripped via JSON.
+    provenance: RunProvenance | None = None
+
     @property
     def excluded_trials(self) -> int:
         """Trials excluded from agent statistics."""
@@ -148,6 +159,8 @@ class ReportData:
             }
         if self.gate is not None:
             result["gate"] = self.gate.to_dict()
+        if self.provenance is not None:
+            result["provenance"] = self.provenance.model_dump(mode="json")
         return result
 
     @classmethod
@@ -164,7 +177,8 @@ class ReportData:
         Raises:
             ValueError: If ``data`` is not a TraceLens results document
                 (not an object, or missing ``total_trials``, ``total_tasks``,
-                or ``task_summaries``).
+                or ``task_summaries``), or its ``provenance`` is invalid or
+                uses a schema version this TraceLens does not know.
         """
         if not isinstance(data, dict):
             raise ValueError("expected a JSON object")
@@ -179,6 +193,12 @@ class ReportData:
         summaries = [TaskSummary(**s) for s in data["task_summaries"]]
         gate_data = data.get("gate")
         gate = GateResult.from_dict(gate_data) if isinstance(gate_data, dict) else None
+        provenance: RunProvenance | None = None
+        if data.get("provenance") is not None:
+            try:
+                provenance = RunProvenance.model_validate(data["provenance"])
+            except ValueError as exc:  # pydantic ValidationError is a ValueError
+                raise ValueError(f"invalid provenance: {exc}") from exc
         pass_at_k: dict[str, float | None] = dict(data.get("pass_at_k", {}))
         reliability: dict[str, float | None] = dict(data.get("reliability", {}))
         recorded = "metric_availability" in data
@@ -212,6 +232,7 @@ class ReportData:
             metric_availability=availability,
             availability_recorded=recorded,
             gate=gate,
+            provenance=provenance,
         )
 
 
@@ -252,6 +273,9 @@ class ReportGenerator:
         # order and gaps cannot change the reported reliability.
         pass_sequences = batch.get_pass_sequences_by_task()
         task_ids = sorted(pass_results.keys())
+        task_hashes = (
+            batch.provenance.measurement.task_hashes if batch.provenance is not None else {}
+        )
 
         # Suite-level stats
         all_scores: list[float] = []
@@ -294,6 +318,7 @@ class ReportGenerator:
                 pass_at_k=task_pass_at_k,
                 reliability=task_reliability,
                 gradable_trials=len(gradable),
+                task_hash=task_hashes.get(task_id),
             ))
 
             all_scores.extend(scores)
@@ -318,6 +343,7 @@ class ReportGenerator:
             pass_at_k={name: mv.value for name, mv in pass_at_k_detail.items()},
             reliability={name: mv.value for name, mv in reliability_detail.items()},
             metric_availability={**pass_at_k_detail, **reliability_detail},
+            provenance=batch.provenance,
         )
 
         return report
@@ -387,6 +413,18 @@ class ReportGenerator:
             lines.append("## Regression Alert")
             lines.append("")
             lines.append(report.regression_report.to_ci_output())
+            lines.append("")
+
+        if report.provenance is not None:
+            lines.append("## Run Provenance")
+            lines.append("")
+            for label, value in _provenance_items(report.provenance):
+                lines.append(f"- **{label}**: {value}")
+            lines.append("")
+            lines.append(
+                "These are declared identities and content hashes: evidence for "
+                "attributing a change, not proof of identical execution."
+            )
             lines.append("")
 
         return "\n".join(lines)
@@ -472,6 +510,7 @@ class ReportGenerator:
                 "#ef4444" if report.grader_error_rate >= 0.05 else "#f97316",
             )
         gate_html = _gate_section_html(report)
+        provenance_html = _provenance_section_html(report)
 
         # --- Capability / Reliability bar charts (available metrics only;
         # unavailable ones are listed with their reason, never drawn as 0) ---
@@ -603,6 +642,8 @@ class ReportGenerator:
 
 {regression_html}
 
+{provenance_html}
+
 <div class="subtitle" style="margin-top:24px;text-align:center">
   TraceLens v{__version__} &middot; {escape(timestamp)}
 </div>
@@ -635,10 +676,36 @@ def _gate_policy_text(gate: GateResult) -> str:
 
 
 def _gate_task_counts(gate: GateResult) -> str:
-    return (
+    text = (
         f"{gate.checked} checked, {gate.skipped_no_baseline} skipped (no baseline), "
         f"{gate.skipped_no_gradable} skipped (no gradable trials), "
         f"{gate.skipped_no_comparable_metrics} skipped (no comparable metrics)"
+    )
+    if gate.skipped_task_content_changed:
+        text += f", {gate.skipped_task_content_changed} skipped (task content changed)"
+    return text
+
+
+def _provenance_items(provenance: RunProvenance) -> list[tuple[str, str]]:
+    """``(label, value)`` pairs from :meth:`RunProvenance.summary_lines`."""
+    items = []
+    for line in provenance.summary_lines():
+        label, _, value = line.partition(": ")
+        items.append((label, value))
+    return items
+
+
+def _provenance_section_html(report: ReportData) -> str:
+    if report.provenance is None:
+        return ""
+    rows = "".join(
+        f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
+        for label, value in _provenance_items(report.provenance)
+    )
+    return (
+        "<section><h2>Run Provenance</h2><table><tbody>" + rows + "</tbody></table>"
+        '<p class="na">Declared identities and content hashes: evidence for '
+        "attributing a change, not proof of identical execution.</p></section>"
     )
 
 

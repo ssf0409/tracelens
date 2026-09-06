@@ -9,7 +9,6 @@ The EvaluationRunner orchestrates:
 """
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -25,6 +24,7 @@ from tracelens.core._time import utc_now
 from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.grader import Grader
 from tracelens.core.outcome import Outcome
+from tracelens.core.provenance import RunnerSettings, build_provenance
 from tracelens.core.task import EvalSet, Task
 from tracelens.core.transcript import Transcript
 from tracelens.core.trial import InfraError, Trial, TrialBatch, TrialStatus
@@ -83,28 +83,6 @@ class CheckpointError(Exception):
 # (written by TraceLens <= 0.3.x) are still readable but can't be
 # identity-checked.
 CHECKPOINT_FORMAT_VERSION = 1
-
-
-def _class_path(obj: object) -> str:
-    """Dotted import path of an object's class, for checkpoint identity."""
-    cls = type(obj)
-    return f"{cls.__module__}.{cls.__qualname__}"
-
-
-def _eval_set_fingerprint(eval_set: EvalSet) -> str:
-    """Content hash of the eval set's tasks.
-
-    Covers task ids, inputs, expectations, and metadata — the things that
-    make checkpointed (task_id, run_index) results meaningful. Deliberately
-    excludes EvalSet-level metadata (timestamps, name) and num_runs, so
-    resuming with more runs of the same tasks still works.
-    """
-    tasks = sorted(
-        (t.model_dump(mode="json") for t in eval_set.tasks),
-        key=lambda d: str(d.get("task_id")),
-    )
-    canonical = json.dumps(tasks, sort_keys=True, default=str)
-    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 @dataclass
@@ -177,16 +155,28 @@ class EvaluationRunner:
     async def run(self, eval_set: EvalSet) -> TrialBatch:
         """Run all tasks × runs and grade results."""
         batch = TrialBatch(started_at=utc_now())
+        # Record what is about to be measured (task content, graders, runner
+        # settings) and which candidate is under test, before any trial
+        # runs. The checkpoint identity is derived from the same record, so
+        # there is one hashing rule (tracelens.core.provenance).
+        provenance = build_provenance(
+            eval_set=eval_set,
+            adapter=self.adapter,
+            graders=self.graders,
+            settings=RunnerSettings.from_config(self.config),
+            decision_spec=self.decision_spec,
+            run_id=batch.batch_id,
+            started_at=batch.started_at,
+        )
+        batch.provenance = provenance
         self._checkpoint_identity = {
-            "eval_set_hash": _eval_set_fingerprint(eval_set),
-            "adapter": _class_path(self.adapter),
-            "graders": [_class_path(g) for g in self.graders],
+            "eval_set_hash": provenance.measurement.eval_set_hash,
+            "adapter": provenance.candidate.adapter.class_path,
+            "graders": [g.class_path for g in provenance.measurement.graders],
             # The spec is the run's reproducibility identity; class paths
             # alone can't tell two SimpleAdapter/HTTPAPIAdapter configs
             # apart, so include the fingerprint whenever a spec is given.
-            "decision_spec_fingerprint": (
-                self.decision_spec.fingerprint if self.decision_spec else None
-            ),
+            "decision_spec_fingerprint": provenance.candidate.decision_spec_fingerprint,
         }
         completed_keys = self._load_resume_state(batch)
         semaphore = asyncio.Semaphore(self.config.max_concurrency)
@@ -219,6 +209,7 @@ class EvaluationRunner:
             )
 
         batch.completed_at = utc_now()
+        provenance.completed_at = batch.completed_at
         self._save_checkpoint(batch)
         return batch
 

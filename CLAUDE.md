@@ -47,6 +47,7 @@ src/tracelens/
 │   ├── grader.py        # Grader ABCs - CodeGrader, LLMGrader, CompositeGrader
 │   ├── transcript.py    # Transcript - execution record
 │   ├── decision_spec.py # DecisionSpec - reproducibility fingerprinting
+│   ├── provenance.py    # RunProvenance - run identity, compatibility check
 │   └── outcome.py       # Outcome - grading result (incl. grader_error flag)
 ├── execution/
 │   ├── runner.py        # EvaluationRunner - parallel execution, checkpoint/resume
@@ -179,6 +180,18 @@ Pass a `DecisionSpec` to `EvaluationRunner` and it is stamped onto every
 transcript that doesn't already carry one, so baselines record a fingerprint
 of the exact configuration that produced them.
 
+Every run also records a `RunProvenance` (`batch.provenance`; `provenance` in
+results and trials JSON; a "Run Provenance" report section): a `measurement`
+side (per-task SHA-256 content hashes, grader identities with an optional
+declared `provenance_version`, runner settings) and a `candidate` side
+(adapter identity, `DecisionSpec` fingerprint). `check_compatibility(a, b)`
+says whether two runs measured the same thing (compatible / incompatible /
+unknown) and lists what changed on each side. The gate refuses to compare a
+task whose content hash differs from the one stored on its baseline
+(`TaskBaseline.task_hash`, taken from `task_summaries[].task_hash`) and
+marks the run unevaluable. Hashing rule and semantics: `docs/reproducibility.md`,
+"Run provenance".
+
 ## CLI Usage
 
 ```bash
@@ -231,7 +244,8 @@ tracelens run \
 Gate semantics: a misconfigured check (missing `--baselines-file`, or the
 file doesn't exist) exits 2 before the eval runs. After execution, exit 2
 also marks an unevaluable gate: no tasks checked, or any baseline-backed task
-with no gradable trials or no comparable CLI metrics. This takes precedence
+with no gradable trials, no comparable CLI metrics, or task content that
+changed since its baseline was stored. This takes precedence
 over policy failures; otherwise exit 1 means a blocking regression or missing
 required baseline. Exit 0 means an evaluable gate passed. Tasks without
 baselines are warned and counted; `--require-baselines` makes them fail

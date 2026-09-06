@@ -10,6 +10,27 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **Versioned run provenance and comparison compatibility.** Every
+  `EvaluationRunner.run()` records a `RunProvenance` on the batch
+  (`batch.provenance`; `provenance` in `--output` and `--save-trials` JSON;
+  a "Run Provenance" section in Markdown and HTML): a `measurement` side
+  (eval-set and per-task SHA-256 content hashes, grader identities with an
+  optional declared `provenance_version`, runner settings) and a
+  `candidate` side (adapter identity, `DecisionSpec` fingerprint and spec).
+  `check_compatibility(a, b)` returns a `CompatibilityReport` that is
+  `compatible`, `incompatible` (changed, added, or removed task content;
+  different graders), or `unknown` (no provenance on a side), with runner
+  and version differences as notes and candidate differences reported
+  separately with a `DecisionSpec` diff. Baselines gain `task_hash`
+  (`TaskBaseline`, `update_baseline(task_hash=)`, `promote(task_hash=)`;
+  results carry `task_summaries[].task_hash`), and the CLI gate refuses to
+  compare a task whose content changed since its baseline was stored
+  (outcome `task_content_changed`, gate unevaluable, exit 2) instead of
+  matching on id; baselines without a hash still compare, with a warning.
+  Checkpoint identity now derives from the same hashing rule (values
+  unchanged). Artifacts written before this release load with
+  `provenance=None`; an unknown `schema_version` is rejected clearly. The
+  `tracelens init` README snippet stores `task_hash` on each baseline. (#51)
 - **`tracelens run --config tracelens.yaml`.** A project-owned run
   configuration file holds exactly what the `run` flags hold (eval set,
   adapter and graders, run counts, outputs, and the baseline gate).

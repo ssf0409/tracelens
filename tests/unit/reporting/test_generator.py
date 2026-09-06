@@ -665,3 +665,117 @@ class TestGateReporting:
         assert "**Grader-Error Rate**: 50.0% (1 of 2 trials)" in gen.render_markdown(report)
         assert "grader_errors=50.0%" in gen.render_ci_summary(report)
         assert "Grader Errors" in gen.render_html(report)
+
+
+class TestProvenanceReporting:
+    """Issue #51: reports carry the run's provenance and per-task content hashes."""
+
+    @staticmethod
+    def _batch_with_provenance() -> TrialBatch:
+        import asyncio
+
+        from tracelens.core.grader import CodeGrader
+        from tracelens.core.task import EvalSet, Task
+        from tracelens.execution.agent_adapter import SimpleAdapter
+        from tracelens.execution.runner import EvaluationRunner
+
+        class _G(CodeGrader):
+            def __init__(self) -> None:
+                super().__init__("g")
+
+            def compute_metrics(self, transcript, task):
+                return {"v": 1.0}
+
+            def determine_pass(self, metrics, task):
+                return True, 1.0
+
+        async def _echo(data):
+            return dict(data)
+
+        suite = EvalSet(name="suite", tasks=[
+            Task(task_id="a", name="a", input_data={"x": 1}),
+            Task(task_id="b", name="b", input_data={"x": 2}),
+        ])
+        return asyncio.run(EvaluationRunner(SimpleAdapter(_echo), [_G()]).run(suite))
+
+    def test_build_report_copies_provenance_and_task_hashes(self):
+        batch = self._batch_with_provenance()
+        report = ReportGenerator().build_report(batch)
+        assert batch.provenance is not None
+        assert report.provenance == batch.provenance
+        assert {s.task_id: s.task_hash for s in report.task_summaries} == (
+            batch.provenance.measurement.task_hashes
+        )
+
+    def test_hand_built_batches_have_no_provenance(self):
+        gen = ReportGenerator()
+        report = gen.build_report(_make_batch({"t": [(True, 1.0)]}))
+        assert report.provenance is None and report.task_summaries[0].task_hash is None
+        assert "provenance" not in report.to_dict()
+        assert "Run Provenance" not in gen.render_markdown(report)
+        assert "Run Provenance" not in gen.render_html(report)
+
+    def test_json_round_trip_preserves_provenance_and_legacy_loads_none(self):
+        report = ReportGenerator().build_report(self._batch_with_provenance())
+        data = json.loads(json.dumps(report.to_dict()))
+        loaded = ReportData.from_dict(data)
+        assert loaded.provenance == report.provenance
+        assert [s.task_hash for s in loaded.task_summaries] == [
+            s.task_hash for s in report.task_summaries
+        ]
+        del data["provenance"]
+        for summary in data["task_summaries"]:
+            del summary["task_hash"]
+        legacy = ReportData.from_dict(data)
+        assert legacy.provenance is None and legacy.task_summaries[0].task_hash is None
+
+    def test_invalid_provenance_is_a_clear_value_error(self):
+        data = ReportGenerator().build_report(self._batch_with_provenance()).to_dict()
+        data["provenance"]["schema_version"] = 5
+        with pytest.raises(ValueError) as exc_info:
+            ReportData.from_dict(data)
+        message = str(exc_info.value)
+        assert message.startswith("invalid provenance: ")
+        assert "unknown provenance schema version 5" in message
+
+    def test_markdown_and_html_render_the_section(self):
+        gen = ReportGenerator()
+        report = gen.build_report(self._batch_with_provenance())
+        assert report.provenance is not None
+        md = gen.render_markdown(report)
+        assert "## Run Provenance" in md
+        assert f"- **Run**: {report.provenance.run_id}" in md
+        assert "- **Eval set**: suite, 2 task(s), content " in md
+        assert "- **Graders**: g (" in md
+        assert "evidence for attributing a change, not proof of identical execution" in md
+        html = gen.render_html(report)
+        assert "<h2>Run Provenance</h2>" in html and "<th>Graders</th>" in html
+        assert "SimpleAdapter" in html
+
+    def test_gate_counts_mention_changed_task_content(self):
+        from tracelens.baselines.comparison import RegressionSeverity
+        from tracelens.reporting.gate import (
+            GateResult,
+            GateStatus,
+            TaskGateOutcome,
+            TaskGateResult,
+        )
+
+        gen = ReportGenerator()
+        report = gen.build_report(_make_batch({"t": [(True, 1.0)]}))
+        report.gate = GateResult(
+            status=GateStatus.UNEVALUABLE, exit_code=2,
+            threshold=RegressionSeverity.MODERATE, noise_band=0.03,
+            skipped_task_content_changed=1,
+            reasons=["1 task(s) whose content changed since their baseline was stored: t"],
+            tasks=[TaskGateResult(
+                task_id="t", outcome=TaskGateOutcome.TASK_CONTENT_CHANGED,
+                reason="task content changed since the baseline was stored (aaaa -> bbbb); "
+                       "re-store the baseline for this task",
+            )],
+        )
+        md = gen.render_markdown(report)
+        assert "1 skipped (task content changed)" in md
+        assert "Skipped tasks: t (task content changed since the baseline was stored" in md
+        assert "task content changed" in gen.render_html(report)
+        assert "1 skipped (task content changed)" in gen.render_ci_summary(report)

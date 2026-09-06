@@ -242,8 +242,9 @@ Add `--baseline-check --baselines-file eval/baselines.json --fail-on-regression
 moderate` to gate CI. The gate exits 1 when it blocks on a regression or missing
 required baselines, and 2 when it is misconfigured or unevaluable. Missing
 baseline files fail before execution; zero checked tasks or any baseline-backed
-task with no gradable trials or comparable metrics makes the check unevaluable
-after execution. Exit 2 takes precedence over observed policy failures. The
+task with no gradable trials or comparable metrics, or whose content changed
+since its baseline was stored, makes the check unevaluable after execution.
+Exit 2 takes precedence over observed policy failures. The
 gate always prints a summary of what it checked. Tasks with no stored baseline
 are skipped with a warning when other tasks can be checked; add
 `--require-baselines` to fail instead. Use `--progress` / `--checkpoint

@@ -151,6 +151,13 @@ class TaskBaseline(BaseModel):
     # RegressionDetector.compare_with_specs() apply the infra-noise band.
     decision_spec: DecisionSpec | None = None
 
+    # Content hash of the task when the baseline was stored (see
+    # ``tracelens.core.provenance``; reports carry it as
+    # ``task_summaries[].task_hash``). The CLI gate refuses to compare a
+    # task whose content changed since, instead of matching on id alone.
+    # ``None`` means unknown, as on baselines written before it existed.
+    task_hash: str | None = None
+
     # Metric baselines
     metrics: dict[str, MetricBaseline] = Field(default_factory=dict)
 
@@ -306,6 +313,7 @@ class TaskBaseline(BaseModel):
         reason: str = "auto",
         fingerprint: str | None = None,
         decision_spec: DecisionSpec | None = None,
+        task_hash: str | None = None,
     ) -> None:
         """Promote baseline to new values.
 
@@ -321,6 +329,9 @@ class TaskBaseline(BaseModel):
                 whenever the baseline carries one — a fingerprint refresh
                 without the matching spec leaves noise-aware comparison
                 diffing against the pre-promotion infra config.
+            task_hash: Content hash of the task in the run being promoted
+                (``task_summaries[].task_hash`` in a results file). Stored so
+                the gate can tell a changed task from a regressed one.
         """
         # Archive current version
         self.previous_versions.append({
@@ -379,6 +390,8 @@ class TaskBaseline(BaseModel):
         if fingerprint:
             self.fingerprint = fingerprint
             self.fingerprint_short = fingerprint[:12] if fingerprint else None
+        if task_hash is not None:
+            self.task_hash = task_hash
 
 
 class BaselineManager:
@@ -450,6 +463,7 @@ class BaselineManager:
                 if data.get("decision_spec")
                 else None
             ),
+            task_hash=data.get("task_hash"),
             metrics=metrics,
             created_at=datetime.fromisoformat(data["created_at"])
             if "created_at" in data else utc_now(),
@@ -503,6 +517,7 @@ class BaselineManager:
         sample_size: int = 1,
         keep_thresholds: bool = True,
         decision_spec: DecisionSpec | None = None,
+        task_hash: str | None = None,
     ) -> TaskBaseline:
         """Update or create a baseline with new metric values.
 
@@ -515,6 +530,9 @@ class BaselineManager:
             decision_spec: DecisionSpec of the run these metrics came
                 from; stored on the baseline to enable noise-aware
                 comparison
+            task_hash: Content hash of the task these metrics came from
+                (``task_summaries[].task_hash`` in a results file), so the
+                gate can refuse to compare a task whose content changed
 
         Returns:
             The updated TaskBaseline
@@ -568,6 +586,8 @@ class BaselineManager:
             if existing.fingerprint is None:
                 existing.fingerprint = decision_spec.fingerprint
                 existing.fingerprint_short = decision_spec.fingerprint_short
+        if task_hash is not None:
+            existing.task_hash = task_hash
 
         existing.updated_at = utc_now()
         existing.git_commit = self._get_git_commit()
