@@ -1,7 +1,8 @@
 # Releasing TraceLens
 
 TraceLens uses tag-driven releases. The package version comes from the git
-tag, and CI publishes only when a maintainer pushes a release tag.
+tag, and CI publishes only from a release tag: the release pipeline creates
+one when a release pull request is merged, or a maintainer pushes one by hand.
 
 This avoids CI-generated version commits, release loops, and PyPI's immutable
 version constraint.
@@ -69,11 +70,13 @@ The default path is two clicks and one review.
    branch if the wording needs work; the pull request description is a
    preview, the changelog section is the source. Its checks are the `ci.yml`
    run the workflow started on the branch (pull requests opened by a
-   workflow do not trigger `pull_request` workflows themselves). Squash-merge
-   it: the commit `release: v0.5.0` on `main` makes the "Release tag"
-   workflow tag that commit `v0.5.0` and start the release workflow with
-   `publish=true`, which publishes to PyPI (the `release` environment and
-   any reviewer required there still apply) and creates the GitHub Release.
+   workflow do not trigger `pull_request` workflows themselves). Merge it
+   with any merge method: the "Release tag" workflow reads the version from
+   the commit that lands on `main` (`release: v0.5.0` after a squash or
+   rebase merge, the `release/v0.5.0` branch name in a merge commit), tags
+   that commit `v0.5.0`, and starts the release workflow with `publish=true`,
+   which publishes to PyPI (the `release` environment and any reviewer
+   required there still apply) and creates the GitHub Release.
 
 3. **Verify that every public channel tells the same story:**
 
@@ -96,9 +99,10 @@ The default path is two clicks and one review.
    /tmp/tracelens-release-smoke/bin/tracelens --help
    ```
 
-Nothing releases on an ordinary merge to `main`: only a commit titled
-`release: vX.Y.Z` (the squash of a release pull request) is tagged, and only
-a tag is ever published.
+Nothing releases on an ordinary merge to `main`: only the merge of a
+`release/vX.Y.Z` pull request is tagged (the workflow also checks that the
+changelog has the dated section and that the tag is new), and only a tag is
+ever published.
 
 ### Manual fallback
 
@@ -133,8 +137,10 @@ If the workflows are unavailable, the tag-driven path still works on its own:
   `release/vX.Y.Z` branch; nothing was tagged or published. Run "Release
   prepare" again later, with the same version if it is still right.
 - **The tag was created but the release workflow never ran** (the dispatch
-  in "Release tag" failed). Run the release workflow by hand on the tag with
-  `publish=true`; it is safe to run more than once.
+  in "Release tag" failed). Re-run the "Release tag" job: it keeps a tag that
+  already points at the release commit and only dispatches again. Or run the
+  release workflow by hand on the tag with `publish=true`; both are safe to
+  repeat.
 
 ## Dependency Guidance
 

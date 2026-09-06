@@ -1,10 +1,12 @@
 name: Release tag
 
 # Second half of the release pipeline (issue #88). When the release pull
-# request opened by release-prepare.yml is merged, its squash commit on main
-# is titled "release: vX.Y.Z": this workflow tags that commit and hands the
-# tag to release.yml, which publishes to PyPI (release environment) and
-# creates the GitHub Release. Every other push to main is ignored.
+# request opened by release-prepare.yml is merged, the resulting commit on
+# main is titled "release: vX.Y.Z" (squash or rebase merge) or "Merge pull
+# request #N from <owner>/release/vX.Y.Z" (merge commit): this workflow tags
+# that commit and hands the tag to release.yml, which publishes to PyPI
+# (release environment) and creates the GitHub Release. Every other push to
+# main is ignored.
 
 on:
   push:
@@ -16,7 +18,9 @@ permissions:
 jobs:
   tag:
     name: tag the release commit and publish
-    if: startsWith(github.event.head_commit.message, 'release: v')
+    if: >-
+      startsWith(github.event.head_commit.message, 'release: v')
+      || contains(github.event.head_commit.message, '/release/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write   # push the tag
@@ -34,23 +38,41 @@ jobs:
         run: |
           set -euo pipefail
           TITLE="$(printf '%s\n' "$MESSAGE" | head -n1)"
-          VERSION="$(printf '%s' "$TITLE" | sed -E 's/^release: v([0-9][^ ]*).*$/\1/')"
-          if [ "$VERSION" = "$TITLE" ] || [ -z "$VERSION" ]; then
-            echo "could not read a version from the commit title: $TITLE" >&2
-            exit 1
+          # Squash and rebase merges keep the release commit's own title; a
+          # merge commit names the release branch instead.
+          squash='^release: v([0-9][^[:space:]]*)'
+          merge='^Merge pull request #[0-9]+ from .+/release/v([0-9][^[:space:]]*)$'
+          VERSION=""
+          if [[ "$TITLE" =~ $squash ]] || [[ "$TITLE" =~ $merge ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "not a release commit, nothing to do: $TITLE"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           if ! grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
             echo "CHANGELOG.md has no dated section for $VERSION" >&2
             exit 1
           fi
-          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
-            echo "tag v$VERSION already exists; nothing to do" >&2
-            exit 1
+          # A re-run after a failed dispatch finds the tag already on this
+          # commit: keep it and dispatch again. A tag elsewhere is an error.
+          if EXISTING="$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}")"; then
+            if [ "$EXISTING" != "$GITHUB_SHA" ]; then
+              echo "tag v$VERSION already exists at $EXISTING, not at $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "tag v$VERSION already points at $GITHUB_SHA; dispatching the release again"
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagging v$VERSION at $GITHUB_SHA"
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tagging v$VERSION at $GITHUB_SHA"
 
       - name: Create and push the tag
+        if: steps.version.outputs.release == 'true' && steps.version.outputs.tagged == 'false'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -61,6 +83,7 @@ jobs:
           git push origin "v$VERSION"
 
       - name: Publish by running release.yml on the tag
+        if: steps.version.outputs.release == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |

@@ -146,9 +146,10 @@ Releases are tag-driven and the tag is created for you:
 2. Run the "Release prepare" workflow with the version. It moves
    `[Unreleased]` into a dated section and opens a `release: vX.Y.Z` pull
    request with the rendered notes.
-3. Review and squash-merge that pull request. The "Release tag" workflow tags
-   the merge commit and the release workflow publishes to PyPI and creates the
-   GitHub Release from the changelog section.
+3. Review and merge that pull request (any merge method). The "Release tag"
+   workflow tags the commit that lands on `main` and the release workflow
+   publishes to PyPI and creates the GitHub Release from the changelog
+   section.
 
 The full checklist, the verification commands, the manual fallback, and what
 to do when a step fails are in [docs/releasing.md](docs/releasing.md).
