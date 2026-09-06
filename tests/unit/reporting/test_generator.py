@@ -1,5 +1,7 @@
 """Tests for report generator module."""
 
+import json
+
 import pytest
 
 from tracelens.core.outcome import Outcome
@@ -404,7 +406,153 @@ class TestReportRunOrderIndependence:
             ))
             batch.add_trial(trial)
         report = ReportGenerator(k_values=[1], consistency_k_values=[2]).build_report(batch)
-        # No complete window of 2: the task is ineligible, so suite pass^2 is 0.0
-        # rather than the 1.0 that treating runs 0 and 2 as consecutive would give.
-        assert report.reliability["pass^2"] == 0.0
+        # No complete window of 2: the task is ineligible, so suite pass^2 is
+        # unavailable rather than the 1.0 that treating runs 0 and 2 as
+        # consecutive would give.
+        assert report.reliability["pass^2"] is None
+        assert not report.metric_availability["pass^2"].available
         assert report.task_summaries[0].pass_rate == 1.0
+
+
+class TestMetricAvailabilityReporting:
+    """Issue #46: unavailable metrics render as N/A with a reason, never as zeros."""
+
+    @staticmethod
+    def _one_run_suite() -> TrialBatch:
+        return _make_batch({"t1": [(True, 1.0)], "t2": [(True, 1.0)]})
+
+    def test_one_run_suite_marks_higher_k_unavailable(self):
+        report = ReportGenerator().build_report(self._one_run_suite())
+        assert report.pass_at_k["pass@1"] == 1.0
+        assert report.pass_at_k["pass@3"] is None
+        assert report.pass_at_k["pass@5"] is None
+        assert all(v is None for v in report.reliability.values())
+        mv = report.metric_availability["pass@5"]
+        assert not mv.available
+        assert (mv.eligible_tasks, mv.total_tasks, mv.max_runs, mv.required_runs) == (0, 2, 1, 5)
+        assert report.metric_availability["pass@1"].available
+        for summary in report.task_summaries:
+            assert summary.pass_at_k["pass@1"] == 1.0
+            assert summary.pass_at_k["pass@5"] is None
+            assert summary.gradable_trials == 1
+
+    def test_markdown_renders_na_with_reason_and_runs_hint(self):
+        gen = ReportGenerator()
+        md = gen.render_markdown(gen.build_report(self._one_run_suite()))
+        assert "**pass@1**: 1.0000 (2/2 tasks)" in md
+        assert (
+            "**pass@5**: N/A: needs at least 5 gradable runs per task; "
+            "0/2 tasks eligible; max 1 gradable run(s) recorded"
+        ) in md
+        assert "rerun with `--num-runs 5`" in md
+        reliability_section = md.split("## Reliability (pass^k)")[1].split("## Per-Task")[0]
+        assert "0.0000" not in reliability_section
+        assert "N/A" in reliability_section
+
+    def test_ci_summary_renders_na(self):
+        gen = ReportGenerator()
+        ci = gen.render_ci_summary(gen.build_report(self._one_run_suite()))
+        assert "pass@1=1.0000" in ci
+        assert "pass@3=n/a" in ci
+        assert "pass@5=n/a" in ci
+
+    def test_html_lists_unavailable_metrics_without_zero_bars(self):
+        gen = ReportGenerator()
+        html = gen.render_html(gen.build_report(self._one_run_suite()))
+        assert "<strong>pass@5</strong>: N/A: needs at least 5 gradable runs per task" in html
+        reliability_section = html.split("Reliability (pass^k)")[1].split("</section>")[0]
+        assert "<rect" not in reliability_section  # nothing drawn as a zero-height bar
+        assert "N/A" in reliability_section
+        assert "--num-runs 5" in html
+
+    def test_json_roundtrip_preserves_availability(self):
+        gen = ReportGenerator()
+        original = gen.build_report(self._one_run_suite())
+        restored = ReportData.from_dict(json.loads(json.dumps(original.to_dict())))
+        assert restored.availability_recorded is True
+        assert restored.pass_at_k == original.pass_at_k
+        assert restored.reliability == original.reliability
+        assert restored.metric_availability == original.metric_availability
+        assert restored.gradable_trials == original.gradable_trials == 2
+        assert restored.task_summaries[0].gradable_trials == 1
+        assert original.to_dict()["metric_availability"]["pass@5"]["available"] is False
+
+    def test_legacy_report_loads_with_explicit_assumption(self):
+        legacy = {
+            "total_trials": 2, "total_tasks": 2,
+            "overall_pass_rate": 1.0, "overall_mean_score": 1.0,
+            "pass_at_k": {"pass@1": 1.0, "pass@5": 1.0},
+            "reliability": {"pass^2": 0.0},
+            "task_summaries": [{
+                "task_id": "t1", "num_trials": 1, "pass_rate": 1.0,
+                "mean_score": 1.0, "std_score": 0.0,
+                "pass_at_k": {"pass@1": 1.0}, "reliability": {"pass^2": 0.0},
+            }],
+        }
+        report = ReportData.from_dict(legacy)
+        assert report.availability_recorded is False
+        assert report.gradable_trials == 2  # legacy denominator: all trials
+        assert report.pass_at_k["pass@5"] == 1.0  # shown as recorded
+        assert report.metric_availability["pass^2"].total_tasks is None
+        assert report.task_summaries[0].gradable_trials is None
+
+        gen = ReportGenerator()
+        md = gen.render_markdown(report)
+        assert "availability was not recorded" in md
+        assert "**pass^2**: 0.0000" in md
+        assert "| t1 | 1 | 100.0% |" in md
+        assert "pass_rate=100.0%" in gen.render_ci_summary(report)
+        assert "availability was not recorded" in gen.render_html(report)
+
+    @staticmethod
+    def _batch_with_harness_failures() -> TrialBatch:
+        def trial(task_id, run_index, status, passed=None, grader_error=False):
+            t = Trial(task_id=task_id, run_index=run_index, status=status)
+            if passed is not None:
+                t.add_outcome(Outcome(
+                    trial_id=t.trial_id, grader_id="g", passed=passed,
+                    score=1.0 if passed else 0.0, grader_error=grader_error,
+                ))
+            return t
+
+        return TrialBatch(trials=[
+            trial("t1", 0, TrialStatus.COMPLETED, passed=True),
+            trial("t1", 1, TrialStatus.INFRA_ERROR),
+            trial("t2", 0, TrialStatus.COMPLETED, passed=False),
+            trial("t2", 1, TrialStatus.COMPLETED, passed=False, grader_error=True),
+            trial("t3", 0, TrialStatus.SKIPPED),
+        ])
+
+    def test_harness_failures_are_excluded_and_counted(self):
+        gen = ReportGenerator(k_values=[1], consistency_k_values=[2])
+        report = gen.build_report(self._batch_with_harness_failures())
+        assert report.total_trials == 5
+        assert report.gradable_trials == 2
+        assert report.excluded_trials == 3
+        assert report.overall_pass_rate == 0.5
+        assert report.infra_error_count == 1
+        assert report.grader_error_count == 1
+        mv = report.metric_availability["pass@1"]
+        assert (mv.eligible_tasks, mv.total_tasks) == (2, 3)
+        by_task = {s.task_id: s for s in report.task_summaries}
+        assert (by_task["t1"].num_trials, by_task["t1"].gradable_trials) == (2, 1)
+        assert by_task["t3"].gradable_trials == 0
+
+        md = gen.render_markdown(report)
+        assert "50.0% (over 2 gradable trials; 3 excluded as harness failures or never run)" in md
+        assert "| t1 | 2 (1 gradable) | 100.0% |" in md
+        assert "| t3 | 1 (0 gradable) | N/A |" in md
+
+    def test_no_gradable_trials_renders_na_pass_rate(self):
+        batch = TrialBatch(trials=[
+            Trial(task_id="t1", run_index=0, status=TrialStatus.INFRA_ERROR),
+            Trial(task_id="t1", run_index=1, status=TrialStatus.INFRA_ERROR),
+        ])
+        gen = ReportGenerator(k_values=[1], consistency_k_values=[2])
+        report = gen.build_report(batch)
+        assert report.gradable_trials == 0
+        assert report.pass_at_k["pass@1"] is None
+        assert report.metric_availability["pass@1"].reason == "needs at least 1 gradable runs per task"
+        assert "**Pass Rate**: N/A (no gradable trials)" in gen.render_markdown(report)
+        assert "pass_rate=n/a" in gen.render_ci_summary(report)
+        assert ">N/A<" in gen.render_html(report)

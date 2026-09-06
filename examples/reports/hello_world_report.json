@@ -1,6 +1,7 @@
 {
   "total_trials": 9,
   "total_tasks": 3,
+  "gradable_trials": 9,
   "overall_pass_rate": 1.0,
   "overall_mean_score": 1.0,
   "infra_error_count": 0,
@@ -17,10 +18,54 @@
     "pass^2": 1.0,
     "pass^3": 1.0
   },
+  "metric_availability": {
+    "pass@1": {
+      "name": "pass@1",
+      "value": 1.0,
+      "available": true,
+      "eligible_tasks": 3,
+      "total_tasks": 3,
+      "required_runs": 1,
+      "max_runs": 3,
+      "reason": null
+    },
+    "pass@3": {
+      "name": "pass@3",
+      "value": 1.0,
+      "available": true,
+      "eligible_tasks": 3,
+      "total_tasks": 3,
+      "required_runs": 3,
+      "max_runs": 3,
+      "reason": null
+    },
+    "pass^2": {
+      "name": "pass^2",
+      "value": 1.0,
+      "available": true,
+      "eligible_tasks": 3,
+      "total_tasks": 3,
+      "required_runs": 2,
+      "max_runs": 3,
+      "reason": null
+    },
+    "pass^3": {
+      "name": "pass^3",
+      "value": 1.0,
+      "available": true,
+      "eligible_tasks": 3,
+      "total_tasks": 3,
+      "required_runs": 3,
+      "max_runs": 3,
+      "reason": null
+    }
+  },
+  "availability_recorded": true,
   "task_summaries": [
     {
       "task_id": "add-10-5",
       "num_trials": 3,
+      "gradable_trials": 3,
       "pass_rate": 1.0,
       "mean_score": 1.0,
       "std_score": 0.0,
@@ -36,6 +81,7 @@
     {
       "task_id": "add-2-2",
       "num_trials": 3,
+      "gradable_trials": 3,
       "pass_rate": 1.0,
       "mean_score": 1.0,
       "std_score": 0.0,
@@ -51,6 +97,7 @@
     {
       "task_id": "add-7-8",
       "num_trials": 3,
+      "gradable_trials": 3,
       "pass_rate": 1.0,
       "mean_score": 1.0,
       "std_score": 0.0,

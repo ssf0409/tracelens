@@ -24,6 +24,8 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+from tracelens.statistics.availability import MetricValue, unavailable_reason
+
 PassSequence = Sequence[bool | None]
 """Pass/fail outcomes in run order; ``None`` marks a missing or excluded run."""
 
@@ -133,6 +135,50 @@ def pass_to_k_estimator(
     return float(np.mean(scores)) if scores else 0.0
 
 
+def pass_to_k_metric(
+    results_per_task: Mapping[str, PassSequence],
+    k: int,
+) -> MetricValue:
+    """Suite pass^k with explicit availability.
+
+    Returns a :class:`MetricValue` whose ``value`` is ``None`` when no task
+    has a complete window of ``k`` consecutive gradable runs, with the
+    eligible/total task counts and the largest number of gradable runs any
+    task recorded.
+
+    Raises:
+        ValueError: If ``k`` is less than 1.
+    """
+    _check_k(k)
+    scores = []
+    max_runs = 0
+    for results in results_per_task.values():
+        max_runs = max(max_runs, sum(1 for r in results if r is not None))
+        consistent, complete = _window_counts(results, k)
+        if complete:
+            scores.append(consistent / complete)
+    total = len(results_per_task)
+    name = f"pass^{k}"
+    if scores:
+        return MetricValue(
+            name=name,
+            value=float(np.mean(scores)),
+            eligible_tasks=len(scores),
+            total_tasks=total,
+            required_runs=k,
+            max_runs=max_runs,
+        )
+    return MetricValue(
+        name=name,
+        value=None,
+        eligible_tasks=0,
+        total_tasks=total,
+        required_runs=k,
+        max_runs=max_runs,
+        reason=unavailable_reason("consecutive gradable runs", k, total),
+    )
+
+
 class ConsistencyAnalyzer:
     """Analyzer for pass^k consistency metrics.
 
@@ -160,6 +206,10 @@ class ConsistencyAnalyzer:
     ) -> dict[str, float]:
         """Compute pass^k for multiple k values.
 
+        Unavailable metrics (no task with a complete window of ``k`` runs)
+        come back as ``0.0`` in this float API; :meth:`analyze_detailed`
+        distinguishes them.
+
         Args:
             results_per_task: Dict mapping task_id to its run-ordered
                 pass/fail sequence
@@ -169,6 +219,21 @@ class ConsistencyAnalyzer:
         """
         return {
             f"pass^{k}": pass_to_k_estimator(results_per_task, k)
+            for k in self.k_values
+        }
+
+    def analyze_detailed(
+        self,
+        results_per_task: Mapping[str, PassSequence],
+    ) -> dict[str, MetricValue]:
+        """Compute pass^k for multiple k values with availability evidence.
+
+        Returns:
+            Dict mapping "pass^k" to a :class:`MetricValue`; ``value`` is
+            ``None`` where no task supports that ``k``.
+        """
+        return {
+            f"pass^{k}": pass_to_k_metric(results_per_task, k)
             for k in self.k_values
         }
 

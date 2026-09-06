@@ -16,26 +16,36 @@ from tracelens._version import __version__
 from tracelens.baselines.comparison import RegressionReport
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.trial import TrialBatch
+from tracelens.statistics.availability import MetricValue
 from tracelens.statistics.consistency import ConsistencyAnalyzer
 from tracelens.statistics.pass_at_k import PassAtKAnalyzer
 
 
 @dataclass
 class TaskSummary:
-    """Per-task summary statistics."""
+    """Per-task summary statistics.
+
+    ``pass_at_k`` and ``reliability`` map metric names to values, with
+    ``None`` where the metric is unavailable for this task (for example
+    fewer gradable runs than ``k``). ``gradable_trials`` counts the trials
+    that are agent evidence; ``None`` means a legacy report that did not
+    record it.
+    """
 
     task_id: str
     num_trials: int
     pass_rate: float
     mean_score: float
     std_score: float
-    pass_at_k: dict[str, float] = field(default_factory=dict)
-    reliability: dict[str, float] = field(default_factory=dict)
+    pass_at_k: dict[str, float | None] = field(default_factory=dict)
+    reliability: dict[str, float | None] = field(default_factory=dict)
+    gradable_trials: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "num_trials": self.num_trials,
+            "gradable_trials": self.gradable_trials,
             "pass_rate": self.pass_rate,
             "mean_score": self.mean_score,
             "std_score": self.std_score,
@@ -46,13 +56,25 @@ class TaskSummary:
 
 @dataclass
 class ReportData:
-    """Complete evaluation report."""
+    """Complete evaluation report.
+
+    Suite metrics live in ``pass_at_k`` / ``reliability`` (``None`` where
+    unavailable) with their evidence in ``metric_availability``. A report
+    loaded from JSON written before availability was recorded has
+    ``availability_recorded=False``: its values are shown as recorded, and
+    a zero may be an unavailable metric rather than a measured zero.
+    """
 
     # Suite-level stats
     total_trials: int = 0
     total_tasks: int = 0
     overall_pass_rate: float = 0.0
     overall_mean_score: float = 0.0
+
+    # Trials that are agent evidence (``Trial.is_gradable``): the
+    # denominator of ``overall_pass_rate``. Harness failures and trials
+    # that never ran are ``total_trials - gradable_trials``.
+    gradable_trials: int = 0
 
     # Infrastructure-noise awareness (see Anthropic, Feb 2026).
     # ``infra_error_rate`` is reported alongside pass_rate so a spike
@@ -74,17 +96,25 @@ class ReportData:
     # Per-task summaries
     task_summaries: list[TaskSummary] = field(default_factory=list)
 
-    # Statistical analysis
-    pass_at_k: dict[str, float] = field(default_factory=dict)
-    reliability: dict[str, float] = field(default_factory=dict)
+    # Statistical analysis (``None`` = unavailable; see metric_availability)
+    pass_at_k: dict[str, float | None] = field(default_factory=dict)
+    reliability: dict[str, float | None] = field(default_factory=dict)
+    metric_availability: dict[str, MetricValue] = field(default_factory=dict)
+    availability_recorded: bool = True
 
     # Optional regression report
     regression_report: RegressionReport | None = None
+
+    @property
+    def excluded_trials(self) -> int:
+        """Trials excluded from agent statistics."""
+        return self.total_trials - self.gradable_trials
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "total_trials": self.total_trials,
             "total_tasks": self.total_tasks,
+            "gradable_trials": self.gradable_trials,
             "overall_pass_rate": self.overall_pass_rate,
             "overall_mean_score": self.overall_mean_score,
             "infra_error_count": self.infra_error_count,
@@ -95,6 +125,10 @@ class ReportData:
             "total_output_tokens": self.total_output_tokens,
             "pass_at_k": self.pass_at_k,
             "reliability": self.reliability,
+            "metric_availability": {
+                name: mv.to_dict() for name, mv in self.metric_availability.items()
+            },
+            "availability_recorded": self.availability_recorded,
             "task_summaries": [s.to_dict() for s in self.task_summaries],
         }
         if self.regression_report:
@@ -109,12 +143,35 @@ class ReportData:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ReportData":
+        """Rebuild from :meth:`to_dict` output.
+
+        Reports written before availability was recorded load with
+        ``availability_recorded=False``; their metric values are kept as
+        recorded, eligibility is unknown, and ``gradable_trials`` falls back
+        to ``total_trials`` (the legacy denominator).
+        """
         summaries = [
             TaskSummary(**s) for s in data.get("task_summaries", [])
         ]
+        pass_at_k: dict[str, float | None] = dict(data.get("pass_at_k", {}))
+        reliability: dict[str, float | None] = dict(data.get("reliability", {}))
+        recorded = "metric_availability" in data
+        if recorded:
+            availability = {
+                name: MetricValue.from_dict(entry)
+                for name, entry in data["metric_availability"].items()
+            }
+        else:
+            availability = {
+                name: MetricValue.legacy(name, value)
+                for name, value in {**pass_at_k, **reliability}.items()
+            }
+        total_trials = data.get("total_trials", 0)
+        gradable = data.get("gradable_trials")
         return cls(
-            total_trials=data.get("total_trials", 0),
+            total_trials=total_trials,
             total_tasks=data.get("total_tasks", 0),
+            gradable_trials=total_trials if gradable is None else gradable,
             overall_pass_rate=data.get("overall_pass_rate", 0.0),
             overall_mean_score=data.get("overall_mean_score", 0.0),
             infra_error_count=data.get("infra_error_count", 0),
@@ -124,8 +181,10 @@ class ReportData:
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
             task_summaries=summaries,
-            pass_at_k=data.get("pass_at_k", {}),
-            reliability=data.get("reliability", {}),
+            pass_at_k=pass_at_k,
+            reliability=reliability,
+            metric_availability=availability,
+            availability_recorded=recorded,
         )
 
 
@@ -153,36 +212,51 @@ class ReportGenerator:
         batch: TrialBatch,
         baseline_manager: BaselineManager | None = None,
     ) -> ReportData:
-        """Build a ReportData from a TrialBatch."""
+        """Build a ReportData from a TrialBatch.
+
+        Only gradable trials (``Trial.is_gradable``) enter pass rates,
+        scores, pass@k, and pass^k; harness failures are counted separately.
+        Suite metrics that no task can support are reported as unavailable,
+        never as zeros.
+        """
         pass_results = batch.get_pass_results_by_task()
         # pass^k is a consecutive-window statistic: feed it run-indexed
-        # sequences (None marks a missing run) so completion order and gaps
-        # cannot change the reported reliability.
+        # sequences (None marks a missing or excluded run) so completion
+        # order and gaps cannot change the reported reliability.
         pass_sequences = batch.get_pass_sequences_by_task()
         task_ids = sorted(pass_results.keys())
 
         # Suite-level stats
-        all_scores = []
+        all_scores: list[float] = []
         task_summaries = []
 
         for task_id in task_ids:
             trials = batch.get_trials_for_task(task_id)
+            gradable = [t for t in trials if t.is_gradable]
             passes = pass_results[task_id]
 
-            scores = []
-            for trial in trials:
-                if trial.aggregate_score is not None:
-                    scores.append(trial.aggregate_score)
+            scores = [
+                t.aggregate_score
+                for t in gradable
+                if t.aggregate_score is not None
+            ]
 
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             mean_score = float(np.mean(scores)) if scores else 0.0
             std_score = float(np.std(scores, ddof=1)) if len(scores) > 1 else 0.0
 
-            # Per-task pass@k
-            task_pass_at_k = self._pass_at_k.analyze({task_id: passes})
-            task_reliability = self._consistency.analyze(
-                {task_id: pass_sequences[task_id]}
-            )
+            task_pass_at_k = {
+                name: mv.value
+                for name, mv in self._pass_at_k.analyze_detailed(
+                    {task_id: passes}
+                ).items()
+            }
+            task_reliability = {
+                name: mv.value
+                for name, mv in self._consistency.analyze_detailed(
+                    {task_id: pass_sequences[task_id]}
+                ).items()
+            }
 
             task_summaries.append(TaskSummary(
                 task_id=task_id,
@@ -192,17 +266,19 @@ class ReportGenerator:
                 std_score=std_score,
                 pass_at_k=task_pass_at_k,
                 reliability=task_reliability,
+                gradable_trials=len(gradable),
             ))
 
             all_scores.extend(scores)
 
-        # Suite-level pass@k and reliability
-        suite_pass_at_k = self._pass_at_k.analyze(pass_results)
-        suite_reliability = self._consistency.analyze(pass_sequences)
+        # Suite-level pass@k and reliability, with availability evidence
+        pass_at_k_detail = self._pass_at_k.analyze_detailed(pass_results)
+        reliability_detail = self._consistency.analyze_detailed(pass_sequences)
 
         report = ReportData(
             total_trials=batch.total_count,
             total_tasks=len(task_ids),
+            gradable_trials=batch.gradable_count,
             overall_pass_rate=batch.pass_rate,
             overall_mean_score=float(np.mean(all_scores)) if all_scores else 0.0,
             infra_error_count=batch.infra_error_count,
@@ -212,8 +288,9 @@ class ReportGenerator:
             total_input_tokens=batch.total_input_tokens,
             total_output_tokens=batch.total_output_tokens,
             task_summaries=task_summaries,
-            pass_at_k=suite_pass_at_k,
-            reliability=suite_reliability,
+            pass_at_k={name: mv.value for name, mv in pass_at_k_detail.items()},
+            reliability={name: mv.value for name, mv in reliability_detail.items()},
+            metric_availability={**pass_at_k_detail, **reliability_detail},
         )
 
         return report
@@ -227,7 +304,7 @@ class ReportGenerator:
             "",
             f"- **Tasks**: {report.total_tasks}",
             f"- **Trials**: {report.total_trials}",
-            f"- **Pass Rate**: {report.overall_pass_rate:.1%}",
+            f"- **Pass Rate**: {_format_pass_rate(report)}",
             f"- **Mean Score**: {report.overall_mean_score:.4f}",
         ]
         if report.infra_error_count > 0:
@@ -242,21 +319,8 @@ class ReportGenerator:
             )
         lines.append("")
 
-        # pass@k summary
-        if report.pass_at_k:
-            lines.append("## Capability (pass@k)")
-            lines.append("")
-            for key, val in sorted(report.pass_at_k.items()):
-                lines.append(f"- **{key}**: {val:.4f}")
-            lines.append("")
-
-        # Reliability summary
-        if report.reliability:
-            lines.append("## Reliability (pass^k)")
-            lines.append("")
-            for key, val in sorted(report.reliability.items()):
-                lines.append(f"- **{key}**: {val:.4f}")
-            lines.append("")
+        lines.extend(_metric_section_md("Capability (pass@k)", report.pass_at_k, report))
+        lines.extend(_metric_section_md("Reliability (pass^k)", report.reliability, report))
 
         # Per-task table
         if report.task_summaries:
@@ -266,8 +330,8 @@ class ReportGenerator:
             lines.append("|------|--------|-----------|------------|")
             for s in report.task_summaries:
                 lines.append(
-                    f"| {s.task_id} | {s.num_trials} | "
-                    f"{s.pass_rate:.1%} | {s.mean_score:.4f} |"
+                    f"| {s.task_id} | {_format_trial_count(s)} | "
+                    f"{_format_task_pass_rate(s, report)} | {s.mean_score:.4f} |"
                 )
             lines.append("")
 
@@ -281,16 +345,24 @@ class ReportGenerator:
         return "\n".join(lines)
 
     def render_ci_summary(self, report: ReportData) -> str:
-        """Render a compact CI-friendly summary."""
+        """Render a compact CI-friendly summary.
+
+        Unavailable metrics render as ``n/a`` so a gate cannot mistake
+        "not measured" for a measured zero.
+        """
+        if report.availability_recorded and report.gradable_trials == 0:
+            pass_rate_text = "n/a"
+        else:
+            pass_rate_text = f"{report.overall_pass_rate:.1%}"
         lines = [
             f"TraceLens: {report.total_tasks} tasks, "
             f"{report.total_trials} trials, "
-            f"pass_rate={report.overall_pass_rate:.1%}, "
+            f"pass_rate={pass_rate_text}, "
             f"mean_score={report.overall_mean_score:.4f}",
         ]
 
         for key, val in sorted(report.pass_at_k.items()):
-            lines[0] += f", {key}={val:.4f}"
+            lines[0] += f", {key}=" + ("n/a" if val is None else f"{val:.4f}")
 
         if report.infra_error_count > 0:
             lines[0] += f", infra_errors={report.infra_error_rate:.1%}"
@@ -315,12 +387,17 @@ class ReportGenerator:
         timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         pass_rate_pct = report.overall_pass_rate * 100
         pass_rate_color = _pass_rate_color(report.overall_pass_rate)
+        if report.availability_recorded and report.gradable_trials == 0:
+            pass_rate_text = "N/A"
+            pass_rate_color = "#6b7280"
+        else:
+            pass_rate_text = f"{pass_rate_pct:.1f}%"
 
         # --- Summary cards ---
         cards_html = (
             _html_card("Tasks", str(report.total_tasks), "#3b82f6")
             + _html_card("Trials", str(report.total_trials), "#6366f1")
-            + _html_card("Pass Rate", f"{pass_rate_pct:.1f}%", pass_rate_color)
+            + _html_card("Pass Rate", pass_rate_text, pass_rate_color)
             + _html_card("Mean Score", f"{report.overall_mean_score:.4f}", "#8b5cf6")
         )
         # Only surface the infra-error card when there's something to
@@ -333,18 +410,10 @@ class ReportGenerator:
                 infra_color,
             )
 
-        # --- Capability / Reliability bar charts ---
-        capability_svg = ""
-        if report.pass_at_k:
-            labels = sorted(report.pass_at_k.keys())
-            values = [report.pass_at_k[k] for k in labels]
-            capability_svg = _svg_bar_chart(labels, values, 1.0)
-
-        reliability_svg = ""
-        if report.reliability:
-            labels = sorted(report.reliability.keys())
-            values = [report.reliability[k] for k in labels]
-            reliability_svg = _svg_bar_chart(labels, values, 1.0)
+        # --- Capability / Reliability bar charts (available metrics only;
+        # unavailable ones are listed with their reason, never drawn as 0) ---
+        capability_svg = _metric_section_html(report, report.pass_at_k)
+        reliability_svg = _metric_section_html(report, report.reliability)
 
         # --- Per-task table ---
         task_rows = ""
@@ -352,9 +421,9 @@ class ReportGenerator:
             pr_color = _pass_rate_color(s.pass_rate)
             task_rows += (
                 f'<tr><td>{escape(s.task_id)}</td>'
-                f"<td>{s.num_trials}</td>"
+                f"<td>{escape(_format_trial_count(s))}</td>"
                 f'<td style="color:{pr_color};font-weight:600">'
-                f"{s.pass_rate:.1%}</td>"
+                f"{escape(_format_task_pass_rate(s, report))}</td>"
                 f"<td>{s.mean_score:.4f}</td>"
                 f"<td>{s.std_score:.4f}</td></tr>\n"
             )
@@ -439,6 +508,7 @@ class ReportGenerator:
   td {{ padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }}
   tr:hover {{ background: #f8fafc; }}
   .chart-row {{ display: flex; gap: 16px; flex-wrap: wrap; }}
+  .na {{ color: #64748b; font-size: 0.9em; margin: 6px 0; }}
   .chart-row > div {{ flex: 1; min-width: 280px; }}
   svg text {{ font-family: system-ui, sans-serif; }}
   @media print {{ body {{ background: #fff; }} section {{ box-shadow: none;
@@ -467,6 +537,106 @@ class ReportGenerator:
 </div>
 </body>
 </html>"""
+
+
+def _format_pass_rate(report: ReportData) -> str:
+    """Suite pass rate with its denominator, or N/A when nothing is gradable."""
+    if not report.availability_recorded:
+        return f"{report.overall_pass_rate:.1%}"
+    if report.gradable_trials == 0:
+        return "N/A (no gradable trials)"
+    text = f"{report.overall_pass_rate:.1%}"
+    if report.excluded_trials > 0:
+        text += (
+            f" (over {report.gradable_trials} gradable trials; "
+            f"{report.excluded_trials} excluded as harness failures or never run)"
+        )
+    return text
+
+
+def _format_task_pass_rate(summary: TaskSummary, report: ReportData) -> str:
+    if report.availability_recorded and summary.gradable_trials == 0:
+        return "N/A"
+    return f"{summary.pass_rate:.1%}"
+
+
+def _format_trial_count(summary: TaskSummary) -> str:
+    if summary.gradable_trials is None or summary.gradable_trials == summary.num_trials:
+        return str(summary.num_trials)
+    return f"{summary.num_trials} ({summary.gradable_trials} gradable)"
+
+
+def _describe_metric(name: str, value: float | None, report: ReportData) -> str:
+    mv = report.metric_availability.get(name)
+    if mv is not None:
+        return mv.describe()
+    return "N/A" if value is None else f"{value:.4f}"
+
+
+def _runs_hint(names: list[str], report: ReportData) -> int | None:
+    """Largest ``k`` among unavailable metrics that more runs would unlock."""
+    needed = [
+        mv.required_runs
+        for name in names
+        if (mv := report.metric_availability.get(name)) is not None
+        and not mv.available
+        and mv.required_runs is not None
+        and (mv.total_tasks or 0) > 0
+    ]
+    return max(needed) if needed else None
+
+
+def _metric_section_md(
+    title: str, metrics: dict[str, float | None], report: ReportData
+) -> list[str]:
+    if not metrics:
+        return []
+    lines = [f"## {title}", ""]
+    for key in sorted(metrics):
+        lines.append(f"- **{key}**: {_describe_metric(key, metrics[key], report)}")
+    needed = _runs_hint(sorted(metrics), report)
+    if needed is not None:
+        lines.append(
+            f"  - Unavailable metrics need more gradable runs per task; "
+            f"rerun with `--num-runs {needed}`."
+        )
+    if not report.availability_recorded:
+        lines.append(
+            "  - Metric availability was not recorded in this report; a zero "
+            "may be an unavailable metric rather than a measured zero."
+        )
+    lines.append("")
+    return lines
+
+
+def _metric_section_html(report: ReportData, metrics: dict[str, float | None]) -> str:
+    if not metrics:
+        return ""
+    labels = [k for k in sorted(metrics) if metrics[k] is not None]
+    values: list[float] = []
+    for label in labels:
+        value = metrics[label]
+        if value is not None:
+            values.append(value)
+    html = _svg_bar_chart(labels, values, 1.0) if labels else ""
+    for key in sorted(metrics):
+        if metrics[key] is None:
+            html += (
+                f'<p class="na"><strong>{escape(key)}</strong>: '
+                f"{escape(_describe_metric(key, None, report))}</p>"
+            )
+    needed = _runs_hint(sorted(metrics), report)
+    if needed is not None:
+        html += (
+            f'<p class="na">Unavailable metrics need more gradable runs per task; '
+            f"rerun with <code>--num-runs {needed}</code>.</p>"
+        )
+    if not report.availability_recorded:
+        html += (
+            '<p class="na">Metric availability was not recorded in this report; '
+            "a zero may be an unavailable metric rather than a measured zero.</p>"
+        )
+    return html
 
 
 def _pass_rate_color(rate: float) -> str:

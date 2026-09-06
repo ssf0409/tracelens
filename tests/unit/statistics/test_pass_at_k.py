@@ -7,6 +7,7 @@ from tracelens.statistics.pass_at_k import (
     PassAtKAnalyzer,
     pass_at_k,
     pass_at_k_estimator,
+    pass_at_k_metric,
 )
 
 
@@ -80,12 +81,17 @@ class TestPassAtKEstimator:
         # Average across tasks
         assert 0.5 < result < 1.0
 
-    def test_insufficient_samples(self):
-        """Test with fewer samples than k."""
+    def test_insufficient_samples_are_not_estimated(self):
+        """A task with fewer runs than k is ineligible: no fallback (issue #46)."""
         results = {"task1": [True, False]}  # Only 2 samples, k=5
-        result = pass_at_k_estimator(results, k=5)
-        # Falls back to empirical estimate: 0.5
-        assert result == 0.5
+        # The float API keeps the legacy 0.0 placeholder ...
+        assert pass_at_k_estimator(results, k=5) == 0.0
+        # ... and the availability API says why.
+        metric = pass_at_k_metric(results, k=5)
+        assert metric.value is None
+        assert metric.eligible_tasks == 0 and metric.total_tasks == 1
+        assert metric.max_runs == 2 and metric.required_runs == 5
+        assert "needs at least 5" in (metric.reason or "")
 
 
 class TestPassAtKAnalyzer:

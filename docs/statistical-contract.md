@@ -200,9 +200,9 @@ are never compared across silently different populations.
 |---|---|---|
 | pass@k bootstrap de-duplicated repeated task draws and had no seed | multiplicity preserved, seedable, order-independent | #44 (fixed) |
 | pass^k used trial insertion (completion) order and could not see gaps | `run_index` order; windows never span gaps; duplicate run indices raise | #45 (fixed) |
-| pass@k with `n < k` falls back to the empirical rate `c / n`; pass^k silently drops such tasks from the suite mean | unavailable, with eligible/total counts | #46 |
-| Suite pass@k, suite pass^k, and `TrialBatch.pass_rate` count harness failures as agent failures (all trials in the denominator) | harness failures excluded and reported separately | #46 |
-| A reliability metric with no eligible task renders as `0.0` | `N/A` with reason | #46 |
+| pass@k with `n < k` fell back to the empirical rate `c / n`; pass^k silently dropped such tasks from the suite mean | unavailable, with eligible/total counts | #46 (fixed) |
+| Suite pass@k, suite pass^k, and `TrialBatch.pass_rate` counted harness failures as agent failures (all trials in the denominator) | harness failures excluded and reported separately | #46 (fixed) |
+| A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
 | The gate decision is not persisted; a re-rendered report drops regression data | one gate result across CLI, JSON, Markdown, HTML | #47 |
 | `compare_metrics` resamples two arms independently | paired task-level resampling for run comparison | #28 |
 

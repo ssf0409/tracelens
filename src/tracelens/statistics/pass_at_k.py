@@ -16,6 +16,7 @@ Reference: Chen et al., "Evaluating Large Language Models Trained on Code"
 
 import numpy as np
 
+from tracelens.statistics.availability import MetricValue, unavailable_reason
 from tracelens.statistics.inference import bootstrap_ci
 
 
@@ -59,11 +60,9 @@ def _per_task_pass_at_k(
 ) -> dict[str, float]:
     """Per-task pass@k scores keyed by task_id, in sorted task_id order.
 
-    Tasks with ``n >= k`` samples use the unbiased estimator. A task with
-    ``0 < n < k`` samples falls back to its empirical pass rate ``c / n``;
-    the statistical contract calls for "unavailable" instead, and that
-    change is tracked separately (issue #46). Tasks without samples are
-    omitted.
+    Only tasks with at least ``k`` gradable runs are eligible; the unbiased
+    estimator is undefined below that, so such tasks are omitted rather than
+    approximated (statistical contract: unavailable, never a fallback).
 
     Sorting by task_id gives every caller a canonical order, so seeded
     resampling does not depend on dict insertion order.
@@ -72,11 +71,8 @@ def _per_task_pass_at_k(
     for task_id in sorted(results_per_task):
         results = results_per_task[task_id]
         n = len(results)
-        c = sum(results)
         if n >= k:
-            scores[task_id] = pass_at_k(n, c, k)
-        elif n > 0:
-            scores[task_id] = c / n
+            scores[task_id] = pass_at_k(n, sum(results), k)
     return scores
 
 
@@ -84,17 +80,19 @@ def pass_at_k_estimator(
     results_per_task: dict[str, list[bool]],
     k: int,
 ) -> float:
-    """Compute pass@k across multiple tasks.
+    """Compute suite pass@k: the mean of per-task pass@k over eligible tasks.
 
-    For each task, computes pass@k using available samples.
-    Returns the average pass@k across all tasks.
+    A task is eligible when it has at least ``k`` gradable runs. This
+    float-returning API keeps the legacy convention of ``0.0`` when no task
+    is eligible; use :func:`pass_at_k_metric` to tell that apart from a
+    measured zero.
 
     Args:
         results_per_task: Dict mapping task_id to list of pass/fail booleans
         k: Number of samples to consider
 
     Returns:
-        Average pass@k across all tasks
+        Mean pass@k over eligible tasks, or 0.0 when no task is eligible
 
     Example:
         >>> results = {
@@ -106,6 +104,45 @@ def pass_at_k_estimator(
     """
     scores = list(_per_task_pass_at_k(results_per_task, k).values())
     return float(np.mean(scores)) if scores else 0.0
+
+
+def pass_at_k_metric(
+    results_per_task: dict[str, list[bool]],
+    k: int,
+) -> MetricValue:
+    """Suite pass@k with explicit availability.
+
+    Returns a :class:`MetricValue` whose ``value`` is ``None`` when no task
+    has at least ``k`` gradable runs, with the eligible/total task counts
+    and the largest run count recorded so a report can say why.
+
+    Raises:
+        ValueError: If ``k`` is less than 1.
+    """
+    if k < 1:
+        raise ValueError(f"k must be at least 1, got {k!r}")
+    scores = _per_task_pass_at_k(results_per_task, k)
+    total = len(results_per_task)
+    max_runs = max((len(r) for r in results_per_task.values()), default=0)
+    name = f"pass@{k}"
+    if scores:
+        return MetricValue(
+            name=name,
+            value=float(np.mean(list(scores.values()))),
+            eligible_tasks=len(scores),
+            total_tasks=total,
+            required_runs=k,
+            max_runs=max_runs,
+        )
+    return MetricValue(
+        name=name,
+        value=None,
+        eligible_tasks=0,
+        total_tasks=total,
+        required_runs=k,
+        max_runs=max_runs,
+        reason=unavailable_reason("gradable runs", k, total),
+    )
 
 
 class PassAtKAnalyzer:
@@ -133,6 +170,9 @@ class PassAtKAnalyzer:
     ) -> dict[str, float]:
         """Compute pass@k for multiple k values.
 
+        Unavailable metrics (no task with ``k`` gradable runs) come back as
+        ``0.0`` in this float API; :meth:`analyze_detailed` distinguishes them.
+
         Args:
             results_per_task: Dict mapping task_id to list of pass/fail booleans
 
@@ -141,6 +181,21 @@ class PassAtKAnalyzer:
         """
         return {
             f"pass@{k}": pass_at_k_estimator(results_per_task, k)
+            for k in self.k_values
+        }
+
+    def analyze_detailed(
+        self,
+        results_per_task: dict[str, list[bool]],
+    ) -> dict[str, MetricValue]:
+        """Compute pass@k for multiple k values with availability evidence.
+
+        Returns:
+            Dict mapping "pass@k" to a :class:`MetricValue`; ``value`` is
+            ``None`` where no task supports that ``k``.
+        """
+        return {
+            f"pass@{k}": pass_at_k_metric(results_per_task, k)
             for k in self.k_values
         }
 

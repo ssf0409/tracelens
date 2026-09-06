@@ -8,8 +8,56 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Changed
+
+- **Harness failures and never-run trials leave the pass-rate denominator.**
+  `TrialBatch.pass_rate`, `passed_count`, `get_pass_results_by_task()`, and
+  `get_pass_sequences_by_task()` now consider only *gradable* trials
+  (`Trial.is_gradable`: `COMPLETED`, `FAILED`, and `TIMEOUT` without a grader
+  crash). `INFRA_ERROR` trials, grader crashes, and `PENDING` / `RUNNING` /
+  `SKIPPED` trials are excluded and appear as `None` gaps in run sequences;
+  the new `gradable_count` / `excluded_count` properties and the report's
+  `gradable_trials` field carry the denominator. Suite mean score likewise
+  averages gradable trials only. The CLI baseline gate already excluded
+  these trials, so gate decisions are unchanged; overall pass rates in
+  reports rise for runs that had harness failures. Migration: batches that
+  reported `pass_rate = passed / total_count` now report
+  `passed / gradable_count`; use `batch.total_count - batch.gradable_count`
+  (or `ReportData.excluded_trials`) to see what was excluded.
+- **No more `c / n` fallback for pass@k below `k` runs.**
+  `pass_at_k_estimator`, `PassAtKAnalyzer.analyze()`, and
+  `compute_confidence_interval()` treat a task with fewer than `k` gradable
+  runs as ineligible, matching `pass_to_k_estimator`. The float APIs return
+  `0.0` when no task is eligible (their documented placeholder); use the new
+  availability APIs below to tell that apart from a measured zero. Migration:
+  code that relied on `pass_at_k_estimator({"t": [True]}, k=5) == 1.0`
+  should either run `k` trials per task or read
+  `pass_at_k_metric(...).value is None`.
+- **Report JSON carries availability.** `ReportData.pass_at_k` and
+  `reliability` values (and their per-task counterparts) may be `null` for
+  an unavailable metric, and new top-level keys `metric_availability`,
+  `availability_recorded`, and `gradable_trials` (plus `gradable_trials`
+  per task summary) are written. Reports written by earlier versions still
+  load: they get `availability_recorded = false`, their values are shown as
+  recorded, and `gradable_trials` falls back to `total_trials`.
+
 ### Fixed
 
+- **Unavailable metrics render as N/A, never as zeros.** A one-run-per-task
+  suite used to report `pass@5 = 1.0` (a fallback) and `pass^5 = 0.0` (no
+  eligible task) as if measured. New `MetricValue`
+  (`tracelens.statistics`), `pass_at_k_metric`, `pass_to_k_metric`, and
+  `PassAtKAnalyzer` / `ConsistencyAnalyzer.analyze_detailed()` return the
+  value with its evidence: eligible/total task counts, the runs the metric
+  needs, the most runs any task recorded, and a reason when unavailable.
+  Markdown shows `N/A: needs at least 5 gradable runs per task; 0/2 tasks
+  eligible; max 1 gradable run(s) recorded` plus a `--num-runs` hint, the
+  CI summary prints `pass@5=n/a`, HTML lists unavailable metrics under the
+  chart instead of drawing zero-height bars, and available values carry
+  their eligible/total counts. Pass rates with no gradable trial render as
+  `N/A` in every format, and per-task rows show `trials (gradable)` when
+  they differ. Legacy reports get an explicit note that availability was
+  not recorded. (#46)
 - **pass^k no longer depends on trial completion order.** The runner appends
   trials as they finish, and `TrialBatch.get_pass_results_by_task()` returned
   them in that order, so the consecutive-window pass^k changed with

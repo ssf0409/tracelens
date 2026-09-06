@@ -29,6 +29,14 @@ class TrialStatus(str, Enum):
     SKIPPED = "skipped"             # Skipped (e.g., due to filter)
 
 
+# Trial states that are evidence about the agent (statistical contract).
+_GRADABLE_STATUSES = frozenset({
+    TrialStatus.COMPLETED,
+    TrialStatus.FAILED,
+    TrialStatus.TIMEOUT,
+})
+
+
 class InfraError(Exception):
     """Raised by adapters when a failure is known to be infrastructural.
 
@@ -176,6 +184,18 @@ class Trial(BaseModel):
         return self.status == TrialStatus.INFRA_ERROR
 
     @property
+    def is_gradable(self) -> bool:
+        """Whether this trial counts as agent evidence.
+
+        COMPLETED, FAILED, and TIMEOUT trials are evidence about the agent
+        (the latter two as failures). INFRA_ERROR trials, trials where a
+        grader crashed, and trials that never ran (PENDING, RUNNING,
+        SKIPPED) are not: they are excluded from pass rates, pass@k, and
+        pass^k and reported separately. See ``docs/statistical-contract.md``.
+        """
+        return self.status in _GRADABLE_STATUSES and not self.has_grader_error
+
+    @property
     def fingerprint(self) -> str | None:
         """Get decision spec fingerprint from transcript."""
         if self.transcript and self.transcript.decision_spec:
@@ -263,16 +283,34 @@ class TrialBatch(BaseModel):
         return sum(1 for t in self.trials if t.is_complete)
 
     @property
+    def gradable_count(self) -> int:
+        """Number of trials that are agent evidence (``Trial.is_gradable``)."""
+        return sum(1 for t in self.trials if t.is_gradable)
+
+    @property
+    def excluded_count(self) -> int:
+        """Trials excluded from agent statistics: harness failures and never-run trials."""
+        return self.total_count - self.gradable_count
+
+    @property
     def passed_count(self) -> int:
-        """Number of passed trials."""
-        return sum(1 for t in self.trials if t.passed)
+        """Number of passed gradable trials."""
+        return sum(1 for t in self.trials if t.is_gradable and t.passed)
 
     @property
     def pass_rate(self) -> float:
-        """Pass rate across all trials."""
-        if not self.trials:
+        """Passed gradable trials divided by gradable trials.
+
+        Harness failures (INFRA_ERROR, grader crashes) and trials that never
+        ran are not in the denominator; they are surfaced separately via
+        ``infra_error_rate``, ``grader_error_rate``, and ``excluded_count``.
+        Returns 0.0 when there is no gradable trial; report renderers show
+        that case as N/A using ``gradable_count``.
+        """
+        gradable = self.gradable_count
+        if not gradable:
             return 0.0
-        return self.passed_count / len(self.trials)
+        return self.passed_count / gradable
 
     @property
     def infra_error_count(self) -> int:
@@ -390,15 +428,17 @@ class TrialBatch(BaseModel):
 
         Returns dict mapping task_id to a list of boolean pass results
         ordered by ``run_index`` regardless of the order trials were
-        appended. Missing run indices are simply absent from the list;
-        use :meth:`get_pass_sequences_by_task` when gaps matter (pass^k).
+        appended. Only gradable trials are included (``Trial.is_gradable``);
+        a task whose trials were all excluded maps to an empty list. Missing
+        or excluded run indices are simply absent from the list; use
+        :meth:`get_pass_sequences_by_task` when gaps matter (pass^k).
         Useful for computing pass@k.
 
         Raises:
             ValueError: If two trials share the same ``(task_id, run_index)``.
         """
         return {
-            task_id: [t.passed for t in trials]
+            task_id: [t.passed for t in trials if t.is_gradable]
             for task_id, trials in self._trials_by_task_in_run_order().items()
         }
 
@@ -406,9 +446,10 @@ class TrialBatch(BaseModel):
         """Pass/fail sequences indexed by ``run_index``, with ``None`` for gaps.
 
         Position ``i`` of each list is the outcome of ``run_index == i``; a
-        run index with no trial yields ``None``. Consecutive-window
-        statistics (pass^k) consume this shape so that runs on either side
-        of a missing run are never treated as consecutive observations.
+        run index with no trial, or whose trial is not gradable (a harness
+        failure), yields ``None``. Consecutive-window statistics (pass^k)
+        consume this shape so that runs on either side of a gap are never
+        treated as consecutive observations.
 
         Raises:
             ValueError: If two trials share the same ``(task_id, run_index)``.
@@ -417,6 +458,6 @@ class TrialBatch(BaseModel):
         for task_id, trials in self._trials_by_task_in_run_order().items():
             seq: list[bool | None] = [None] * (trials[-1].run_index + 1)
             for trial in trials:
-                seq[trial.run_index] = trial.passed
+                seq[trial.run_index] = trial.passed if trial.is_gradable else None
             sequences[task_id] = seq
         return sequences

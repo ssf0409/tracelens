@@ -86,6 +86,17 @@ for k in (1, 2, 3, 5):
 
 ---
 
+## When a metric is unavailable
+
+Both metrics need at least `k` gradable runs per task (pass^k needs them
+consecutive). A task with fewer is *ineligible* at that `k`, and a suite in
+which no task is eligible reports the metric as **N/A** with the reason and
+the eligible/total task counts — never as a `0.0` or a fallback `1.0`. A one
+run per task suite therefore shows a measured `pass@1` and `N/A` for
+`pass@3`, `pass@5`, and every `pass^k`; rerun with `--num-runs k` to unlock
+them. Harness failures (infrastructure errors, grader crashes) are not
+gradable runs and never count as agent failures.
+
 ## Which metric goes where
 
 | Context | Use | Why |
