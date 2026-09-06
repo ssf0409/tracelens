@@ -6,7 +6,8 @@ same story as the changelog. The script refuses (exit 1) when the version has
 no dated ``## [X.Y.Z] - YYYY-MM-DD`` section instead of inventing notes;
 ``--allow-unreleased`` exists for dry runs of the workflow on a branch, where
 the built version is a development version and the ``[Unreleased]`` section
-stands in for it, clearly labelled.
+stands in for it, clearly labelled; when that section is empty (the state
+right after a release) the dry run renders a placeholder instead of failing.
 
 Usage:
     python scripts/release_notes.py --version 0.5.0 --output notes.md
@@ -55,25 +56,29 @@ def release_notes(changelog: str, version: str, *, allow_unreleased: bool = Fals
     """The release body for ``version``: its changelog section plus install links.
 
     Raises:
-        LookupError: The version has no section (or it is empty) and no
-            fallback applies. The message names the sections that exist.
+        LookupError: The version has no section and no fallback applies (the
+            message names the sections that exist), or its section is empty.
+            The ``[Unreleased]`` fallback never raises for an empty section:
+            right after a release there is nothing to preview, and the dry run
+            says so instead of failing.
     """
     found = sections(changelog)
     body = found.get(version)
     prefix = ""
     if body is None and allow_unreleased and "Unreleased" in found:
         body = found["Unreleased"]
-        prefix = (
-            f"> Dry run: CHANGELOG.md has no section for {version}; "
-            "this is the [Unreleased] section.\n\n"
-        )
+        prefix = f"> Dry run: CHANGELOG.md has no section for {version}; "
+        if body.strip():
+            prefix += "this is the [Unreleased] section.\n\n"
+        else:
+            prefix += "the [Unreleased] section is empty, so there is nothing to release yet.\n\n"
     elif body is None:
         available = ", ".join(name for name in found if name != "Unreleased") or "none"
         raise LookupError(
             f"CHANGELOG.md has no '## [{version}] - YYYY-MM-DD' section (found: {available}); "
             "add the dated section before tagging"
         )
-    if not body.strip():
+    elif not body.strip():
         raise LookupError(f"the changelog section for {version} is empty")
     trailer = f"[Full changelog]({REPO_URL}/blob/main/CHANGELOG.md)"
     if not prefix:
@@ -81,7 +86,8 @@ def release_notes(changelog: str, version: str, *, allow_unreleased: bool = Fals
             f"Install: `pip install tracelens=={version}` · "
             f"[PyPI](https://pypi.org/project/tracelens/{version}/) · " + trailer
         )
-    return prefix + body.rstrip() + "\n\n" + trailer + "\n"
+    notes = body.rstrip() + "\n\n" if body.strip() else ""
+    return prefix + notes + trailer + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
