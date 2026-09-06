@@ -258,8 +258,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to JSON results file",
     )
     report_parser.add_argument(
-        "--format", default="markdown", choices=["markdown", "json", "html"],
-        help="Output format (default: markdown)",
+        "--format", default="markdown", choices=["markdown", "json", "html", "ci"],
+        help=(
+            "Output format: markdown, json, html, or ci, the one-line summary "
+            "'tracelens run' printed, gate line included (default: markdown)"
+        ),
     )
 
     # -- tracelens sample --
@@ -706,6 +709,10 @@ def cmd_report(args: argparse.Namespace) -> int:
         print(gen.render_markdown(report))
     elif args.format == "html":
         print(gen.render_html(report))
+    elif args.format == "ci":
+        # The same text `tracelens run` put on stdout, from the recorded
+        # decision: report never re-decides the gate, so it exits 0.
+        print(gen.render_ci_summary(report))
     else:
         print(json.dumps(report.to_dict(), indent=2, default=str))
 

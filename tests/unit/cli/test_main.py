@@ -89,6 +89,11 @@ class TestBuildParser:
         assert args.results == "results.json"
         assert args.format == "markdown"
 
+    def test_report_ci_format(self):
+        """Report command accepts the CI summary format."""
+        args = build_parser().parse_args(["report", "--results", "r.json", "--format", "ci"])
+        assert args.format == "ci"
+
     def test_report_json_format(self):
         """Report command accepts JSON format."""
         parser = build_parser()

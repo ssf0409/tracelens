@@ -256,7 +256,9 @@ path.json` / `--max-infra-retries N` for long runs. See
 [CI/CD Integration](ci-cd-integration.md) for the noise-aware flags
 (`--decision-spec`, `--noise-band`, `--infra-exceptions`).
 `tracelens report --results results.json --format markdown` re-renders a saved
-run.
+run; `--format ci` prints the same one-line summary `run` printed, gate line
+included, for job summaries and scripts (it re-renders the recorded decision
+and exits 0; the gate's exit code belongs to `run`).
 
 `tracelens compare baseline-trials.json candidate-trials.json` decides whether
 a second run of the same eval set is better, worse, or indistinguishable, from
