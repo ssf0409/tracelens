@@ -157,6 +157,11 @@ from tracelens.statistics.pass_at_k import (
     pass_at_k,
     pass_at_k_estimator,
 )
+from tracelens.statistics.run_comparison import (
+    RunComparison,
+    Verdict,
+    compare_runs,
+)
 
 __all__ = [
     # --- Core models ---
@@ -241,6 +246,9 @@ __all__ = [
     "check_compatibility",
     "TaskSummary",
     # --- Statistics ---
+    "compare_runs",
+    "RunComparison",
+    "Verdict",
     "pass_at_k",
     "pass_at_k_estimator",
     "PassAtKAnalyzer",

@@ -111,11 +111,68 @@ version comparison
 The fingerprint in brackets is your audit trail: every row is tied to a specific
 model + prompt.
 
-## Step 3: head-to-head significance with `compare_metrics`
+## Step 3: the verdict — `tracelens compare`
 
-The means say v2 looks better. `compare_metrics` tells you whether to believe it.
-It takes the two per-trial score lists (baseline first, current second) and
-returns a `ComparisonResult`:
+The means say v2 looks better. The comparison tells you whether to believe it,
+and whether it matters. With both runs saved (`tracelens run --save-trials`),
+it is one command:
+
+```bash
+tracelens compare v1-trials.json v2-trials.json --metric mean_score --threshold 0.05
+```
+
+or, in Python, `compare_runs(b1, b2, metric="mean_score", threshold=0.05)` on
+the two `TrialBatch` objects (this is what the example does). Either way the
+statistics are the ones fixed in the
+[statistical contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28):
+
+- **The task is the sampling unit.** Each task's mean score under v1 and under
+  v2 is paired, and the interval comes from resampling *tasks*. Six tickets of
+  different difficulty therefore cancel out instead of looking like noise, and
+  ten repeated trials of one ticket never masquerade as ten independent samples.
+- **Comparability is checked, not assumed.** The runs' provenance must show the
+  same task content and graders; a task edited between the runs, or a changed
+  grader, is refused rather than matched by id.
+- **Three readings, one verdict.** Significance (does the interval exclude 0),
+  practical relevance (`|delta|` against `--threshold`), and evidence (is the
+  interval narrow enough to say anything). The verdict is one of *improvement*,
+  *regression*, *significant but below the threshold*, *equivalent within the
+  threshold*, *inconclusive*, or *insufficient evidence*; exit codes are 0, 1,
+  and 2 respectively for "no regression", "regression", and "cannot tell".
+
+The example prints the same summary the command does:
+
+```text
+Compared v2 vs v1 on mean_score (higher is better): paired task bootstrap over 6 task(s)
+  v1: 60 trials, 60 gradable, 6 task(s) with values
+  v2: 60 trials, 60 gradable, 6 task(s) with values
+  tasks: 6 task(s) compared, aligned by content
+  delta = +0.1599  95% CI [+0.1213, +0.1964]  p = 0.0312 (exact)  (B = 10000, seed = 0)
+  readings: significant, |delta| >= threshold 0.05
+  Verdict: IMPROVEMENT (exit 0)
+  What changed: DecisionSpec prompts (attribution evidence, not proof of cause)
+  What moved (largest first): ticket-4 +0.230 (n 10/10), ticket-1 +0.188 (n 10/10), ...
+```
+
+Read it top to bottom: *what was compared* (metric, tasks, how they were
+aligned), *what the data say* (delta, interval, p-value, and the three
+readings), *the verdict*, then *what changed* (from the two `DecisionSpec`s;
+here only the prompts) next to *what moved* (the tasks with the largest paired
+differences, the ones to read first). "What changed" is attribution evidence,
+not proof of cause.
+
+Every field in that summary is also in `--output compare.json`, so a CI job
+can branch on the exit code and archive the record. An inconclusive comparison
+exits 2 on purpose: not enough evidence must never read as "no regression";
+pass `--observe` for dashboards that only want the numbers.
+
+### Trial-level comparison with `compare_metrics`
+
+`compare_metrics` is the older, lower-level tool: it compares two flat lists of
+values with an *unpaired* bootstrap and treats every value as an independent
+sample. Use it when the two samples really are independent draws (two unrelated
+sets of trials, latency samples), not for two runs of the same eval set, where
+`compare_runs` pairs the tasks. It returns a `ComparisonResult`:
 
 ```python
 from tracelens.statistics.inference import compare_metrics
@@ -135,12 +192,10 @@ the expensive part). The result fields:
 | `cohens_d` | effect size (standardized magnitude) |
 | `p_value` | permutation-test p-value (`None` unless `compute_p_value=True`) |
 
-Running the example prints:
+On the example's two score lists this reads:
 
 ```
   quality delta (v2 - v1) = +0.160  95% CI [+0.119, +0.201]  cohens_d=1.38  p=0.000
-  -> v2 is significantly BETTER
-  fingerprints differ: True
 ```
 
 How to read this, in order of what matters:
@@ -182,7 +237,8 @@ Compute these per version and compare them side by side, not just the means. See
 ## Two ways to run a comparison
 
 This page covers **ad-hoc head-to-head**: you have two configs in hand right now
-and you want a verdict. That's `compare_metrics` on two score lists.
+and you want a verdict. That's `tracelens compare` on two saved runs (or
+`compare_runs` on two batches).
 
 The other mode is **baseline-gated comparison for CI**: you store a baseline once,
 then every future run is compared against it automatically and the build fails on
@@ -199,6 +255,8 @@ and explained in [Reproducibility & DecisionSpec](reproducibility.md).
 
 ## See also
 
+- [Statistical Contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28)
+  — the estimand, sampling unit, and verdict table `tracelens compare` implements.
 - [Statistical Comparison](statistical-comparison.md) — the bootstrap CI, effect
   size, and significance machinery behind `compare_metrics`.
 - [Reproducibility & DecisionSpec](reproducibility.md) — how fingerprints make a

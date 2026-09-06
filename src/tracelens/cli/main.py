@@ -10,9 +10,7 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
-import traceback
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -22,7 +20,9 @@ from tracelens.baselines.comparison import (
     RegressionSeverity,
 )
 from tracelens.baselines.manager import BaselineManager
+from tracelens.cli._errors import debug_enabled, usage_error
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
+from tracelens.cli.compare import add_compare_parser, cmd_compare
 from tracelens.cli.config import RUN_DEFAULTS, ConfigError, resolve_run_settings
 from tracelens.cli.init import add_init_parser, cmd_init
 from tracelens.cli.sample import add_sample_parser, cmd_sample
@@ -256,6 +256,9 @@ def build_parser() -> argparse.ArgumentParser:
     # -- tracelens sample --
     add_sample_parser(subparsers)
 
+    # -- tracelens compare --
+    add_compare_parser(subparsers)
+
     # -- tracelens init --
     add_init_parser(subparsers)
 
@@ -362,36 +365,6 @@ def _print_gate_diagnostics(gate: GateResult) -> None:
                 f"within the {gate.noise_band} noise band "
                 f"are flagged but not blocking"
             )
-
-
-def debug_enabled(args: argparse.Namespace) -> bool:
-    """Whether tracebacks should accompany expected-error messages."""
-    return bool(getattr(args, "debug", False)) or bool(os.environ.get("TRACELENS_DEBUG"))
-
-
-def usage_error(
-    message: str,
-    *,
-    hint: str | None = None,
-    exc: BaseException | None = None,
-    debug: bool = False,
-) -> int:
-    """Print a concise usage/input error to stderr and return exit code 2.
-
-    Expected errors (a missing file, an unimportable class, an invalid value)
-    are reported in one or two lines. The traceback is printed only with
-    ``--debug`` / ``TRACELENS_DEBUG=1`` so a misconfiguration never looks like
-    a crash, while a genuine programming failure stays diagnosable.
-    """
-    print(f"Error: {message}", file=sys.stderr)
-    if hint:
-        print(f"  {hint}", file=sys.stderr)
-    if exc is not None:
-        if debug:
-            traceback.print_exception(exc, file=sys.stderr)
-        else:
-            print("  (run with --debug for the full traceback)", file=sys.stderr)
-    return 2
 
 
 def _write_output(path: str, content: str) -> None:
@@ -722,6 +695,8 @@ def main() -> None:
         sys.exit(cmd_report(args))
     elif args.command == "sample":
         sys.exit(cmd_sample(args))
+    elif args.command == "compare":
+        sys.exit(cmd_compare(args))
     elif args.command == "init":
         sys.exit(cmd_init(args))
     elif args.command in ("calibrate", "reconcile"):

@@ -10,6 +10,25 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **`tracelens compare`: a verdict between two saved runs.**
+  `tracelens compare baseline-trials.json candidate-trials.json` (and
+  `compare_runs()` in Python) implements the statistical contract's
+  run-versus-run section: tasks are aligned by content through the runs'
+  provenance (changed, added, or removed tasks and different graders make
+  the runs incompatible; `--unmatched-tasks exclude` compares the shared
+  tasks and lists the rest; artifacts without provenance align by id and
+  are labelled, or refused with `--require-provenance`), one statistic per
+  task and run is paired (`--metric pass_rate | mean_score |
+  <grader_id>.<metric_name>`, `--direction lower` for latency-like metrics,
+  `--grader` for multi-grader runs), and the mean paired difference gets a
+  percentile bootstrap over tasks, a sign-flip p-value (exact for small
+  suites), and a verdict against `--threshold`: improvement, equivalent
+  within the threshold, or significant but below it exit 0; regression
+  exits 1; inconclusive or insufficient evidence exits 2 (`--observe`
+  forces 0). The terminal summary ("what changed" from the `DecisionSpec`
+  diff next to "what moved" per task) and `--output compare.json` share
+  every field, and the same inputs and `--seed` reproduce the record
+  exactly. `examples/version_compare.py` now uses it. (#28)
 - **Versioned run provenance and comparison compatibility.** Every
   `EvaluationRunner.run()` records a `RunProvenance` on the batch
   (`batch.provenance`; `provenance` in `--output` and `--save-trials` JSON;
