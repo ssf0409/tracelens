@@ -1,8 +1,10 @@
-"""Decision specification for reproducibility.
+"""Decision specification: the declared configuration of a run.
 
-A DecisionSpec captures all parameters that could affect agent behavior,
-enabling exact reproducibility of evaluation runs. The fingerprint is a
-hash of all these parameters.
+A DecisionSpec records the parameters declared to affect agent behavior, so
+runs can be compared and outcome changes attributed to declared differences.
+The fingerprint is a hash of those parameters. It is evidence for attribution,
+not a guarantee that a run can be reproduced exactly: anything the spec does
+not capture can still differ between runs.
 
 Research-grade evaluations require knowing:
 - What model was used (provider + version)
@@ -371,9 +373,10 @@ class InfraConfig(BaseModel):
 class DecisionSpec(BaseModel):
     """Complete specification of all decision-affecting parameters.
 
-    A DecisionSpec is an immutable fingerprint of everything that could
-    affect agent behavior. Two runs with the same DecisionSpec fingerprint
-    should produce statistically similar results (given the same task input).
+    A DecisionSpec is a fingerprintable record of the declared configuration.
+    Two runs with the same fingerprint declared the same configuration;
+    whether their results agree is an empirical question the statistics
+    answer, since anything the spec does not capture can still differ.
 
     Example:
         spec = DecisionSpec(
@@ -460,9 +463,9 @@ class DecisionSpec(BaseModel):
     def fingerprint(self) -> str:
         """Compute SHA-256 fingerprint of the decision spec.
 
-        This fingerprint uniquely identifies the configuration.
-        Two runs with the same fingerprint should produce statistically
-        similar results.
+        The fingerprint identifies the declared configuration (the fields
+        in ``_to_hash_dict``); it says nothing about anything the spec does
+        not capture.
         """
         hash_data = self._to_hash_dict()
         # Serialize deterministically (sorted keys)

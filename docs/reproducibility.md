@@ -8,11 +8,16 @@ environment change underneath it?* If you never recorded the configuration that
 produced a result, you can't answer it.
 
 `DecisionSpec` is TraceLens's answer. It records the model, prompts, tools, agent,
-infrastructure, and environment that produced a run, and reduces them to a single
-content hash — the **fingerprint**. Identical configurations produce identical
-fingerprints; any behavior-affecting change produces a different one. Baselines
-stamped with a fingerprint become attributable: a regression carries the exact
-config that produced it.
+infrastructure, and environment declared for a run, and reduces them to a single
+content hash — the **fingerprint**. Identical declared configurations produce
+identical fingerprints; a change in any declared field produces a different one,
+and a change the spec does not capture (an undeclared dependency bump, say)
+does not. Baselines stamped with a fingerprint become attributable: a
+regression carries the declared configuration it was measured under. That
+supports *attributing* an outcome change to a declared difference; it is not
+proof that two runs executed identical code, and it is not causal proof. The
+[run provenance](#run-provenance) below records the measurement side of the
+same question.
 
 ```python
 from tracelens import DecisionSpec, ModelConfig, PromptSpec, ToolSpec, AgentSpec

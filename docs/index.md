@@ -5,7 +5,10 @@ into inspectable traces, graded outcomes, baseline comparisons, calibration
 data, and CI-ready reliability signals.
 
 It is deliberately domain-agnostic: TraceLens evaluates evidence, while your
-project owns the task data, agent invocation, graders, and rollout policy.
+project owns the task data, agent invocation, graders, and rollout policy. And
+it is deliberately local: tasks, baselines, run artifacts, and decisions are
+files in your repository, nothing needs an account or a server, and CI runs
+the same command you run at your desk.
 
 ---
 
@@ -56,6 +59,23 @@ defines every object and shows how they connect.
   baselines with severity-graded CI gates.
 - **Harness-vs-agent separation** — `infra_error` and `grader_error` rates are
   tracked separately, so a broken eval never looks like a failing agent.
+- **Decisions with their evidence** — `tracelens run --baseline-check` records
+  one gate decision in every output; `tracelens compare` gives a verdict between
+  two saved runs with an interval and a practical threshold; `tracelens inspect`
+  explains a failure from the trials file.
+- **Provenance, not promises** — every run records what was measured (task
+  content hashes, graders, settings) and which candidate was under test.
+  Comparisons refuse mismatched measurements, and "what changed" is reported
+  as attribution evidence, not proof of cause.
+
+### What is demonstrated today
+
+| Claim | What it rests on |
+|---|---|
+| The documented workflow works from a fresh install | A CI job installs a freshly built wheel into a clean environment and drives `init`, `run --config`, baselines, the gate, an intentional regression, `inspect`, `compare`, a targeted rerun, an infra outage, a grader crash, malformed input, and checkpoint/resume through the console script. |
+| The statistics do what the contract says | Hand-derived and independent-reference tests against the statistical contract (task-level bootstrap with multiplicity, order-independent pass^k, paired run comparison). |
+| Integrations behave at their boundaries | Tests exercise the JSON/JSONL/CSV loaders, the HTTP adapter, the optional Hugging Face loader, the generated GitHub workflow, and `tracelens.yaml`. |
+| TraceLens caught a real regression in a real project | **Not yet published.** The examples and the scaffold use simulated agents. A sanitized downstream case study is the open half of issue #33; until it exists, treat "catches regressions" as a tested mechanism, not an observed result. |
 
 ```bash
 pip install tracelens
