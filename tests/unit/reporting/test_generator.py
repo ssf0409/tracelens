@@ -556,3 +556,112 @@ class TestMetricAvailabilityReporting:
         assert "**Pass Rate**: N/A (no gradable trials)" in gen.render_markdown(report)
         assert "pass_rate=n/a" in gen.render_ci_summary(report)
         assert ">N/A<" in gen.render_html(report)
+
+
+class TestGateReporting:
+    """Issue #47: the gate decision is recorded once and rendered everywhere."""
+
+    @staticmethod
+    def _gated_report(tmp_path, *, passing: bool):
+        from tracelens.baselines.manager import BaselineManager, TaskBaseline
+        from tracelens.reporting.gate import evaluate_gate
+
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 1.0, std=0.05, sample_size=10)
+        manager.set_baseline(baseline)
+        manager.save()
+        batch = _make_batch({
+            "t1": [(passing, 1.0 if passing else 0.0)] * 3,
+            "t2": [(True, 1.0)] * 3,  # no baseline stored
+        })
+        gen = ReportGenerator(k_values=[1], consistency_k_values=[2])
+        report = gen.build_report(batch)
+        report.gate = evaluate_gate(
+            batch, manager, task_ids=[s.task_id for s in report.task_summaries]
+        )
+        return gen, report
+
+    def test_blocked_gate_is_rendered_in_every_format(self, tmp_path):
+        gen, report = self._gated_report(tmp_path, passing=False)
+        assert report.gate is not None and report.gate.status.value == "blocked"
+
+        md = gen.render_markdown(report)
+        assert "## Baseline Gate" in md
+        assert "**Status**: BLOCKED (exit code 1)" in md
+        assert "block at `moderate` or worse" in md
+        assert "1 checked, 1 skipped (no baseline)" in md
+        assert "| t1 | pass_rate | 1.0000 | 0.0000 | -100.0% | severe | blocking |" in md
+        assert "Skipped tasks: t2 (no baseline stored for this task)" in md
+
+        ci = gen.render_ci_summary(report)
+        assert "REGRESSION DETECTED [SEVERE]" in ci
+        assert "[tracelens] Baseline check: 1 checked, 1 skipped (no baseline), 1 blocking regression(s)" in ci
+
+        html = gen.render_html(report)
+        assert "Baseline Gate" in html and ">BLOCKED<" in html
+        assert "<td>pass_rate</td>" in html
+
+    def test_passed_and_not_requested_gates(self, tmp_path):
+        gen, report = self._gated_report(tmp_path, passing=True)
+        assert report.gate is not None and report.gate.status.value == "passed"
+        md = gen.render_markdown(report)
+        assert "**Status**: PASSED (exit code 0)" in md
+        assert "REGRESSION DETECTED" not in gen.render_ci_summary(report)
+        assert "0 blocking regression(s)" in gen.render_ci_summary(report)
+
+        from tracelens.reporting.gate import GateResult
+
+        report.gate = GateResult.not_requested()
+        md = gen.render_markdown(report)
+        assert "**Status**: not requested (run without `--baseline-check`)" in md
+        assert "Baseline check:" not in gen.render_ci_summary(report)
+        assert ">NOT_REQUESTED<" in gen.render_html(report)
+
+    def test_gate_round_trips_through_json(self, tmp_path):
+        gen, report = self._gated_report(tmp_path, passing=False)
+        restored = ReportData.from_dict(json.loads(json.dumps(report.to_dict())))
+        assert restored.gate is not None
+        assert restored.gate.to_dict() == report.gate.to_dict()
+        assert restored.gate.tasks[0].regressions[0].severity.value == "severe"
+        assert gen.render_markdown(restored) == gen.render_markdown(report)
+        assert gen.render_ci_summary(restored) == gen.render_ci_summary(report)
+
+    def test_legacy_report_has_no_gate_and_invents_none(self):
+        legacy = {"total_trials": 1, "total_tasks": 1, "task_summaries": []}
+        report = ReportData.from_dict(legacy)
+        assert report.gate is None
+        gen = ReportGenerator()
+        assert "Baseline Gate" not in gen.render_markdown(report)
+        assert "Baseline Gate" not in gen.render_html(report)
+        assert "Baseline check" not in gen.render_ci_summary(report)
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"foo": 1},
+            [],
+            {"total_trials": 1, "total_tasks": 1},
+            {"total_trials": 1, "total_tasks": 1, "task_summaries": "nope"},
+        ],
+    )
+    def test_from_dict_rejects_non_report_documents(self, data):
+        with pytest.raises(ValueError):
+            ReportData.from_dict(data)
+
+    def test_grader_errors_are_surfaced_in_human_output(self):
+        batch = TrialBatch()
+        ok = Trial(task_id="t1", run_index=0, status=TrialStatus.COMPLETED)
+        ok.add_outcome(Outcome(trial_id=ok.trial_id, grader_id="g", passed=True, score=1.0))
+        crashed = Trial(task_id="t1", run_index=1, status=TrialStatus.COMPLETED)
+        crashed.add_outcome(Outcome(
+            trial_id=crashed.trial_id, grader_id="g", passed=False, score=0.0,
+            grader_error=True,
+        ))
+        batch.add_trial(ok)
+        batch.add_trial(crashed)
+        gen = ReportGenerator(k_values=[1], consistency_k_values=[2])
+        report = gen.build_report(batch)
+        assert "**Grader-Error Rate**: 50.0% (1 of 2 trials)" in gen.render_markdown(report)
+        assert "grader_errors=50.0%" in gen.render_ci_summary(report)
+        assert "Grader Errors" in gen.render_html(report)

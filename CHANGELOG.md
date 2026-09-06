@@ -10,6 +10,24 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **Report JSON records the baseline gate decision.** `tracelens run
+  --output` now writes a `gate` object (status `not_requested` / `passed` /
+  `blocked` / `unevaluable`, exit code, threshold, noise band, task counts,
+  reasons, and per-task outcomes with the observed regressions), and
+  `ReportData.gate` carries it in Python. Files written by earlier versions
+  have no `gate` key and load with `gate = None`; no decision is invented.
+- **`tracelens report` and output writing fail clearly.** `report` exits 2
+  with a message for a missing results file, invalid JSON, or a document
+  that is not a TraceLens results file (`ReportData.from_dict` now raises
+  `ValueError` instead of rendering an empty report), and `tracelens run`
+  exits 2 when an `--output` / `--report` / `--html-report` /
+  `--save-trials` path cannot be written. Previously both produced
+  tracebacks.
+- **Gate comparisons use gradable trials only.** The per-trial samples fed
+  to regression detection now follow `Trial.is_gradable`, so `PENDING`,
+  `RUNNING`, and `SKIPPED` trials are excluded like harness failures
+  (previously they counted as failures); `INFRA_ERROR` and grader-crash
+  exclusion is unchanged.
 - **Harness failures and never-run trials leave the pass-rate denominator.**
   `TrialBatch.pass_rate`, `passed_count`, `get_pass_results_by_task()`, and
   `get_pass_sequences_by_task()` now consider only *gradable* trials
@@ -43,6 +61,19 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **The gate decision is made once and shown everywhere.** `tracelens run
+  --baseline-check` used to write JSON/Markdown/HTML before comparing against
+  baselines, so a run that exited 1 on a severe regression saved artifacts
+  that said nothing about it, and re-rendering with `tracelens report` lost
+  regression data entirely. The comparison now runs first
+  (`tracelens.reporting.gate.evaluate_gate`), the resulting `GateResult` is
+  attached to the report before any file is written, and the exit code, the
+  stdout summary, the JSON `gate` object, and the Markdown/HTML "Baseline
+  Gate" sections (status, policy, task counts, reasons, a regression table
+  with baseline/current/change/severity/notes, skipped tasks) all come from
+  it. All-infra and all-grader-error runs stay distinguishable from agent
+  regressions in every format, and grader-error rate and token totals are
+  now rendered in Markdown, the CI summary, and HTML. (#47)
 - **Unavailable metrics render as N/A, never as zeros.** A one-run-per-task
   suite used to report `pass@5 = 1.0` (a fallback) and `pass^5 = 0.0` (no
   eligible task) as if measured. New `MetricValue`

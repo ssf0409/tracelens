@@ -12,7 +12,7 @@ from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 
 
 def _trial(task_id: str, passed: bool, score: float) -> Trial:
-    trial = Trial(task_id=task_id)
+    trial = Trial(task_id=task_id, status=TrialStatus.COMPLETED)
     trial.add_outcome(
         Outcome(trial_id="x", grader_id="g", passed=passed, score=score)
     )

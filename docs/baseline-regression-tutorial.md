@@ -217,7 +217,11 @@ baseline-backed task with no gradable trials or comparable CLI metrics
 makes the gate `UNEVALUABLE` (exit 2), even if another task regressed.
 The gate always prints a summary line
 (`N checked, M skipped (no baseline), B blocking regression(s)`) plus per-task
-warnings for missing baselines.
+warnings for missing baselines. The same decision is written to the
+`--output` JSON as a `gate` object and rendered in the Markdown and HTML
+reports, so `tracelens report --results results.json` shows the status,
+threshold, per-task regressions, and reasons exactly as the run decided them.
+See [Reading the gate](./ci-cd-integration.md#reading-the-gate).
 
 For a hand-rolled Python gate, run your eval harness on pull requests and exit
 with a failure when the regression report blocks:

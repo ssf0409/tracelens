@@ -986,3 +986,118 @@ def test_noise_band_without_baseline_check_errors(
 
     assert exit_code == 2
     assert "--baseline-check" in capsys.readouterr().err
+
+
+# --- Issue #47: the gate decision is persisted and re-rendered -------------
+
+
+def test_gate_decision_is_persisted_and_rerendered(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A blocked gate is recorded in JSON/Markdown and survives `tracelens report`."""
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.9})
+    output = tmp_path / "results.json"
+    report_md = tmp_path / "report.md"
+    report_html = tmp_path / "report.html"
+
+    exit_code = _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--num-runs", "2", "--baseline-check", "--baselines-file", str(baselines),
+        "--fail-on-regression", "moderate",
+        "--output", str(output), "--report", str(report_md), "--html-report", str(report_html),
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "REGRESSION DETECTED" in captured.out
+    assert "Baseline check:" in captured.out
+    assert "blocking regression" in captured.err
+
+    data = json.loads(output.read_text())
+    gate = data["gate"]
+    assert gate["status"] == "blocked" and gate["exit_code"] == 1
+    assert gate["threshold"] == "moderate" and gate["checked"] == 2
+    failing = next(t for t in gate["tasks"] if t["task_id"] == "t-fail")
+    assert failing["outcome"] == "checked" and failing["blocking"]
+    assert failing["regressions"][0]["metric_name"] == "pass_rate"
+    assert failing["regressions"][0]["severity"] == "severe"
+
+    for text in (report_md.read_text(), report_html.read_text()):
+        assert "Baseline Gate" in text and "BLOCKED" in text
+        assert "t-fail" in text and "pass_rate" in text and "severe" in text
+
+    # Re-render from the saved JSON: identical decision, no recomputation.
+    assert _run_report(capsys, output, "markdown") == 0
+    rendered = capsys.readouterr().out
+    assert "**Status**: BLOCKED (exit code 1)" in rendered
+    assert "block at `moderate` or worse" in rendered
+    assert "| t-fail | pass_rate |" in rendered and "severe" in rendered
+    assert _run_report(capsys, output, "json") == 0
+    assert json.loads(capsys.readouterr().out)["gate"] == gate
+
+
+def _run_report(capsys: pytest.CaptureFixture[str], results: Path, fmt: str) -> int:
+    capsys.readouterr()  # drop anything pending
+    args = build_parser().parse_args(["report", "--results", str(results), "--format", fmt])
+    return cmd_report(args)
+
+
+def test_unevaluable_and_non_gated_decisions_are_persisted(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.1})
+    output = tmp_path / "results.json"
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file),
+        "--adapter", "tests.integration.test_cli_e2e.FlakyInfraAdapter", "--graders", GRADER,
+        "--baseline-check", "--baselines-file", str(baselines), "--output", str(output),
+    ) == 2
+    capsys.readouterr()
+    gate = json.loads(output.read_text())["gate"]
+    assert gate["status"] == "unevaluable" and gate["exit_code"] == 2
+    assert gate["skipped_no_gradable"] == 2
+    assert all(t["outcome"] == "no_gradable_trials" for t in gate["tasks"])
+    # All-infra stays distinguishable from an agent regression in the same document.
+    assert json.loads(output.read_text())["infra_error_count"] == 2
+    assert gate["blocking_regressions"] == 0
+
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--output", str(output),
+    ) == 0
+    capsys.readouterr()
+    assert json.loads(output.read_text())["gate"] == {
+        **json.loads(output.read_text())["gate"], "status": "not_requested", "exit_code": 0,
+    }
+
+
+def test_report_rejects_files_that_are_not_results(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    unrelated = tmp_path / "unrelated.json"
+    unrelated.write_text(json.dumps({"foo": 1}))
+    assert _run_report(capsys, unrelated, "markdown") == 2
+    assert "not a TraceLens results file" in capsys.readouterr().err
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert _run_report(capsys, broken, "markdown") == 2
+    assert "invalid JSON" in capsys.readouterr().err
+
+    assert _run_report(capsys, tmp_path / "missing.json", "markdown") == 2
+    assert "not found" in capsys.readouterr().err
+
+
+def test_output_write_failure_is_a_clear_error(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    blocker = tmp_path / "file.txt"
+    blocker.write_text("not a directory")
+    exit_code = _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--output", str(blocker / "results.json"),
+    )
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "could not write output file" in captured.err
+    assert "Traceback" not in captured.err

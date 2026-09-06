@@ -203,7 +203,7 @@ are never compared across silently different populations.
 | pass@k with `n < k` fell back to the empirical rate `c / n`; pass^k silently dropped such tasks from the suite mean | unavailable, with eligible/total counts | #46 (fixed) |
 | Suite pass@k, suite pass^k, and `TrialBatch.pass_rate` counted harness failures as agent failures (all trials in the denominator) | harness failures excluded and reported separately | #46 (fixed) |
 | A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
-| The gate decision is not persisted; a re-rendered report drops regression data | one gate result across CLI, JSON, Markdown, HTML | #47 |
+| The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
 | `compare_metrics` resamples two arms independently | paired task-level resampling for run comparison | #28 |
 
 ## Related pages
