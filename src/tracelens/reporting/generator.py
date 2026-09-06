@@ -16,6 +16,7 @@ from tracelens._version import __version__
 from tracelens.baselines.comparison import RegressionReport
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.trial import TrialBatch
+from tracelens.reporting.gate import GateResult, GateStatus, TaskGateOutcome
 from tracelens.statistics.availability import MetricValue
 from tracelens.statistics.consistency import ConsistencyAnalyzer
 from tracelens.statistics.pass_at_k import PassAtKAnalyzer
@@ -102,8 +103,14 @@ class ReportData:
     metric_availability: dict[str, MetricValue] = field(default_factory=dict)
     availability_recorded: bool = True
 
-    # Optional regression report
+    # Optional regression report (library callers may attach one by hand;
+    # CLI runs record the full decision in ``gate`` instead)
     regression_report: RegressionReport | None = None
+
+    # Baseline gate decision. ``None`` means unknown (a report written before
+    # gate decisions were recorded); ``GateResult.not_requested()`` means the
+    # run had no gate. Rendered in every format and round-tripped via JSON.
+    gate: GateResult | None = None
 
     @property
     def excluded_trials(self) -> int:
@@ -139,6 +146,8 @@ class ReportData:
                 "infra_config_mismatch": self.regression_report.infra_config_mismatch,
                 "blocking_regressions": len(self.regression_report.blocking_regressions),
             }
+        if self.gate is not None:
+            result["gate"] = self.gate.to_dict()
         return result
 
     @classmethod
@@ -148,11 +157,28 @@ class ReportData:
         Reports written before availability was recorded load with
         ``availability_recorded=False``; their metric values are kept as
         recorded, eligibility is unknown, and ``gradable_trials`` falls back
-        to ``total_trials`` (the legacy denominator).
+        to ``total_trials`` (the legacy denominator). Reports written before
+        gate decisions were recorded load with ``gate=None``; no decision is
+        invented for them.
+
+        Raises:
+            ValueError: If ``data`` is not a TraceLens results document
+                (not an object, or missing ``total_trials``, ``total_tasks``,
+                or ``task_summaries``).
         """
-        summaries = [
-            TaskSummary(**s) for s in data.get("task_summaries", [])
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+        missing = [
+            key for key in ("total_trials", "total_tasks", "task_summaries")
+            if key not in data
         ]
+        if missing:
+            raise ValueError("missing required keys: " + ", ".join(missing))
+        if not isinstance(data["task_summaries"], list):
+            raise ValueError("task_summaries must be a list")
+        summaries = [TaskSummary(**s) for s in data["task_summaries"]]
+        gate_data = data.get("gate")
+        gate = GateResult.from_dict(gate_data) if isinstance(gate_data, dict) else None
         pass_at_k: dict[str, float | None] = dict(data.get("pass_at_k", {}))
         reliability: dict[str, float | None] = dict(data.get("reliability", {}))
         recorded = "metric_availability" in data
@@ -185,6 +211,7 @@ class ReportData:
             reliability=reliability,
             metric_availability=availability,
             availability_recorded=recorded,
+            gate=gate,
         )
 
 
@@ -317,8 +344,24 @@ class ReportGenerator:
                 "due to infrastructure (OOM, network, sandbox) rather than "
                 "the agent. Cross-check resource config before blaming the model."
             )
+        if report.grader_error_count > 0:
+            lines.append(
+                f"- **Grader-Error Rate**: {report.grader_error_rate:.1%} "
+                f"({report.grader_error_count} of {report.total_trials} trials)"
+            )
+            lines.append(
+                "  - ⚠ A grader crashed on these trials. They are excluded from "
+                "agent statistics; a spike here means the grading harness broke, "
+                "not the agent."
+            )
+        if report.total_input_tokens or report.total_output_tokens:
+            lines.append(
+                f"- **Tokens**: {report.total_input_tokens:,} in / "
+                f"{report.total_output_tokens:,} out"
+            )
         lines.append("")
 
+        lines.extend(_gate_section_md(report))
         lines.extend(_metric_section_md("Capability (pass@k)", report.pass_at_k, report))
         lines.extend(_metric_section_md("Reliability (pass^k)", report.reliability, report))
 
@@ -335,8 +378,12 @@ class ReportGenerator:
                 )
             lines.append("")
 
-        # Regression
-        if report.regression_report and report.regression_report.has_regression:
+        # Legacy hand-attached regression report (CLI runs use ``gate``)
+        if (
+            report.gate is None
+            and report.regression_report
+            and report.regression_report.has_regression
+        ):
             lines.append("## Regression Alert")
             lines.append("")
             lines.append(report.regression_report.to_ci_output())
@@ -366,8 +413,17 @@ class ReportGenerator:
 
         if report.infra_error_count > 0:
             lines[0] += f", infra_errors={report.infra_error_rate:.1%}"
+        if report.grader_error_count > 0:
+            lines[0] += f", grader_errors={report.grader_error_rate:.1%}"
 
-        if report.regression_report and report.regression_report.has_regression:
+        if report.gate is not None and report.gate.requested:
+            # Blocking tasks print the detector's own text, then the one-line
+            # gate summary -- the same lines the CLI used to assemble itself.
+            for task in report.gate.tasks:
+                if task.outcome is TaskGateOutcome.CHECKED and task.blocking:
+                    lines.append(task.regression_report().to_ci_output())
+            lines.append(report.gate.summary_line())
+        elif report.regression_report and report.regression_report.has_regression:
             # Prefer the noise-aware "blocking" count if specs were provided.
             n_blocking = len(report.regression_report.blocking_regressions)
             n_total = len(report.regression_report.regressions)
@@ -409,6 +465,13 @@ class ReportGenerator:
                 f"{report.infra_error_rate * 100:.1f}%",
                 infra_color,
             )
+        if report.grader_error_count > 0:
+            cards_html += _html_card(
+                "Grader Errors",
+                f"{report.grader_error_rate * 100:.1f}%",
+                "#ef4444" if report.grader_error_rate >= 0.05 else "#f97316",
+            )
+        gate_html = _gate_section_html(report)
 
         # --- Capability / Reliability bar charts (available metrics only;
         # unavailable ones are listed with their reason, never drawn as 0) ---
@@ -444,9 +507,13 @@ class ReportGenerator:
         if all_scores:
             score_histogram = _svg_histogram(all_scores, bins=10)
 
-        # --- Regression alert ---
+        # --- Legacy regression alert (CLI runs render ``gate`` instead) ---
         regression_html = ""
-        if report.regression_report and report.regression_report.has_regression:
+        if (
+            report.gate is None
+            and report.regression_report
+            and report.regression_report.has_regression
+        ):
             severity = report.regression_report.overall_severity.value.upper()
             sev_color = {"MINOR": "#eab308", "MODERATE": "#f97316", "SEVERE": "#ef4444"}.get(
                 severity, "#6b7280"
@@ -509,6 +576,8 @@ class ReportGenerator:
   tr:hover {{ background: #f8fafc; }}
   .chart-row {{ display: flex; gap: 16px; flex-wrap: wrap; }}
   .na {{ color: #64748b; font-size: 0.9em; margin: 6px 0; }}
+  .badge {{ color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 0.75em;
+            margin-left: 8px; }}
   .chart-row > div {{ flex: 1; min-width: 280px; }}
   svg text {{ font-family: system-ui, sans-serif; }}
   @media print {{ body {{ background: #fff; }} section {{ box-shadow: none;
@@ -520,6 +589,8 @@ class ReportGenerator:
 <div class="subtitle">Generated {escape(timestamp)} &middot; TraceLens v{__version__}</div>
 
 <div class="cards">{cards_html}</div>
+
+{gate_html}
 
 {"<section><h2>Capability (pass@k)</h2>" + capability_svg + "</section>" if capability_svg else ""}
 {"<section><h2>Reliability (pass^k)</h2>" + reliability_svg + "</section>" if reliability_svg else ""}
@@ -537,6 +608,143 @@ class ReportGenerator:
 </div>
 </body>
 </html>"""
+
+
+_GATE_COLORS = {
+    GateStatus.PASSED: "#22c55e",
+    GateStatus.BLOCKED: "#ef4444",
+    GateStatus.UNEVALUABLE: "#f97316",
+    GateStatus.NOT_REQUESTED: "#6b7280",
+}
+
+
+def _gate_status_text(gate: GateResult) -> str:
+    if gate.status is GateStatus.NOT_REQUESTED:
+        return "not requested (run without `--baseline-check`)"
+    return f"{gate.status.value.upper()} (exit code {gate.exit_code})"
+
+
+def _gate_policy_text(gate: GateResult) -> str:
+    threshold = gate.threshold.value if gate.threshold else "moderate"
+    band = f"{gate.noise_band}" if gate.noise_band is not None else "default"
+    required = "yes" if gate.require_baselines else "no"
+    return (
+        f"block at `{threshold}` or worse; noise band {band}; "
+        f"require baselines: {required}"
+    )
+
+
+def _gate_task_counts(gate: GateResult) -> str:
+    return (
+        f"{gate.checked} checked, {gate.skipped_no_baseline} skipped (no baseline), "
+        f"{gate.skipped_no_gradable} skipped (no gradable trials), "
+        f"{gate.skipped_no_comparable_metrics} skipped (no comparable metrics)"
+    )
+
+
+def _regression_notes(task: Any, regression: Any) -> str:
+    notes: list[str] = []
+    if regression.within_noise_band:
+        notes.append("within infra-noise band; not blocking")
+    elif task.blocking:
+        notes.append("blocking")
+    if regression.insufficient_data:
+        notes.append("insufficient samples; severity from thresholds")
+    if task.infra_config_mismatch:
+        notes.append("infra config differs from baseline")
+    return "; ".join(notes)
+
+
+def _gate_rows(gate: GateResult) -> list[tuple[str, str, str, str, str, str, str]]:
+    rows = []
+    for task in gate.tasks:
+        for regression in task.regressions:
+            rows.append((
+                task.task_id,
+                regression.metric_name,
+                f"{regression.baseline_mean:.4f}",
+                f"{regression.current_mean:.4f}",
+                f"{regression.delta_percent:+.1f}%",
+                regression.severity.value,
+                _regression_notes(task, regression),
+            ))
+    return rows
+
+
+def _gate_skipped_lines(gate: GateResult) -> list[str]:
+    return [
+        f"{task.task_id} ({task.reason})"
+        for task in gate.tasks
+        if task.outcome is not TaskGateOutcome.CHECKED
+    ]
+
+
+def _gate_section_md(report: ReportData) -> list[str]:
+    gate = report.gate
+    if gate is None:
+        return []
+    lines = ["## Baseline Gate", "", f"- **Status**: {_gate_status_text(gate)}"]
+    if gate.requested:
+        lines.append(f"- **Policy**: {_gate_policy_text(gate)}")
+        lines.append(f"- **Tasks**: {_gate_task_counts(gate)}")
+        lines.append(f"- **Blocking regressions**: {gate.blocking_regressions}")
+        for reason in gate.reasons:
+            lines.append(f"- **Why**: {reason}")
+        for warning in gate.warnings:
+            lines.append(f"- **Warning**: {warning}")
+        rows = _gate_rows(gate)
+        if rows:
+            lines.append("")
+            lines.append(
+                "| Task | Metric | Baseline | Current | Change | Severity | Notes |"
+            )
+            lines.append(
+                "|------|--------|----------|---------|--------|----------|-------|"
+            )
+            for row in rows:
+                lines.append("| " + " | ".join(row) + " |")
+        skipped = _gate_skipped_lines(gate)
+        if skipped:
+            lines.append("")
+            lines.append("Skipped tasks: " + "; ".join(skipped))
+    lines.append("")
+    return lines
+
+
+def _gate_section_html(report: ReportData) -> str:
+    gate = report.gate
+    if gate is None:
+        return ""
+    color = _GATE_COLORS[gate.status]
+    badge = (
+        f'<span class="badge" style="background:{color}">'
+        f"{escape(gate.status.value.upper())}</span>"
+    )
+    body = f"<p><strong>Status</strong>: {escape(_gate_status_text(gate))}</p>"
+    if gate.requested:
+        body += f"<p><strong>Policy</strong>: {escape(_gate_policy_text(gate))}</p>"
+        body += f"<p><strong>Tasks</strong>: {escape(_gate_task_counts(gate))}</p>"
+        body += (
+            f"<p><strong>Blocking regressions</strong>: {gate.blocking_regressions}</p>"
+        )
+        for reason in gate.reasons:
+            body += f"<p><strong>Why</strong>: {escape(reason)}</p>"
+        for warning in gate.warnings:
+            body += f'<p class="na"><strong>Warning</strong>: {escape(warning)}</p>'
+        rows = _gate_rows(gate)
+        if rows:
+            body += (
+                "<table><thead><tr><th>Task</th><th>Metric</th><th>Baseline</th>"
+                "<th>Current</th><th>Change</th><th>Severity</th><th>Notes</th>"
+                "</tr></thead><tbody>"
+            )
+            for row in rows:
+                body += "<tr>" + "".join(f"<td>{escape(cell)}</td>" for cell in row) + "</tr>"
+            body += "</tbody></table>"
+        skipped = _gate_skipped_lines(gate)
+        if skipped:
+            body += f'<p class="na">Skipped tasks: {escape("; ".join(skipped))}</p>'
+    return f"<section><h2>Baseline Gate{badge}</h2>{body}</section>"
 
 
 def _format_pass_rate(report: ReportData) -> str:

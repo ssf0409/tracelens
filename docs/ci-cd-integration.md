@@ -141,7 +141,70 @@ jobs:
             eval/results/trials.json
 ```
 
-Notes:
+## Reading the gate
+
+`tracelens run --baseline-check` makes one decision per run and records it in
+every output: the exit code, the summary on stdout, and a `gate` object in the
+`--output` JSON, which the Markdown and HTML reports render and
+`tracelens report` re-renders without recomputing anything.
+
+| Status | Exit code | Meaning | What to do |
+|--------|-----------|---------|------------|
+| `not_requested` | 0 | The run had no `--baseline-check`. | Nothing; no gate was evaluated. |
+| `passed` | 0 | At least one task was compared and nothing blocked. | Merge. |
+| `blocked` | 1 | A regression at or above `--fail-on-regression`, or `--require-baselines` with a task that has no baseline. | Read the regression table, decide whether the change is acceptable, then fix the agent or promote the baseline. |
+| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials or no comparable metric. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons, then rerun. |
+
+A misconfigured gate (missing `--baselines-file`, an unreadable baselines
+file, or a gate-only flag without `--baseline-check`) also exits 2, before
+the eval runs. `unevaluable` takes precedence over `blocked`: an observed
+regression is still recorded, but missing evidence cannot authorize either
+verdict.
+
+The `gate` object in `results.json` (abridged):
+
+```json
+"gate": {
+  "status": "blocked",
+  "exit_code": 1,
+  "threshold": "moderate",
+  "noise_band": 0.03,
+  "require_baselines": false,
+  "checked": 2,
+  "skipped_no_baseline": 0,
+  "skipped_no_gradable": 0,
+  "skipped_no_comparable_metrics": 0,
+  "blocking_regressions": 1,
+  "reasons": ["1 blocking regression(s) at threshold 'moderate': t-fail (severe)"],
+  "tasks": [
+    {
+      "task_id": "t-fail",
+      "outcome": "checked",
+      "compared_trials": 2,
+      "excluded_trials": 0,
+      "blocking": true,
+      "regressions": [
+        {"metric_name": "pass_rate", "baseline_mean": 0.9, "current_mean": 0.0,
+         "delta_percent": -100.0, "severity": "severe", "is_significant": true,
+         "within_noise_band": false}
+      ]
+    }
+  ]
+}
+```
+
+Each task's `outcome` is one of `checked`, `no_baseline`,
+`no_gradable_trials`, or `no_comparable_metrics`, with a `reason` when it
+was not checked. To look at a saved decision again:
+
+```bash
+tracelens report --results eval/results/results.json --format markdown
+```
+
+A results file written before gate decisions were recorded has no `gate`
+key; `tracelens report` renders it without inventing one.
+
+### Details
 
 - `--baseline-check` requires `--baselines-file`, and the file must exist —
   a missing flag or file exits 2 before the eval runs, so a misconfigured
