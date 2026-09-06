@@ -55,6 +55,8 @@ async def starter_agent(input_data: dict[str, Any]) -> dict[str, Any]:
 class StarterAdapter(SimpleAdapter):
     """No-argument adapter loadable by ``tracelens run``."""
 
+    # provenance_version = "starter-1"  # Bump when agent behavior or invocation wiring changes.
+
     def __init__(self) -> None:
         super().__init__(starter_agent)
 '''
@@ -67,6 +69,8 @@ from tracelens import CodeGrader, Task, Transcript
 
 class StarterGrader(CodeGrader):
     """Passes when ``final_output["answer"]`` matches task metadata."""
+
+    # provenance_version = "starter-1"  # Bump when the grading rubric changes.
 
     def __init__(self) -> None:
         super().__init__("starter")

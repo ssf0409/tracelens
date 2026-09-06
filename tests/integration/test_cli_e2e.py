@@ -278,9 +278,12 @@ def test_init_scaffolds_a_runnable_eval_project(
     args = build_parser().parse_args(["run", "--config", "tracelens.yaml"])
 
     assert cmd_run(args) == 0
-    assert json.loads((project / "eval/results/results.json").read_text())[
-        "overall_pass_rate"
-    ] == 1.0
+    results = json.loads((project / "eval/results/results.json").read_text())
+    assert results["overall_pass_rate"] == 1.0
+    assert '# provenance_version = "starter-1"' in (project / "eval/adapter.py").read_text()
+    assert '# provenance_version = "starter-1"' in (project / "eval/grader.py").read_text()
+    assert results["provenance"]["candidate"]["adapter"]["version"] is None
+    assert results["provenance"]["measurement"]["graders"][0]["version"] is None
     for name in ("report.md", "report.html", "trials.json"):
         assert (project / "eval/results" / name).exists(), name
 

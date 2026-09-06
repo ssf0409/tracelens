@@ -85,13 +85,22 @@ from tracelens import SimpleAdapter
 async def my_agent(input_data: dict) -> dict:
     return {"action": decide(input_data["ticket"])}
 
-adapter = SimpleAdapter(my_agent)
+class MyAdapter(SimpleAdapter):
+    provenance_version = "agent-v1"  # Bump when agent behavior or invocation wiring changes.
+
+    def __init__(self) -> None:
+        super().__init__(my_agent)
+
+adapter = MyAdapter()
 ```
 
 For a custom adapter, call `self.start_transcript(task)` to get a transcript with
 timing already started, fill `final_output` (and optionally record steps), and
 return it. The runner only depends on the `AgentAdapter` interface, so everything
-downstream is identical regardless of which adapter you pick.
+downstream is identical regardless of which adapter you pick. `provenance_version`
+records the declared adapter version in run provenance; bump it when agent behavior
+or invocation wiring changes. It is evidence for attribution, not proof of identical
+execution or of what caused an outcome change.
 
 → A custom HTTP adapter end to end: [Evaluating a Real Agent](real-agent.md).
 
@@ -118,6 +127,8 @@ pass/score:
 from tracelens import CodeGrader
 
 class ActionGrader(CodeGrader):
+    provenance_version = "rubric-v1"  # Bump when the grading rubric changes.
+
     def compute_metrics(self, transcript, task) -> dict[str, float]:
         got = transcript.final_output.get("action")
         return {"correct": float(got == task.metadata["expected_action"])}
@@ -125,6 +136,10 @@ class ActionGrader(CodeGrader):
     def determine_pass(self, metrics, task) -> tuple[bool, float]:
         return metrics["correct"] == 1.0, metrics["correct"]
 ```
+
+`provenance_version` records the declared grader version in run provenance; bump
+it when the grading rubric changes. It is evidence for attribution, not proof of
+identical execution or of what caused an outcome change.
 
 **Combining graders.** Real grading is often a hard gate *plus* a quality score.
 `CompositeGrader` takes `(grader, weight)` pairs; each grader's `EvalPolicy`

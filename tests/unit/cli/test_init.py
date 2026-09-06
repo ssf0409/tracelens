@@ -6,7 +6,9 @@ import yaml
 
 from tracelens.cli.config import load_run_config
 from tracelens.cli.init import (
+    ADAPTER_TEMPLATE,
     CONFIG_TEMPLATE,
+    GRADER_TEMPLATE,
     render_readme,
     render_workflow,
     tracelens_requirement,
@@ -120,6 +122,12 @@ class TestConfigTemplate:
         assert "tracelens run --config tracelens.yaml" in CONFIG_TEMPLATE
         assert "environment variables" in CONFIG_TEMPLATE
         assert "key" not in CONFIG_TEMPLATE.lower().replace("every key", "").replace("api key", "x")
+
+
+class TestStarterTemplates:
+    def test_declare_versions_for_run_provenance(self):
+        assert '# provenance_version = "starter-1"' in ADAPTER_TEMPLATE
+        assert '# provenance_version = "starter-1"' in GRADER_TEMPLATE
 
 
 class TestReadmeTemplate:
