@@ -90,6 +90,7 @@ nav:
       - Comparing Versions: comparing-versions.md
       - Grader Library: grader-library.md
       - User Guide: user-guide.md
+      - Debugging a Failed Evaluation: inspecting-failures.md
       - Multi-Level Evaluation: evaluation-levels.md
       - Baseline Regression Tutorial: baseline-regression-tutorial.md
       - Human-Eval Calibration: human-eval.md

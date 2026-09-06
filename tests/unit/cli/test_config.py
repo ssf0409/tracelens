@@ -25,6 +25,7 @@ run:
   metadata_fields: [difficulty, area]
   adapter: eval.adapter.StarterAdapter
   graders: [eval.grader.StarterGrader, eval.grader.OtherGrader]
+  task_ids: [t-1, t-2]
   import_root: src
   num_runs: 3
   max_concurrency: 2
@@ -78,6 +79,7 @@ class TestLoadRunConfig:
             "metadata_fields": ["difficulty", "area"],
             "adapter": "eval.adapter.StarterAdapter",
             "graders": ["eval.grader.StarterGrader", "eval.grader.OtherGrader"],
+            "task_ids": ["t-1", "t-2"],
             "num_runs": 3,
             "max_concurrency": 2,
             "timeout": 45.0,

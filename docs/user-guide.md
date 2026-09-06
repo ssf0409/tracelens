@@ -192,6 +192,10 @@ error never trips it.
    time?). A high pass@k with a low pass^k is "capable but flaky."
 3. **Is a change real?** To compare two runs, don't eyeball the means — use a
    bootstrap comparison.
+4. **Why did a trial fail?** Read the trial, not the number:
+   `tracelens inspect trials.json --failures` shows the kind of failure,
+   expected versus actual, grader feedback, and the transcript
+   ([Debugging a Failed Evaluation](inspecting-failures.md)).
 
 Which statistic answers which question:
 
@@ -267,6 +271,15 @@ tasks, `--observe` to always exit 0, and `--output compare.json` for the
 record. See [Comparing Versions](comparing-versions.md) and the
 [statistical contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28).
 
+`tracelens inspect eval/results/trials.json --failures` explains a failed run
+from its trials file: each failing trial's kind (agent failure, infra error,
+or grader crash, never conflated), expected versus actual (with
+`--eval-set`), grader feedback, and transcript steps, bounded with explicit
+omission counts (`--full` lifts the bounds; `--html` writes an offline
+drilldown). Fix and rerun only the affected tasks with
+`tracelens run ... --task-id ID` (`run.task_ids` in a config file). See
+[Debugging a Failed Evaluation](inspecting-failures.md).
+
 ### Run configuration file
 
 Commit the run settings instead of repeating flags in every README and CI
@@ -282,6 +295,7 @@ run:
   metadata_fields: [difficulty]      # --metadata-fields (jsonl/csv columns to keep)
   adapter: eval.adapter.MyAdapter    # --adapter
   graders: [eval.grader.MyGrader]    # --graders
+  task_ids: [math-add]               # --task-id (targeted rerun; omit to run every task)
   import_root: .                     # dotted paths import from here (default: this directory)
   num_runs: 5                        # --num-runs
   max_concurrency: 5                 # --max-concurrency
@@ -334,7 +348,7 @@ without parsing text:
 
 | Exit code | Meaning | Examples |
 |-----------|---------|----------|
-| `0` | Success, or the gate passed | a run completed; `reconcile` found the grader calibrated; `compare` found no regression |
+| `0` | Success, or the gate passed | a run completed; `reconcile` found the grader calibrated; `compare` found no regression; `inspect` printed its report |
 | `1` | A negative result | the baseline gate blocked; `--require-baselines` unmet; Pearson r below `--threshold`; `compare` found a regression |
 | `2` | A usage, configuration, or input error, or a gate that could not be evaluated | missing or unreadable input file, invalid JSON, an unimportable adapter or grader, `--num-runs 0`, a gate with no gradable trials, `init` refusing to overwrite without `--force`, a `compare` of runs that are not comparable or whose evidence is inconclusive |
 

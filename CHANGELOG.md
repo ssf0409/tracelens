@@ -10,6 +10,25 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **`tracelens inspect`: explain failed trials from a trials file.**
+  `tracelens inspect eval/results/trials.json --failures` prints, per
+  failing trial, one kind (agent failure, infra error, or grader crash,
+  never conflated, harness causes first), status and attempts, expected
+  versus actual output (`--eval-set` joins the task's name, input, and
+  declared expectation), every grader's verdict, score, metrics, and
+  feedback, and the transcript's steps, tokens, tool calls, and errors.
+  Absent fields read `missing`; output is bounded (400 characters per
+  field, 20 steps per transcript) with an explicit count of what was
+  omitted, and `--full` lifts the bounds. Filters: `--kind agent|infra|
+  grader|not-run|passed`, `--task-id`, `--grader` (trials that grader
+  failed or crashed on), `--all`, `--limit`. `--html` writes a
+  self-contained, escaped, offline drilldown that reads on a phone;
+  `--json` writes the same view as data. The command exits 0 whenever the
+  file was read (it reports, the gate decides) and 2 on input errors.
+  `tracelens run --task-id ID ...` (`run.task_ids` in `tracelens.yaml`)
+  reruns only the named tasks and refuses unknown ids; its provenance and
+  checkpoint identity cover the subset. New guide: "Debugging a Failed
+  Evaluation". (#52)
 - **`tracelens compare`: a verdict between two saved runs.**
   `tracelens compare baseline-trials.json candidate-trials.json` (and
   `compare_runs()` in Python) implements the statistical contract's

@@ -25,6 +25,7 @@ from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
 from tracelens.cli.compare import add_compare_parser, cmd_compare
 from tracelens.cli.config import RUN_DEFAULTS, ConfigError, resolve_run_settings
 from tracelens.cli.init import add_init_parser, cmd_init
+from tracelens.cli.inspect import add_inspect_parser, cmd_inspect
 from tracelens.cli.sample import add_sample_parser, cmd_sample
 from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.task import EvalSet
@@ -133,6 +134,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--graders", nargs="+", default=argparse.SUPPRESS,
         help="Dotted paths to Grader classes",
+    )
+    run_parser.add_argument(
+        "--task-id", nargs="+", default=argparse.SUPPRESS, dest="task_ids", metavar="ID",
+        help=(
+            "Run only these tasks of the eval set (a targeted rerun after "
+            "'tracelens inspect'). This is a separate run: its provenance and "
+            "checkpoint identity cover only the selected tasks"
+        ),
     )
     run_parser.add_argument(
         "--num-runs", type=int, default=argparse.SUPPRESS,
@@ -258,6 +267,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- tracelens compare --
     add_compare_parser(subparsers)
+
+    # -- tracelens inspect --
+    add_inspect_parser(subparsers)
 
     # -- tracelens init --
     add_init_parser(subparsers)
@@ -527,6 +539,22 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
     except EvalSetLoadError as exc:
         return usage_error(str(exc), exc=exc, debug=debug)
+    if args.task_ids:
+        known = {task.task_id for task in tasks}
+        unknown = [task_id for task_id in args.task_ids if task_id not in known]
+        if unknown:
+            return usage_error(
+                f"--task-id not in the eval set: {', '.join(unknown)}",
+                hint="Known task ids: " + ", ".join(sorted(known)[:20])
+                + (f", and {len(known) - 20} more" if len(known) > 20 else ""),
+            )
+        wanted = set(args.task_ids)
+        tasks = [task for task in tasks if task.task_id in wanted]
+        print(
+            f"[tracelens] running {len(tasks)} of {len(known)} task(s): "
+            + ", ".join(task.task_id for task in tasks),
+            file=sys.stderr,
+        )
     eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
 
     # Load adapter and graders (usage error -> exit 2, before any agent call)
@@ -697,6 +725,8 @@ def main() -> None:
         sys.exit(cmd_sample(args))
     elif args.command == "compare":
         sys.exit(cmd_compare(args))
+    elif args.command == "inspect":
+        sys.exit(cmd_inspect(args))
     elif args.command == "init":
         sys.exit(cmd_init(args))
     elif args.command in ("calibrate", "reconcile"):
