@@ -144,6 +144,11 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   unchanged, except that `--eval-set`, `--adapter`, and `--graders` are now
   required only when no config file provides them; a run missing any of
   them still exits 2, naming both the flag and the config key. (#35)
+- **The scaffold and the user guide show `provenance_version`.** The
+  adapter and grader examples in the user guide declare it with a note on
+  when to bump it, and `tracelens init` writes a commented
+  `# provenance_version = "starter-1"` line into `eval/adapter.py` and
+  `eval/grader.py`. (#76)
 - **One exit-code contract for every command.** 0 = success or gate passed;
   1 = a negative result (blocked gate, unmet `--require-baselines`,
   calibration below threshold); 2 = a usage, configuration, or input error,
