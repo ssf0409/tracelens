@@ -228,7 +228,9 @@ Every release should leave these channels agreeing with each other:
 - `CHANGELOG.md` has a dated section for the version.
 - The git tag exists on GitHub.
 - PyPI shows the same latest version.
-- GitHub Releases has a release for the tag.
+- GitHub Releases has a release for the tag (the release workflow creates it
+  from the changelog section; a missing section fails the release before
+  anything is published).
 - `mkdocs build --strict` exits cleanly with no project link or rendering
   warnings.
 
