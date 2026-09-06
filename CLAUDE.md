@@ -331,6 +331,14 @@ uv run --frozen --extra dev pytest -q --cov=tracelens --cov-fail-under=90
 For packaging, CLI, README, public imports, or dependency metadata changes, also
 run the built-wheel smoke path in `docs/contributor-testing.md`.
 
+`tests/journey/test_user_journey.py` is the documented user journey run as
+real `tracelens` processes (issue #33, Stage A): init, run --config,
+baselines, gate, regression, inspect, compare, --task-id rerun, infra outage,
+grader crash, malformed input, checkpoint/resume, report, sample. `make
+verify` runs it against the editable install; CI's `user journey (built
+wheel)` job runs it from a freshly built wheel via `TRACELENS_CLI`. Extend it
+when a documented command changes.
+
 ## Documentation Rules
 
 - Prefer public, runnable examples over private downstream project references.

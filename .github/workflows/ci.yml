@@ -175,3 +175,37 @@ jobs:
           /tmp/tracelens-smoke/bin/python -m pip install dist/*.whl
           /tmp/tracelens-smoke/bin/python -c "import tracelens; print(tracelens.__version__)"
           /tmp/tracelens-smoke/bin/tracelens --help
+
+  # ------------------------------------------------------------------
+  # journey: the documented user journey (issue #33, Stage A) driven
+  # through the console script of a freshly built wheel installed into
+  # a clean environment: init -> run --config -> baselines -> gate ->
+  # intentional regression -> inspect -> compare -> --task-id rerun ->
+  # infra outage -> grader crash -> malformed input -> checkpoint/resume
+  # -> report/sample. Every step checks the exit code and the decision
+  # persisted in the artifacts. No network credentials are needed.
+  # ------------------------------------------------------------------
+  journey:
+    name: user journey (built wheel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/tracelens-journey
+          /tmp/tracelens-journey/bin/python -m pip install --upgrade pip
+          /tmp/tracelens-journey/bin/python -m pip install dist/*.whl "pytest>=7.0" "pytest-asyncio>=0.21"
+      - name: Run the journey against the installed console script
+        env:
+          TRACELENS_CLI: /tmp/tracelens-journey/bin/tracelens
+        run: /tmp/tracelens-journey/bin/python -m pytest tests/journey -q --no-header -p no:cacheprovider
