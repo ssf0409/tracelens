@@ -113,8 +113,17 @@ jobs:
             echo
             cat /tmp/release-notes.md
           } > /tmp/pr-body.md
-          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
-            --title "release: v$VERSION" --body-file /tmp/pr-body.md
+          # The workflow token may open pull requests only when the repository
+          # allows it (Settings > Actions > General > Workflow permissions >
+          # "Allow GitHub Actions to create and approve pull requests"). When
+          # it cannot, undo the push so the run can simply be repeated once
+          # the setting is on.
+          if ! gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+              --title "release: v$VERSION" --body-file /tmp/pr-body.md; then
+            git push origin --delete "$BRANCH"
+            echo "::error::could not open the release pull request; branch $BRANCH was removed again. If the message above says GitHub Actions is not permitted to create pull requests, enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General > Workflow permissions, then run this workflow again."
+            exit 1
+          fi
           # A pull request opened with the workflow token does not trigger the
           # pull_request workflows; run CI on the branch explicitly instead.
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
