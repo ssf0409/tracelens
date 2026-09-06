@@ -139,23 +139,19 @@ These guide reviews; deviations should be justified in the PR description:
 
 ## Releasing (maintainers only)
 
-TraceLens uses tag-driven releases. Do not commit a version bump just to
-release. Package versions are generated from git tags by `hatch-vcs`.
+Releases are tag-driven and the tag is created for you:
 
-1. Move `[Unreleased]` notes to a new dated section in `CHANGELOG.md`.
-2. Run the full verification gate:
-   `uv lock --check`, `uv run --frozen --extra dev pytest -q`,
-   `uv run --frozen --extra dev ruff check src/ tests/ examples/ scripts/ benchmarks/high-stakes-autonomous`,
-   `uv run --frozen --extra dev mypy src/tracelens/`, and
-   `uv build --sdist --wheel`.
-3. Commit the release notes.
-4. Push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-5. Watch `.github/workflows/release.yml`: it publishes to PyPI and then
-   creates the GitHub Release from the changelog section (a tag whose
-   version has no dated section fails before anything is published).
+1. Keep `CHANGELOG.md` current: every user-visible change lands under
+   `[Unreleased]` in the same pull request as the code.
+2. Run the "Release prepare" workflow with the version. It moves
+   `[Unreleased]` into a dated section and opens a `release: vX.Y.Z` pull
+   request with the rendered notes.
+3. Review and squash-merge that pull request. The "Release tag" workflow tags
+   the merge commit and the release workflow publishes to PyPI and creates the
+   GitHub Release from the changelog section.
 
-See [docs/releasing.md](docs/releasing.md) for the PyPI trusted publishing
-setup and release checklist.
+The full checklist, the verification commands, the manual fallback, and what
+to do when a step fails are in [docs/releasing.md](docs/releasing.md).
 
 ## Questions?
 

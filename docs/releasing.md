@@ -12,6 +12,9 @@ version constraint.
   package build validation.
 - A tag named `vX.Y.Z` builds package version `X.Y.Z`.
 - Pushing that tag triggers `.github/workflows/release.yml`.
+- The "Release prepare" workflow turns the changelog's `[Unreleased]` section
+  into a dated section and opens a release pull request; merging it tags the
+  merge commit (the "Release tag" workflow).
 - The release workflow builds the package, verifies the tag matches the built
   version, renders the release notes from the changelog's dated section,
   publishes to PyPI using trusted publishing, and then creates the GitHub
@@ -46,50 +49,33 @@ No PyPI API token is required when trusted publishing is configured correctly.
 
 ## Cut A Release
 
-1. Move changelog entries from `[Unreleased]` to a dated version section:
+The default path is two clicks and one review.
 
-   ```markdown
-   ## [X.Y.Z] - YYYY-MM-DD
-   ```
-
-   The release workflow takes the GitHub Release notes from exactly this
-   section and fails, before publishing anything, if it is missing or empty.
-   Preview what it will render at any time:
-
-   ```bash
-   python scripts/release_notes.py --version X.Y.Z
-   ```
-
-2. Ensure the verification gate is green:
+1. **Run the "Release prepare" workflow** (Actions → Release prepare → Run
+   workflow) with the version, for example `0.5.0`, and an optional
+   one-paragraph summary. It checks that the version is well-formed, not
+   older than the latest tag, and unused; moves the changelog's
+   `[Unreleased]` entries into `## [0.5.0] - <today>` (refusing an empty
+   section); pushes `release/v0.5.0`; opens the pull request
+   `release: v0.5.0` with the rendered notes as its description; and starts
+   CI on the branch. Preview the notes locally at any time:
 
    ```bash
-   uv lock --check
-   uv run --frozen --extra dev pytest -q
-   uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
-   uv run --frozen --extra dev mypy src/tracelens/
-   uv build --sdist --wheel
+   python scripts/prepare_release.py --version 0.5.0 --check
+   python scripts/release_notes.py --version 0.5.0   # after the section exists
    ```
 
-3. Run the release-relevant environment checks from
-   [Contributor Testing](contributor-testing.md), especially the clean wheel
-   smoke when packaging, CLI, README, public imports, or dependency metadata
-   changed.
+2. **Review and merge the release pull request.** Edit `CHANGELOG.md` on the
+   branch if the wording needs work; the pull request description is a
+   preview, the changelog section is the source. Its checks are the `ci.yml`
+   run the workflow started on the branch (pull requests opened by a
+   workflow do not trigger `pull_request` workflows themselves). Squash-merge
+   it: the commit `release: v0.5.0` on `main` makes the "Release tag"
+   workflow tag that commit `v0.5.0` and start the release workflow with
+   `publish=true`, which publishes to PyPI (the `release` environment and
+   any reviewer required there still apply) and creates the GitHub Release.
 
-4. Commit the release notes.
-
-5. Create and push the tag:
-
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-
-6. Watch the GitHub Actions release workflow. Its three jobs run in order:
-   `build, verify, render notes` (the notes preview appears in the job
-   summary), `publish to PyPI` (in the `release` environment), and
-   `create GitHub Release`.
-
-7. Verify that every public channel tells the same story:
+3. **Verify that every public channel tells the same story:**
 
    ```bash
    git ls-remote --tags origin "vX.Y.Z"           # the tag exists on GitHub
@@ -102,13 +88,29 @@ No PyPI API token is required when trusted publishing is configured correctly.
    mkdocs build --strict                           # docs still build
    ```
 
-8. After PyPI publish completes, smoke test from a clean environment:
+4. **Smoke test from a clean environment** once PyPI lists the version:
 
    ```bash
    python -m venv /tmp/tracelens-release-smoke
    /tmp/tracelens-release-smoke/bin/python -m pip install tracelens
    /tmp/tracelens-release-smoke/bin/tracelens --help
    ```
+
+Nothing releases on an ordinary merge to `main`: only a commit titled
+`release: vX.Y.Z` (the squash of a release pull request) is tagged, and only
+a tag is ever published.
+
+### Manual fallback
+
+If the workflows are unavailable, the tag-driven path still works on its own:
+
+1. Move the `[Unreleased]` entries into `## [X.Y.Z] - YYYY-MM-DD` (or run
+   `python scripts/prepare_release.py --version X.Y.Z`) and commit.
+2. Run the verification gate (`make verify`, `make docs`) and, for packaging
+   or dependency changes, the built-wheel smoke in
+   [Contributor Testing](contributor-testing.md).
+3. `git tag vX.Y.Z && git push origin vX.Y.Z`. The pushed tag triggers the
+   release workflow directly, exactly as the automatic path does.
 
 ## If A Release Fails
 
@@ -124,8 +126,15 @@ No PyPI API token is required when trusted publishing is configured correctly.
   an existing release instead of failing on "already exists". Re-running
   never uploads a different file under an already-published version.
 - **Something else needs checking first.** Use "Run workflow"
-  (`workflow_dispatch`) on a branch or a tag: it builds, verifies, and shows
-  the rendered notes in the job summary without publishing anything.
+  (`workflow_dispatch`) on the release workflow with `publish` left off, on a
+  branch or a tag: it builds, verifies, and shows the rendered notes in the
+  job summary without publishing anything.
+- **A release pull request must be abandoned.** Close it and delete the
+  `release/vX.Y.Z` branch; nothing was tagged or published. Run "Release
+  prepare" again later, with the same version if it is still right.
+- **The tag was created but the release workflow never ran** (the dispatch
+  in "Release tag" failed). Run the release workflow by hand on the tag with
+  `publish=true`; it is safe to run more than once.
 
 ## Dependency Guidance
 
