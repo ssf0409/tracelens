@@ -14,7 +14,7 @@ coverage:
 	uv run --frozen --extra dev pytest -q --cov=tracelens --cov-report=term-missing --cov-fail-under=90
 
 lint:
-	uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+	uv run --frozen --extra dev ruff check src/ tests/ examples/ scripts/ benchmarks/high-stakes-autonomous
 
 format:
 	uv run --frozen --extra dev ruff format src/ tests/ examples/

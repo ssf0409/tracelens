@@ -10,6 +10,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **Releases create their GitHub Release automatically.** The release
+  workflow now runs three jobs: build and verify (tag matches the built
+  version; release notes rendered from the changelog's dated section by
+  `scripts/release_notes.py`, failing before anything is published when the
+  section is missing or empty), publish to PyPI (`skip-existing` so a
+  re-run of an already-published tag is safe), and create the GitHub
+  Release with those notes and the wheel and sdist attached, marked as a
+  pre-release for any non-final version. The release step updates an
+  existing release instead of failing, so re-runs after a partial failure
+  are safe, and `workflow_dispatch` is a dry run that publishes nothing.
+  `docs/releasing.md` gains the verification checklist and failure/re-run
+  guidance. (#54)
 - **Positioning and contributor guidance aligned with what is actually
   demonstrated.** The README and docs home lead with what TraceLens is
   (repo-owned local regression checks, inspectable artifacts, no backend,

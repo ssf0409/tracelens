@@ -145,12 +145,14 @@ release. Package versions are generated from git tags by `hatch-vcs`.
 1. Move `[Unreleased]` notes to a new dated section in `CHANGELOG.md`.
 2. Run the full verification gate:
    `uv lock --check`, `uv run --frozen --extra dev pytest -q`,
-   `uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous`,
+   `uv run --frozen --extra dev ruff check src/ tests/ examples/ scripts/ benchmarks/high-stakes-autonomous`,
    `uv run --frozen --extra dev mypy src/tracelens/`, and
    `uv build --sdist --wheel`.
 3. Commit the release notes.
 4. Push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-5. Watch `.github/workflows/release.yml`.
+5. Watch `.github/workflows/release.yml`: it publishes to PyPI and then
+   creates the GitHub Release from the changelog section (a tag whose
+   version has no dated section fails before anything is published).
 
 See [docs/releasing.md](docs/releasing.md) for the PyPI trusted publishing
 setup and release checklist.
