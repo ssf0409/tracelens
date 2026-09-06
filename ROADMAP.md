@@ -81,6 +81,9 @@ An honest inventory (as of the 0.4 series), so the phases below have context:
 - **Trace behavior is never associated with outcomes.** Transcripts carry
   steps, tool errors, tokens, and latency, but nothing relates those features
   to pass/fail.
+- **Evidence is thin at the source.** Adapters assemble transcripts by hand
+  with two helpers; token and duration fields are silently zero when left
+  unfilled, and externally produced traces have no import path.
 - **Runs are single-shot.** Each run writes standalone files; there is no
   first-class way to compare two runs or accumulate history.
 - **The regression path is not wired through reporting.** Report building
@@ -90,17 +93,23 @@ An honest inventory (as of the 0.4 series), so the phases below have context:
 ## Executable Roadmap
 
 The issue tracker remains the source of truth for current priority, ownership,
-and acceptance criteria. The phases below are direction, ordered by leverage;
-each names its definition of done. CLI commands that do not exist yet are
-marked *(proposed)*.
+and acceptance criteria; the delivery tracker is issue #55. The estimator,
+sampling-unit, and trial-validity definitions every statistic follows live in
+`docs/statistical-contract.md`. The phases below are direction, ordered by
+leverage; each names its definition of done. CLI commands that do not exist
+yet are marked *(proposed)*.
 
-### Phase 0 — Wire up what exists
+### Phase 0 — Make the existing numbers trustworthy
 
-Repair the seams so the current decision output flows end to end.
+Repair the seams so the current decision output is correct and flows end to
+end.
 
+- Land the statistical correctness fixes against the statistical contract:
+  bootstrap multiplicity (issue #44), order-independent pass^k (issue #45),
+  and explicit metric availability instead of zeros (issue #46).
 - Thread regression results through report building so markdown, HTML, JSON,
   and CI renderings include them without CLI-side assembly, and stop dropping
-  them when re-rendering saved results.
+  them when re-rendering saved results (issue #47).
 - Render the harness-health signals that are already computed: grader error
   rate and token totals alongside infra error rate.
 
@@ -112,6 +121,9 @@ every output format.
 
 Build the analysis foundation: one flat, joinable view of trials.
 
+- Transcript capture helpers and an import path for externally recorded
+  transcripts with offline grading, so behavior variables are actually
+  populated and traces can enter without TraceLens driving the agent.
 - A trial-analysis table joining trials with task dimensions (category, tags,
   difficulty, metadata), decision-spec fields, extracted behavior features,
   and outcomes. This is the substrate for everything below.
@@ -135,7 +147,8 @@ Turn comparison and diagnosis into decision output.
   with bootstrap significance, noise-band awareness, and slice-level
   regressions, printing the decision-spec diff — "here is what changed" —
   next to "here is what moved". When the diff shows exactly one changed
-  factor, report it as a controlled comparison.
+  factor, say so: the outcome change is attributable to that factor, which
+  is evidence, not causal proof.
 - Driver association: relate behavior features (tool error rate, retries,
   token usage, duration, ...) to pass/fail with effect sizes and permutation
   tests; rank suspects with explicit correlation-not-causation labeling.
@@ -183,8 +196,10 @@ These continue in parallel and feed the north star:
 The analysis layer is only worth building if it stays honest:
 
 - **Correlation is not causation.** Driver rankings are suspects with
-  evidence, not verdicts. Causal language is reserved for comparisons where
-  the decision-spec diff shows a single changed factor.
+  evidence, not verdicts. A decision-spec diff with a single changed factor
+  supports *attributing* an outcome change to that factor; it is still not
+  proof of causation, so reports say what changed and what moved, never
+  "caused by".
 - **Small samples are the norm.** Every insight carries confidence intervals
   and minimum-sample guards; multi-way slicing labels or corrects for
   multiple comparisons rather than shipping false discoveries.
