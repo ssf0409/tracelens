@@ -55,6 +55,11 @@ async def starter_agent(input_data: dict[str, Any]) -> dict[str, Any]:
 class StarterAdapter(SimpleAdapter):
     """No-argument adapter loadable by ``tracelens run``."""
 
+    # Declared identity recorded in every run's provenance. Uncomment and bump
+    # it when the agent under test changes (attribution evidence, not proof
+    # that the code is identical).
+    # provenance_version = "starter-1"
+
     def __init__(self) -> None:
         super().__init__(starter_agent)
 '''
@@ -67,6 +72,11 @@ from tracelens import CodeGrader, Task, Transcript
 
 class StarterGrader(CodeGrader):
     """Passes when ``final_output["answer"]`` matches task metadata."""
+
+    # Declared identity recorded in every run's provenance. Uncomment and bump
+    # it when the rubric changes: a changed grader is a different measurement,
+    # so `tracelens compare` refuses to compare runs across it.
+    # provenance_version = "starter-1"
 
     def __init__(self) -> None:
         super().__init__("starter")

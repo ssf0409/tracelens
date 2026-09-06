@@ -93,6 +93,28 @@ timing already started, fill `final_output` (and optionally record steps), and
 return it. The runner only depends on the `AgentAdapter` interface, so everything
 downstream is identical regardless of which adapter you pick.
 
+```python
+from datetime import UTC, datetime
+
+from tracelens import AgentAdapter, Task, Transcript
+
+class MyAdapter(AgentAdapter):
+    provenance_version = "agent-2.3.0"  # bump when the agent code or prompt under test changes
+
+    async def run(self, task: Task) -> Transcript:
+        transcript = self.start_transcript(task)
+        transcript.final_output = await call_my_agent(task.input_data)
+        transcript.completed_at = datetime.now(UTC)
+        return transcript
+```
+
+`provenance_version` is the adapter's declared identity in every run's
+provenance (`candidate.adapter.version`). Bump it when the agent code or prompt
+under test changes, so a comparison can name what changed; a `SimpleAdapter`
+instance takes it too (`adapter.provenance_version = "agent-2.3.0"`). It is
+attribution evidence, not proof that the code is identical: see
+[Run provenance](reproducibility.md#run-provenance).
+
 → A custom HTTP adapter end to end: [Evaluating a Real Agent](real-agent.md).
 
 ---
@@ -118,6 +140,8 @@ pass/score:
 from tracelens import CodeGrader
 
 class ActionGrader(CodeGrader):
+    provenance_version = "rubric-v1"  # bump when the rubric changes
+
     def compute_metrics(self, transcript, task) -> dict[str, float]:
         got = transcript.final_output.get("action")
         return {"correct": float(got == task.metadata["expected_action"])}
@@ -125,6 +149,12 @@ class ActionGrader(CodeGrader):
     def determine_pass(self, metrics, task) -> tuple[bool, float]:
         return metrics["correct"] == 1.0, metrics["correct"]
 ```
+
+A grader's `provenance_version` is recorded in the run's provenance as part of
+its identity. Bump it whenever the rubric changes: a changed grader is a
+different measurement, so `tracelens compare` refuses to compare runs across
+it, and baselines stored under the old rubric should be re-stored rather than
+silently reused.
 
 **Combining graders.** Real grading is often a hard gate *plus* a quality score.
 `CompositeGrader` takes `(grader, weight)` pairs; each grader's `EvalPolicy`
