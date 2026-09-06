@@ -73,6 +73,38 @@ python -m venv /tmp/tracelens-wheel-smoke
 This catches missing package files, broken console scripts, stale version
 metadata, and import errors that editable installs can hide.
 
+## User-Journey Test
+
+`tests/journey/test_user_journey.py` runs the documented workflow as a user
+would, as real `tracelens` processes in a scratch project: an existing
+project, `tracelens init`, `run --config`, baselines stored with the README
+snippet, the gate enabled in `tracelens.yaml`, an intentional regression that
+blocks, `inspect` explaining it, `compare` calling it a regression, a
+`--task-id` rerun, an infra outage and a grader crash made unevaluable and
+told apart, malformed input and a bad config as usage errors,
+checkpoint/resume re-executing nothing, the suite passing again, and
+`report` and `sample` reading the artifacts. Every step checks the exit code
+and the decision persisted in the files.
+
+`make verify` runs it against the editable install. CI (the `user journey
+(built wheel)` job) runs it against the console script of a freshly built
+wheel in a clean environment, the boundary no other test crosses. To do the
+same locally:
+
+```bash
+uv build --wheel --out-dir /tmp/tracelens-dist
+uv venv /tmp/tracelens-journey
+uv pip install --python /tmp/tracelens-journey/bin/python \
+  /tmp/tracelens-dist/tracelens-*.whl pytest pytest-asyncio
+TRACELENS_CLI=/tmp/tracelens-journey/bin/tracelens \
+  /tmp/tracelens-journey/bin/python -m pytest tests/journey -q
+```
+
+`TRACELENS_CLI` names the executable (a path, or a command line) the journey
+drives; unset, it falls back to `python -m tracelens.cli.main` from the
+interpreter running pytest. When a documented command changes, extend the
+journey rather than adding a separate smoke test.
+
 ## Downstream Integration Smoke
 
 For public API or dependency changes, test from the perspective of a downstream

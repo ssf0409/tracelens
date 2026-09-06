@@ -10,6 +10,17 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **The documented user journey runs in CI from a built wheel.**
+  `tests/journey/test_user_journey.py` drives real `tracelens` processes
+  through the documented workflow in a scratch project (an existing
+  project, `init`, `run --config`, baselines from the README snippet, the
+  gate enabled in `tracelens.yaml`, an intentional regression that blocks,
+  `inspect`, `compare`, a `--task-id` rerun, an infra outage and a grader
+  crash made unevaluable and told apart, malformed input and a bad config,
+  checkpoint/resume re-executing nothing, `report`, `sample`), checking
+  exit codes and persisted decisions at every step. A new CI job installs
+  a freshly built wheel into a clean environment and runs the journey
+  against its console script (`TRACELENS_CLI`). (#33, Stage A)
 - **`tracelens inspect`: explain failed trials from a trials file.**
   `tracelens inspect eval/results/trials.json --failures` prints, per
   failing trial, one kind (agent failure, infra error, or grader crash,
