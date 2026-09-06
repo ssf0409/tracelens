@@ -6,19 +6,24 @@ import sys
 from pathlib import Path
 
 
-def test_hello_world_generates_sample_report_artifacts() -> None:
+def test_hello_world_generates_sample_report_artifacts(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    tracked_reports = [
+        repo_root / "examples" / "reports" / "hello_world_report.json",
+        repo_root / "examples" / "reports" / "hello_world_report.md",
+    ]
+    original_reports = {path: path.read_bytes() for path in tracked_reports}
 
     result = subprocess.run(
-        [sys.executable, "examples/hello_world.py"],
+        [sys.executable, "examples/hello_world.py", "--output-dir", str(tmp_path)],
         cwd=repo_root,
         check=True,
         capture_output=True,
         text=True,
     )
 
-    report_json = repo_root / "examples" / "reports" / "hello_world_report.json"
-    report_md = repo_root / "examples" / "reports" / "hello_world_report.md"
+    report_json = tmp_path / "hello_world_report.json"
+    report_md = tmp_path / "hello_world_report.md"
 
     assert "tracelens hello-world" in result.stdout
     assert result.stdout.count("add-2-2") == 1
@@ -37,3 +42,4 @@ def test_hello_world_generates_sample_report_artifacts() -> None:
     assert "## Baseline Comparison" in markdown
     assert "## Regression Result" in markdown
     assert "## CI Summary" in markdown
+    assert {path: path.read_bytes() for path in tracked_reports} == original_reports

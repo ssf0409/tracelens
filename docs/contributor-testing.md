@@ -140,6 +140,8 @@ tagging a release.
 
 ## Contributor Boundaries
 
+- The hello-world integration test writes reports to pytest's temporary directory. To refresh the
+  checked-in samples intentionally, run `python examples/hello_world.py` without `--output-dir`.
 - Do not push release tags from contributor branches.
 - Do not add real API keys, tokens, private URLs, or local machine paths to
   tests or docs.
