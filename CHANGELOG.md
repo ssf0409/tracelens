@@ -139,6 +139,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **`examples/hello_world.py` takes `--reports-dir`.** The default is still
+  `examples/reports/` (the checked-in sample the README links to); the test
+  suite now writes to a temporary directory instead of rewriting the sample
+  on every run. (#74)
 - **PyYAML is a core dependency** (`pyyaml>=6.0`), used only through the
   safe loader for `--config`. Flag-only `tracelens run` invocations are
   unchanged, except that `--eval-set`, `--adapter`, and `--graders` are now

@@ -19,8 +19,13 @@ Run it::
 Then render the generated JSON report::
 
     tracelens report --results examples/reports/hello_world_report.json --format markdown
+
+The reports go to ``examples/reports/``, the checked-in sample the README
+links to; pass ``--reports-dir DIR`` to write them somewhere else (the test
+suite does, so a test run never rewrites the sample).
 """
 
+import argparse
 import asyncio
 import json
 from pathlib import Path
@@ -189,9 +194,13 @@ def _relative_to_cwd(path: Path) -> str:
         return str(path)
 
 
-def _write_reports(report: ReportData, generator: ReportGenerator) -> tuple[Path, Path]:
-    reports_dir = Path(__file__).parent / "reports"
-    reports_dir.mkdir(exist_ok=True)
+DEFAULT_REPORTS_DIR = Path(__file__).parent / "reports"
+
+
+def _write_reports(
+    report: ReportData, generator: ReportGenerator, reports_dir: Path
+) -> tuple[Path, Path]:
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = reports_dir / "hello_world_report.json"
     json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n")
@@ -205,7 +214,7 @@ def _write_reports(report: ReportData, generator: ReportGenerator) -> tuple[Path
 # ---------------------------------------------------------------------------
 # 4. Run it.
 # ---------------------------------------------------------------------------
-async def main() -> None:
+async def main(reports_dir: Path = DEFAULT_REPORTS_DIR) -> None:
     eval_set = build_eval_set()
     adapter = SimpleAdapter(my_agent)
     grader = ExactMatchGrader("hello.exact_match")
@@ -218,7 +227,7 @@ async def main() -> None:
     batch = await runner.run(eval_set)
     generator = ReportGenerator(k_values=[1, 3], consistency_k_values=[2, 3])
     report = generator.build_report(batch)
-    report_json, report_markdown = _write_reports(report, generator)
+    report_json, report_markdown = _write_reports(report, generator, reports_dir)
 
     print("\ntracelens hello-world")
     print("--------------------")
@@ -242,5 +251,17 @@ async def main() -> None:
         )
 
 
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="The smallest possible tracelens run.")
+    parser.add_argument(
+        "--reports-dir", type=Path, default=DEFAULT_REPORTS_DIR,
+        help=(
+            "Where to write the JSON and Markdown reports "
+            "(default: examples/reports, the checked-in sample)"
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(_parse_args().reports_dir))
