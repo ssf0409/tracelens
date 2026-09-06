@@ -76,7 +76,8 @@
       "reliability": {
         "pass^2": 1.0,
         "pass^3": 1.0
-      }
+      },
+      "task_hash": "eda6f930d19cad6e24d88d990de9c0ee66af1ddf7a5a2096abdb68ba47048a6a"
     },
     {
       "task_id": "add-2-2",
@@ -92,7 +93,8 @@
       "reliability": {
         "pass^2": 1.0,
         "pass^3": 1.0
-      }
+      },
+      "task_hash": "d796f53cc23604167c2d76721922244b735ec09027fc7df5efa35de5dec4ed32"
     },
     {
       "task_id": "add-7-8",
@@ -108,7 +110,51 @@
       "reliability": {
         "pass^2": 1.0,
         "pass^3": 1.0
-      }
+      },
+      "task_hash": "0fe39d6802b4c321445df8b5b71035eb6bc4154081ae007c186423d44abee516"
     }
-  ]
+  ],
+  "provenance": {
+    "schema_version": 1,
+    "run_id": "072901d5-a89b-4ddc-9657-b8822d61d045",
+    "tracelens_version": "0.4.1.dev14",
+    "started_at": "2026-09-06T15:22:43.832268Z",
+    "completed_at": "2026-09-06T15:22:43.833850Z",
+    "measurement": {
+      "eval_set_name": "hello-world",
+      "eval_set_hash": "1116ecb0199703d7cf496a4e18acd56ad203119fe3498db238e6548ac7d77be9",
+      "task_hashes": {
+        "add-2-2": "d796f53cc23604167c2d76721922244b735ec09027fc7df5efa35de5dec4ed32",
+        "add-10-5": "eda6f930d19cad6e24d88d990de9c0ee66af1ddf7a5a2096abdb68ba47048a6a",
+        "add-7-8": "0fe39d6802b4c321445df8b5b71035eb6bc4154081ae007c186423d44abee516"
+      },
+      "graders": [
+        {
+          "class_path": "__main__.ExactMatchGrader",
+          "name": "hello.exact_match",
+          "version": null
+        }
+      ],
+      "runner": {
+        "num_runs": 3,
+        "max_concurrency": 1,
+        "timeout_seconds": 300.0,
+        "max_infra_retries": 0,
+        "infra_exception_types": [
+          "tracelens.core.trial.InfraError",
+          "builtins.MemoryError",
+          "builtins.ConnectionError"
+        ]
+      }
+    },
+    "candidate": {
+      "adapter": {
+        "class_path": "tracelens.execution.agent_adapter.SimpleAdapter",
+        "name": null,
+        "version": null
+      },
+      "decision_spec_fingerprint": null,
+      "decision_spec": null
+    }
+  }
 }
