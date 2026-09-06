@@ -82,21 +82,19 @@ When you are ready to start in your own repo, generate a runnable starter suite:
 
 ```bash
 tracelens init .
-tracelens run \
-  --eval-set eval/tasks.json \
-  --adapter eval.adapter.StarterAdapter \
-  --graders eval.grader.StarterGrader \
-  --output eval/results/results.json \
-  --report eval/results/report.md \
-  --save-trials eval/results/trials.json
+tracelens run --config tracelens.yaml
 ```
 
-This writes `eval/tasks.json`, `eval/adapter.py`, `eval/grader.py`, an
-`eval/README.md`, and `.github/workflows/eval.yml`. The generated adapter and
-grader pass immediately so you can replace one piece at a time. The workflow
-evaluates every pull request as a smoke test; `eval/README.md` walks through
-storing baselines, enabling the regression gate, and proving that an
-intentional regression blocks.
+This writes `tracelens.yaml` (the run settings: eval set, adapter and grader
+import paths, output locations), `eval/tasks.json`, `eval/adapter.py`,
+`eval/grader.py`, an `eval/README.md`, and `.github/workflows/eval.yml`, which
+runs the same command on every pull request. The generated adapter and grader
+pass immediately so you can replace one piece at a time. A flag on the command
+line overrides the file (`--num-runs 3`); the
+[run configuration file](user-guide.md#run-configuration-file) reference lists
+every key. `eval/README.md` walks through storing baselines, enabling the
+regression gate in `tracelens.yaml`, and proving that an intentional
+regression blocks.
 
 Run `tracelens init . --force` only when you want to overwrite the generated
 files.

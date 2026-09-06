@@ -222,9 +222,10 @@ block future runs that decline:
 
 ## From the CLI
 
-The same four decisions map to flags. The CLI loads your adapter and graders by
-dotted import path (so they must be importable and constructible with no
-arguments):
+The same four decisions map to flags, or to a committed `tracelens.yaml` (see
+[Run configuration file](#run-configuration-file) below). The CLI loads your
+adapter and graders by dotted import path (so they must be importable and
+constructible with no arguments):
 
 ```bash
 tracelens run \
@@ -251,6 +252,64 @@ path.json` / `--max-infra-retries N` for long runs. See
 (`--decision-spec`, `--noise-band`, `--infra-exceptions`).
 `tracelens report --results results.json --format markdown` re-renders a saved
 run.
+
+### Run configuration file
+
+Commit the run settings instead of repeating flags in every README and CI
+step. `tracelens init` writes a `tracelens.yaml`, and
+`tracelens run --config tracelens.yaml` runs it from any directory. Every key
+is a `run` flag; this file lists all of them:
+
+```yaml
+run:
+  eval_set: eval/tasks.json          # --eval-set (.json, .jsonl, .csv, or a directory)
+  eval_set_format: json              # --eval-set-format (required for a directory)
+  input_field: input                 # --input-field (jsonl/csv column with the input)
+  metadata_fields: [difficulty]      # --metadata-fields (jsonl/csv columns to keep)
+  adapter: eval.adapter.MyAdapter    # --adapter
+  graders: [eval.grader.MyGrader]    # --graders
+  import_root: .                     # dotted paths import from here (default: this directory)
+  num_runs: 5                        # --num-runs
+  max_concurrency: 5                 # --max-concurrency
+  timeout: 300                       # --timeout, in seconds
+  progress: true                     # --progress / --no-progress
+  checkpoint: eval/results/checkpoint.json   # --checkpoint
+  max_infra_retries: 0               # --max-infra-retries
+  infra_exceptions: [builtins.OSError]       # --infra-exceptions
+  decision_spec: eval/decision-spec.json     # --decision-spec
+  outputs:
+    results: eval/results/results.json       # --output
+    report: eval/results/report.md           # --report
+    html_report: eval/results/report.html    # --html-report
+    trials: eval/results/trials.json         # --save-trials
+  baseline:
+    enabled: true                    # --baseline-check / --no-baseline-check
+    file: eval/baselines.json        # --baselines-file
+    fail_on_regression: moderate     # --fail-on-regression
+    require_baselines: false         # --require-baselines / --no-require-baselines
+    noise_band: 0.03                 # --noise-band
+```
+
+Every key is optional, but some layer must provide `eval_set`, `adapter`,
+and `graders`. The rules are fixed:
+
+- **Precedence.** Built-in defaults, then the file, then the flags you type;
+  each layer overrides the one before. An omitted flag never resets a value
+  from the file, and booleans override in both directions (`--no-progress`
+  beats `progress: true`; `--no-baseline-check` switches a configured gate
+  off for one run).
+- **Paths.** Paths in the file resolve relative to the file. Paths given as
+  flags resolve against the current directory, as they always have. The
+  `[tracelens] wrote ...` lines on stderr show the resolved locations.
+- **Imports.** Adapters and graders are imported from `run.import_root`, by
+  default the file's directory, so the command behaves the same from any
+  working directory. TraceLens never changes the process directory.
+- **Strictness.** The file is read with YAML's safe loader and validated
+  before any agent call: an unknown key, a duplicate key, a wrong type, a
+  bad enumeration, or an unsafe YAML construct exits 2 with a message that
+  names the file and the dotted key. There are no profiles, includes,
+  matrices, or variable interpolation, and secrets belong in environment
+  variables, not in the file.
 
 ---
 

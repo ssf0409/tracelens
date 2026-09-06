@@ -1,6 +1,7 @@
 """CLI entry point for tracelens.
 
 Usage:
+    tracelens run --config tracelens.yaml
     tracelens run --eval-set tasks.json --adapter my.Adapter --graders my.Grader1 my.Grader2
     tracelens report --results results.json --format markdown
 """
@@ -22,6 +23,7 @@ from tracelens.baselines.comparison import (
 )
 from tracelens.baselines.manager import BaselineManager
 from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
+from tracelens.cli.config import RUN_DEFAULTS, ConfigError, resolve_run_settings
 from tracelens.cli.init import add_init_parser, cmd_init
 from tracelens.cli.sample import add_sample_parser, cmd_sample
 from tracelens.core.decision_spec import DecisionSpec
@@ -68,100 +70,134 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # -- tracelens run --
-    run_parser = subparsers.add_parser("run", help="Run an evaluation suite")
+    # Every run default lives in RUN_DEFAULTS (tracelens.cli.config); the
+    # flags use argparse.SUPPRESS so an omitted flag stays out of the
+    # namespace and can never shadow a value from --config. Help strings
+    # spell the defaults out for the same reason.
+    d = RUN_DEFAULTS
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run an evaluation suite",
+        description=(
+            "Run an evaluation suite. Settings come from three layers, each "
+            "overriding the one before: built-in defaults, the --config file, "
+            "then flags given here. Some layer must provide an eval set, an "
+            "adapter, and at least one grader."
+        ),
+        epilog=(
+            "Paths inside the config file resolve relative to that file and "
+            "dotted adapter/grader paths import from run.import_root (default: "
+            "the file's directory); paths given as flags resolve against the "
+            "current directory. See the user guide for the file format."
+        ),
+    )
     run_parser.add_argument(
-        "--eval-set", required=True,
+        "--config", default=None, metavar="FILE",
+        help=(
+            "Run configuration file (tracelens.yaml, written by 'tracelens "
+            "init'). Flags given explicitly override its values"
+        ),
+    )
+    run_parser.add_argument(
+        "--eval-set", default=argparse.SUPPRESS,
         help=(
             "Path to the eval set: a .json, .jsonl, or .csv file, or a "
             "directory (then pass --eval-set-format)"
         ),
     )
     run_parser.add_argument(
-        "--eval-set-format", choices=EVAL_SET_FORMATS, default=None,
+        "--eval-set-format", choices=EVAL_SET_FORMATS, default=argparse.SUPPRESS,
         help=(
             "Format of --eval-set; inferred from the file suffix, required "
             "for a directory"
         ),
     )
     run_parser.add_argument(
-        "--input-field", default="input",
+        "--input-field", default=argparse.SUPPRESS,
         help=(
             "jsonl/csv eval sets: name of the column holding the task input "
-            "(default: input)"
+            f"(default: {d['input_field']})"
         ),
     )
     run_parser.add_argument(
-        "--metadata-fields", nargs="+", default=None, metavar="FIELD",
+        "--metadata-fields", nargs="+", default=argparse.SUPPRESS, metavar="FIELD",
         help=(
             "jsonl/csv eval sets: foreign columns to keep in Task.metadata "
             "(default: all of them)"
         ),
     )
     run_parser.add_argument(
-        "--adapter", required=True,
+        "--adapter", default=argparse.SUPPRESS,
         help="Dotted path to AgentAdapter class",
     )
     run_parser.add_argument(
-        "--graders", required=True, nargs="+",
+        "--graders", nargs="+", default=argparse.SUPPRESS,
         help="Dotted paths to Grader classes",
     )
     run_parser.add_argument(
-        "--num-runs", type=int, default=1,
-        help="Number of runs per task (default: 1)",
+        "--num-runs", type=int, default=argparse.SUPPRESS,
+        help=f"Number of runs per task (default: {d['num_runs']})",
     )
     run_parser.add_argument(
-        "--max-concurrency", type=int, default=5,
-        help="Max concurrent trials (default: 5)",
+        "--max-concurrency", type=int, default=argparse.SUPPRESS,
+        help=f"Max concurrent trials (default: {d['max_concurrency']})",
     )
     run_parser.add_argument(
-        "--timeout", type=float, default=300.0,
-        help="Timeout per trial in seconds (default: 300)",
+        "--timeout", type=float, default=argparse.SUPPRESS,
+        help=f"Timeout per trial in seconds (default: {d['timeout']:g})",
     )
     run_parser.add_argument(
-        "--baseline-check", action="store_true",
+        "--baseline-check", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
         help=(
             "Check results against baselines. Requires --baselines-file; "
-            "a missing flag or file is a usage error (exit 2)"
+            "a missing flag or file is a usage error (exit 2). "
+            "--no-baseline-check overrides a config file (default: off)"
         ),
     )
     run_parser.add_argument(
-        "--baselines-file", default=None,
+        "--baselines-file", default=argparse.SUPPRESS,
         help="Path to baselines JSON file",
     )
     run_parser.add_argument(
-        "--require-baselines", action="store_true",
+        "--require-baselines", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
         help=(
             "Fail (exit 1) if any task in the eval set has no stored "
-            "baseline, instead of warning and skipping it"
+            "baseline, instead of warning and skipping it (default: off)"
         ),
     )
     run_parser.add_argument(
-        "--fail-on-regression", default="moderate",
+        "--fail-on-regression", default=argparse.SUPPRESS,
         choices=["minor", "moderate", "severe"],
-        help="Minimum regression severity to fail (default: moderate)",
+        help=(
+            "Minimum regression severity to fail "
+            f"(default: {d['fail_on_regression']})"
+        ),
     )
     run_parser.add_argument(
-        "--output", default=None,
+        "--output", default=argparse.SUPPRESS,
         help="Path to write JSON results",
     )
     run_parser.add_argument(
-        "--report", default=None,
+        "--report", default=argparse.SUPPRESS,
         help="Path to write markdown report",
     )
     run_parser.add_argument(
-        "--html-report", default=None,
+        "--html-report", default=argparse.SUPPRESS,
         help="Path to write HTML dashboard report",
     )
     run_parser.add_argument(
-        "--save-trials", default=None,
+        "--save-trials", default=argparse.SUPPRESS,
         help="Path to write raw trial data (JSON) for replay and comparison",
     )
     run_parser.add_argument(
-        "--progress", action="store_true",
-        help="Print per-trial progress to stderr",
+        "--progress", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
+        help="Print per-trial progress to stderr (default: off)",
     )
     run_parser.add_argument(
-        "--checkpoint", default=None,
+        "--checkpoint", default=argparse.SUPPRESS,
         help=(
             "Path to a checkpoint file. Trials are periodically persisted "
             "there; re-running with the same path resumes, skipping "
@@ -169,15 +205,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
-        "--max-infra-retries", type=int, default=0,
+        "--max-infra-retries", type=int, default=argparse.SUPPRESS,
         help=(
             "Re-attempt trials that end in INFRA_ERROR up to N extra times "
             "with exponential backoff. Agent failures and timeouts never "
-            "retry (default: 0)"
+            f"retry (default: {d['max_infra_retries']})"
         ),
     )
     run_parser.add_argument(
-        "--infra-exceptions", default=None, nargs="+",
+        "--infra-exceptions", default=argparse.SUPPRESS, nargs="+",
         help=(
             "Dotted paths of extra exception types to classify as "
             "INFRA_ERROR instead of FAILED (e.g. builtins.OSError "
@@ -186,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
-        "--decision-spec", default=None,
+        "--decision-spec", default=argparse.SUPPRESS,
         help=(
             "Path to a DecisionSpec JSON file describing this run's "
             "configuration. Stamped onto transcripts and, together with a "
@@ -195,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
-        "--noise-band", type=float, default=None,
+        "--noise-band", type=float, default=argparse.SUPPRESS,
         help=(
             "Absolute metric delta treated as within infra noise when "
             f"baseline and current infra configs differ (default: "
@@ -367,23 +403,53 @@ def _write_output(path: str, content: str) -> None:
 
 def _validate_run_parameters(args: argparse.Namespace) -> str | None:
     """Return a usage-error message for an impossible run configuration."""
+    with_config = bool(getattr(args, "config", None))
+
+    def name(flag: str, key: str) -> str:
+        return f"{flag} ({key})" if with_config else flag
+
     if args.num_runs < 1:
-        return f"--num-runs must be at least 1 (got {args.num_runs})"
+        return f"{name('--num-runs', 'run.num_runs')} must be at least 1 (got {args.num_runs})"
     if args.max_concurrency < 1:
-        return f"--max-concurrency must be at least 1 (got {args.max_concurrency})"
+        return (
+            f"{name('--max-concurrency', 'run.max_concurrency')} must be at least 1 "
+            f"(got {args.max_concurrency})"
+        )
     if args.timeout <= 0:
-        return f"--timeout must be a positive number of seconds (got {args.timeout})"
+        return (
+            f"{name('--timeout', 'run.timeout')} must be a positive number of seconds "
+            f"(got {args.timeout})"
+        )
     if args.max_infra_retries < 0:
-        return f"--max-infra-retries cannot be negative (got {args.max_infra_retries})"
+        return (
+            f"{name('--max-infra-retries', 'run.max_infra_retries')} cannot be negative "
+            f"(got {args.max_infra_retries})"
+        )
     return None
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute the 'run' subcommand."""
     debug = debug_enabled(args)
+    # Layer the settings (defaults <- --config file <- explicit flags) before
+    # anything else; a bad or incomplete config is a usage error (exit 2).
+    try:
+        args, import_root = resolve_run_settings(args)
+    except ConfigError as exc:
+        return usage_error(str(exc), exc=exc, debug=debug)
+    if args.config:
+        print(f"[tracelens] config: {args.config}", file=sys.stderr)
     invalid = _validate_run_parameters(args)
     if invalid:
         return usage_error(invalid)
+
+    def _setting(flag: str, key: str) -> str:
+        # Name the config key too when a config file is in play, so the
+        # message says where to fix it.
+        return f"{flag} ({key})" if args.config else flag
+
+    baseline_check = _setting("--baseline-check", "run.baseline.enabled")
+    baselines_file = _setting("--baselines-file", "run.baseline.file")
 
     # Gate preflight — a misconfigured baseline check must fail before any
     # eval time is spent, never silently skip (exit 2 = usage error, so CI
@@ -392,7 +458,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.baseline_check:
         if not args.baselines_file:
             print(
-                "Error: --baseline-check requires --baselines-file; "
+                f"Error: {baseline_check} requires {baselines_file}; "
                 "refusing to run with a vacuously-passing gate",
                 file=sys.stderr,
             )
@@ -416,29 +482,38 @@ def cmd_run(args: argparse.Namespace) -> int:
         gate_only_flags = [
             flag
             for flag, is_set in (
-                ("--require-baselines", args.require_baselines),
-                ("--noise-band", args.noise_band is not None),
+                (
+                    _setting("--require-baselines", "run.baseline.require_baselines"),
+                    args.require_baselines,
+                ),
+                (
+                    _setting("--noise-band", "run.baseline.noise_band"),
+                    args.noise_band is not None,
+                ),
             )
             if is_set
         ]
         if gate_only_flags:
             print(
                 f"Error: {', '.join(gate_only_flags)} require(s) "
-                "--baseline-check; refusing to run with a "
+                f"{baseline_check}; refusing to run with a "
                 "vacuously-passing gate",
                 file=sys.stderr,
             )
             return 2
         if args.baselines_file:
             print(
-                "[tracelens] warning: --baselines-file has "
-                "no effect without --baseline-check",
+                f"[tracelens] warning: {baselines_file} has "
+                f"no effect without {baseline_check}",
                 file=sys.stderr,
             )
 
-    cwd = str(Path.cwd())
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
+    # Dotted adapter/grader paths import from the config's run.import_root
+    # (default: the config file's directory) or, without a config, from the
+    # current directory. The process cwd is never changed.
+    import_root_str = str(import_root if import_root is not None else Path.cwd())
+    if import_root_str not in sys.path:
+        sys.path.insert(0, import_root_str)
 
     # Resolve --infra-exceptions before running (usage error -> exit 2)
     infra_exception_types = DEFAULT_INFRA_EXCEPTION_TYPES
@@ -485,7 +560,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     import_hint = (
         "Use a dotted path (package.module.ClassName) and run from the project "
         "root so the module is importable; the class must accept no constructor "
-        "arguments."
+        f"arguments. Modules are imported from {import_root_str}"
+        + (" (run.import_root in the config)." if args.config else ".")
     )
     try:
         adapter_cls = load_class(args.adapter)

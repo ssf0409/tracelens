@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.cli.test_init import enable_gate_block
 from tracelens.baselines.manager import BaselineManager, TaskBaseline
 from tracelens.cli.main import build_parser, cmd_report, cmd_run, main
 from tracelens.core.decision_spec import DecisionSpec, InfraConfig
@@ -254,10 +255,12 @@ def test_init_scaffolds_a_runnable_eval_project(
     project = tmp_path / "starter"
     project.mkdir()
     monkeypatch.chdir(project)
+    _forget_scaffold_modules(monkeypatch)
 
     assert _run_main(monkeypatch, "init", ".") == 0
 
     expected_files = {
+        "tracelens.yaml",
         "eval/__init__.py",
         "eval/tasks.json",
         "eval/adapter.py",
@@ -271,20 +274,15 @@ def test_init_scaffolds_a_runnable_eval_project(
         if path.is_file()
     }
 
-    args = build_parser().parse_args([
-        "run",
-        "--eval-set", "eval/tasks.json",
-        "--adapter", "eval.adapter.StarterAdapter",
-        "--graders", "eval.grader.StarterGrader",
-        "--output", "eval/results/results.json",
-        "--report", "eval/results/report.md",
-        "--save-trials", "eval/results/trials.json",
-    ])
+    # The one documented command: no flags beyond the config file.
+    args = build_parser().parse_args(["run", "--config", "tracelens.yaml"])
 
     assert cmd_run(args) == 0
     assert json.loads((project / "eval/results/results.json").read_text())[
         "overall_pass_rate"
     ] == 1.0
+    for name in ("report.md", "report.html", "trials.json"):
+        assert (project / "eval/results" / name).exists(), name
 
 
 def test_init_refuses_to_overwrite_without_force(
@@ -1128,20 +1126,15 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     _forget_scaffold_modules(monkeypatch)
     assert _run_main(monkeypatch, "init", ".") == 0
 
-    # The generated workflow is valid YAML that evaluates every pull request.
-    workflow = yaml.safe_load((project / ".github/workflows/eval.yml").read_text())
+    # The generated workflow is valid YAML that evaluates every pull request
+    # with the same command the README documents.
+    workflow_text = (project / ".github/workflows/eval.yml").read_text()
+    workflow = yaml.safe_load(workflow_text)
     triggers = workflow.get("on", workflow.get(True))
     assert triggers["pull_request"] == {"branches": ["main"]}
+    assert ".venv/bin/tracelens run --config tracelens.yaml" in workflow_text
 
-    run = [
-        "run", "--eval-set", "eval/tasks.json",
-        "--adapter", "eval.adapter.StarterAdapter", "--graders", "eval.grader.StarterGrader",
-        "--output", "eval/results/results.json", "--report", "eval/results/report.md",
-    ]
-    gate = run + [
-        "--baseline-check", "--baselines-file", "eval/baselines.json",
-        "--fail-on-regression", "moderate",
-    ]
+    run = ["run", "--config", "tracelens.yaml"]
     results = project / "eval/results/results.json"
 
     # Step 1: the smoke run passes by construction.
@@ -1154,19 +1147,25 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     exec(compile(textwrap.dedent(snippet), "eval/README.md", "exec"), {})
     assert (project / "eval/baselines.json").exists()
 
-    # Step 4.2/4.3: the trusted agent passes the gate ...
-    assert cmd_run(build_parser().parse_args(gate)) == 0
+    # Step 4.2: enable the gate by uncommenting the block in tracelens.yaml;
+    # nothing in the workflow changes.
+    config = project / "tracelens.yaml"
+    config.write_text(enable_gate_block(config.read_text()))
+
+    # Step 4.3: the trusted agent passes the gate ...
+    assert cmd_run(build_parser().parse_args(run)) == 0
     assert json.loads(results.read_text())["gate"]["status"] == "passed"
 
     # ... an intentionally broken agent is blocked ...
     adapter = project / "eval/adapter.py"
-    broken = adapter.read_text().replace(
+    trusted = adapter.read_text()
+    broken = trusted.replace(
         'return {"answer": input_data["answer"]}', 'return {"answer": "wrong"}'
     )
-    assert broken != adapter.read_text()
+    assert broken != trusted
     adapter.write_text(broken)
     _forget_scaffold_modules(monkeypatch)
-    assert cmd_run(build_parser().parse_args(gate)) == 1
+    assert cmd_run(build_parser().parse_args(run)) == 1
     data = json.loads(results.read_text())
     assert data["gate"]["status"] == "blocked" and data["gate"]["exit_code"] == 1
     assert data["gate"]["blocking_regressions"] == 2
@@ -1174,9 +1173,10 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     assert "REGRESSION DETECTED" in capsys.readouterr().out
 
     # ... and reverting the change passes again.
-    _run_main(monkeypatch, "init", ".", "--force")
+    adapter.write_text(trusted)
     _forget_scaffold_modules(monkeypatch)
-    assert cmd_run(build_parser().parse_args(gate)) == 0
+    assert cmd_run(build_parser().parse_args(run)) == 0
+    assert json.loads(results.read_text())["gate"]["status"] == "passed"
 
 
 # --- Issue #50: JSONL and CSV eval sets through the CLI ----------------------
@@ -1350,3 +1350,119 @@ def test_report_and_sample_input_errors_exit_2_in_a_real_process(tmp_path: Path)
         assert result.returncode == 2, argv
         assert "not found" in result.stderr and "Traceback" not in result.stderr
         assert result.stdout == ""
+
+
+# --- Issue #35: tracelens run --config ---------------------------------------
+
+
+def _tracelens(*argv: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run the CLI in a real process from ``cwd``."""
+    return subprocess.run(
+        [sys.executable, "-m", "tracelens.cli.main", *argv],
+        cwd=cwd, capture_output=True, text=True, timeout=120,
+    )
+
+
+def test_config_run_works_from_another_directory_in_a_real_process(tmp_path: Path) -> None:
+    """The scaffold's one documented command works from anywhere: paths in the
+    file resolve against the file and the adapter imports from its directory."""
+    project = tmp_path / "project"
+    elsewhere = tmp_path / "elsewhere"
+    project.mkdir()
+    elsewhere.mkdir()
+    init = _tracelens("init", str(project), cwd=elsewhere)
+    assert init.returncode == 0, init.stdout + init.stderr
+    assert f"Next: tracelens run --config {project / 'tracelens.yaml'}" in init.stdout
+
+    config = project / "tracelens.yaml"
+    result = _tracelens("run", "--config", str(config), cwd=elsewhere)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    stdout_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(stdout_lines) == 1 and stdout_lines[0].startswith("TraceLens: ")
+    assert f"[tracelens] config: {config}" in result.stderr
+    results = project / "eval/results/results.json"
+    assert f"[tracelens] wrote results: {results}" in result.stderr
+    for name in ("results.json", "report.md", "report.html", "trials.json"):
+        assert (project / "eval/results" / name).exists(), name
+    assert not (elsewhere / "eval").exists()  # nothing lands in the working directory
+    assert json.loads(results.read_text())["overall_pass_rate"] == 1.0
+
+
+def test_config_values_yield_to_explicit_flags_in_a_real_process(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    assert _tracelens("init", ".", cwd=project).returncode == 0
+    result = _tracelens(
+        "run", "--config", "tracelens.yaml", "--num-runs", "2", "--no-progress", cwd=project
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads((project / "eval/results/results.json").read_text())
+    assert data["total_trials"] == 4  # 2 tasks x --num-runs 2; the file says num_runs: 1
+
+
+@pytest.mark.parametrize(
+    ("text", "fragment"),
+    [
+        (
+            "run:\n  eval_set: eval/tasks.json\n  adapters: eval.adapter.StarterAdapter\n",
+            "unknown key(s) under run: adapters",
+        ),
+        ("run:\n  num_runs: 1\n  num_runs: 2\n", "duplicate key 'num_runs' at line 3"),
+        (
+            "run:\n  eval_set: eval/tasks.json\n",
+            "missing required setting(s): --adapter (run.adapter), --graders (run.graders)",
+        ),
+        (
+            "run:\n  eval_set: tasks.json\n  adapter: a.A\n  graders: [g.G]\n  num_runs: 0\n",
+            "--num-runs (run.num_runs) must be at least 1",
+        ),
+    ],
+)
+def test_invalid_config_exits_2_in_a_real_process(
+    tmp_path: Path, text: str, fragment: str
+) -> None:
+    (tmp_path / "tracelens.yaml").write_text(text)
+    result = _tracelens("run", "--config", "tracelens.yaml", cwd=tmp_path)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert fragment in result.stderr, result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected"), [("passed", 0), ("blocked", 1), ("unevaluable", 2)]
+)
+def test_config_gate_outcomes_in_a_real_process(
+    tmp_path: Path, tasks_file: Path, scenario: str, expected: int
+) -> None:
+    """The gate configured in the file reaches every exit code, with the
+    adapter imported from run.import_root rather than the working directory."""
+    if scenario == "unevaluable":
+        baselines = _write_pass_baseline(tmp_path, {"someone-else": 0.9})  # no task matches
+    else:
+        baselines = _write_pass_baseline(
+            tmp_path, {"t-pass": 0.9, "t-fail": 0.9 if scenario == "blocked" else 0.1}
+        )
+    config = tmp_path / "tracelens.yaml"
+    config.write_text(
+        "run:\n"
+        f"  eval_set: {tasks_file.name}\n"
+        f"  adapter: {ADAPTER}\n"
+        f"  graders: [{GRADER}]\n"
+        f"  import_root: {Path(__file__).resolve().parents[2]}\n"
+        "  outputs:\n"
+        "    results: out/results.json\n"
+        "  baseline:\n"
+        "    enabled: true\n"
+        f"    file: {baselines.name}\n"
+        "    fail_on_regression: moderate\n"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    result = _tracelens("run", "--config", str(config), cwd=elsewhere)
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Baseline check:" in result.stdout
+    gate = json.loads((tmp_path / "out/results.json").read_text())["gate"]
+    assert gate["status"] == scenario and gate["exit_code"] == expected
