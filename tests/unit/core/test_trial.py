@@ -227,7 +227,9 @@ class TestTrialBatch:
         assert batch.total_count == 3
         assert batch.completed_count == 2
         assert batch.passed_count == 1
-        assert batch.pass_rate == pytest.approx(1 / 3, rel=0.01)
+        # The RUNNING trial is not evidence: 1 passed of 2 gradable trials.
+        assert batch.gradable_count == 2
+        assert batch.pass_rate == pytest.approx(1 / 2, rel=0.01)
         assert batch.all_complete is False
 
     def test_batch_get_trials_for_task(self):
@@ -249,9 +251,9 @@ class TestTrialBatch:
     def test_batch_get_pass_results_by_task(self):
         """Test getting pass results grouped by task."""
         trials = [
-            Trial(task_id="t1", run_index=0),
-            Trial(task_id="t1", run_index=1),
-            Trial(task_id="t2", run_index=0),
+            Trial(task_id="t1", run_index=0, status=TrialStatus.COMPLETED),
+            Trial(task_id="t1", run_index=1, status=TrialStatus.COMPLETED),
+            Trial(task_id="t2", run_index=0, status=TrialStatus.COMPLETED),
         ]
 
         # Add outcomes
@@ -345,7 +347,7 @@ class TestTrialBatchRunOrder:
 
     @staticmethod
     def _trial(task_id: str, run_index: int, passed: bool) -> Trial:
-        trial = Trial(task_id=task_id, run_index=run_index)
+        trial = Trial(task_id=task_id, run_index=run_index, status=TrialStatus.COMPLETED)
         trial.add_outcome(Outcome(
             trial_id=trial.trial_id,
             grader_id="g",
@@ -390,3 +392,51 @@ class TestTrialBatchRunOrder:
             self._trial("b", 0, True),
         ])
         assert batch.get_pass_results_by_task() == {"b": [True, False], "a": [True]}
+
+
+class TestGradableTrials:
+    """Issue #46: only agent evidence enters pass rates and per-task sequences."""
+
+    @staticmethod
+    def _trial(task_id, run_index, status, passed=None, grader_error=False):
+        trial = Trial(task_id=task_id, run_index=run_index, status=status)
+        if passed is not None:
+            trial.add_outcome(Outcome(
+                trial_id=trial.trial_id, grader_id="g", passed=passed,
+                score=1.0 if passed else 0.0, grader_error=grader_error,
+            ))
+        return trial
+
+    def test_is_gradable_by_status(self):
+        for status in (TrialStatus.COMPLETED, TrialStatus.FAILED, TrialStatus.TIMEOUT):
+            assert self._trial("a", 0, status).is_gradable, status
+        for status in (
+            TrialStatus.INFRA_ERROR, TrialStatus.SKIPPED,
+            TrialStatus.PENDING, TrialStatus.RUNNING,
+        ):
+            assert not self._trial("a", 0, status).is_gradable, status
+
+    def test_grader_crash_is_not_gradable(self):
+        crashed = self._trial("a", 0, TrialStatus.COMPLETED, passed=False, grader_error=True)
+        assert crashed.has_grader_error and not crashed.is_gradable
+
+    def test_harness_failures_leave_the_denominator_and_become_gaps(self):
+        batch = TrialBatch(trials=[
+            self._trial("a", 0, TrialStatus.COMPLETED, passed=True),
+            self._trial("a", 1, TrialStatus.INFRA_ERROR),
+            self._trial("a", 2, TrialStatus.COMPLETED, passed=False, grader_error=True),
+            self._trial("a", 3, TrialStatus.TIMEOUT),
+            self._trial("b", 0, TrialStatus.SKIPPED),
+        ])
+        assert batch.total_count == 5
+        assert batch.gradable_count == 2          # a0 (pass) and a3 (timeout = failure)
+        assert batch.excluded_count == 3
+        assert batch.passed_count == 1
+        assert batch.pass_rate == 0.5
+        assert batch.get_pass_results_by_task() == {"a": [True, False], "b": []}
+        assert batch.get_pass_sequences_by_task() == {"a": [True, None, None, False], "b": [None]}
+
+    def test_no_gradable_trials(self):
+        batch = TrialBatch(trials=[self._trial("a", 0, TrialStatus.INFRA_ERROR)])
+        assert batch.gradable_count == 0 and batch.pass_rate == 0.0
+        assert batch.get_pass_results_by_task() == {"a": []}
