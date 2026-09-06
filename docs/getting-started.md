@@ -93,7 +93,10 @@ tracelens run \
 
 This writes `eval/tasks.json`, `eval/adapter.py`, `eval/grader.py`, an
 `eval/README.md`, and `.github/workflows/eval.yml`. The generated adapter and
-grader pass immediately so you can replace one piece at a time.
+grader pass immediately so you can replace one piece at a time. The workflow
+evaluates every pull request as a smoke test; `eval/README.md` walks through
+storing baselines, enabling the regression gate, and proving that an
+intentional regression blocks.
 
 Run `tracelens init . --force` only when you want to overwrite the generated
 files.

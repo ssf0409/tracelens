@@ -75,6 +75,7 @@ dev = [
     "httpx>=0.25",
     "scipy-stubs>=1.10",
     "types-jsonschema>=4.0",
+    "pyyaml>=6.0",  # validates the generated CI workflow in tests
 ]
 # Documentation site (MkDocs Material). Build locally with `make docs-serve`.
 docs = [
