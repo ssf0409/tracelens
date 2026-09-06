@@ -105,6 +105,15 @@ drives; unset, it falls back to `python -m tracelens.cli.main` from the
 interpreter running pytest. When a documented command changes, extend the
 journey rather than adding a separate smoke test.
 
+## Sample Reports
+
+`examples/reports/hello_world_report.json` and `.md` are the checked-in
+sample the README links to. `python examples/hello_world.py` regenerates
+them in place; commit the result only when the example or the report format
+changed on purpose, since every regeneration carries a new run id and
+timestamps. The test suite runs the example with `--reports-dir` pointing at
+a temporary directory, so `make verify` never touches the sample.
+
 ## Downstream Integration Smoke
 
 For public API or dependency changes, test from the perspective of a downstream
