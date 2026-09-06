@@ -1177,3 +1177,98 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     _run_main(monkeypatch, "init", ".", "--force")
     _forget_scaffold_modules(monkeypatch)
     assert cmd_run(build_parser().parse_args(gate)) == 0
+
+
+# --- Issue #50: JSONL and CSV eval sets through the CLI ----------------------
+
+
+def _equivalent_task_files(tmp_path: Path) -> dict[str, Path]:
+    """The tasks_file suite (t-pass 0.9 / t-fail 0.1) in JSONL and CSV."""
+    import csv
+
+    records = [
+        {"task_id": "t-pass", "name": "passing task", "input": {"value": 0.9}},
+        {"task_id": "t-fail", "name": "failing task", "input": {"value": 0.1}},
+    ]
+    jsonl = tmp_path / "tasks.jsonl"
+    jsonl.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    csv_path = tmp_path / "tasks.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["task_id", "name", "input"])
+        writer.writeheader()
+        for record in records:
+            writer.writerow({**record, "input": json.dumps(record["input"])})
+    return {"jsonl": jsonl, "csv": csv_path}
+
+
+@pytest.mark.parametrize("fmt", ["jsonl", "csv"])
+def test_run_accepts_jsonl_and_csv_eval_sets(
+    tasks_file: Path, tmp_path: Path, fmt: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_output = tmp_path / "json-results.json"
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--output", str(baseline_output),
+    ) == 0
+    other_output = tmp_path / f"{fmt}-results.json"
+    assert _run_cli(
+        "run", "--eval-set", str(_equivalent_task_files(tmp_path)[fmt]),
+        "--adapter", ADAPTER, "--graders", GRADER, "--output", str(other_output),
+    ) == 0
+    capsys.readouterr()
+
+    def _per_task(path: Path) -> dict[str, float]:
+        data = json.loads(path.read_text())
+        return {s["task_id"]: s["pass_rate"] for s in data["task_summaries"]}
+
+    assert _per_task(other_output) == _per_task(baseline_output) == {"t-pass": 1.0, "t-fail": 0.0}
+
+
+def test_run_maps_foreign_input_columns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prompts = tmp_path / "prompts.jsonl"
+    prompts.write_text(
+        json.dumps({"task_id": "t-pass", "prompt": {"value": 0.9}, "subject": "geo"}) + "\n"
+    )
+    output = tmp_path / "results.json"
+    assert _run_cli(
+        "run", "--eval-set", str(prompts), "--input-field", "prompt",
+        "--metadata-fields", "subject",
+        "--adapter", ADAPTER, "--graders", GRADER, "--output", str(output),
+    ) == 0
+    capsys.readouterr()
+    assert json.loads(output.read_text())["task_summaries"][0]["pass_rate"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "setup, expected_error",
+    [
+        ("unknown-suffix", "unsupported eval-set file type '.yaml'"),
+        ("directory-without-format", "--eval-set-format"),
+        ("malformed-jsonl", "tasks.jsonl:2"),
+        ("missing", "not found"),
+    ],
+)
+def test_eval_set_load_failures_exit_2_before_running(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], setup: str, expected_error: str
+) -> None:
+    if setup == "unknown-suffix":
+        target = tmp_path / "tasks.yaml"
+        target.write_text("tasks: []\n")
+    elif setup == "directory-without-format":
+        target = tmp_path / "suite"
+        target.mkdir()
+    elif setup == "malformed-jsonl":
+        target = tmp_path / "tasks.jsonl"
+        target.write_text('{"input": {"value": 0.9}}\nnot json\n')
+    else:
+        target = tmp_path / "missing.json"
+
+    assert _run_cli(
+        "run", "--eval-set", str(target), "--adapter", ADAPTER, "--graders", GRADER,
+    ) == 2
+    captured = capsys.readouterr()
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err
+    assert EchoAdapter.run_count == 0  # nothing ran

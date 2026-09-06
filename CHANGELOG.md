@@ -8,8 +8,23 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **`tracelens run` accepts JSONL and CSV eval sets.** `--eval-set` picks
+  the loader from the file suffix (`.json`, `.jsonl`, `.csv`); a directory
+  needs `--eval-set-format json|jsonl|csv`. `--input-field` and
+  `--metadata-fields` map foreign JSONL/CSV columns the same way the Python
+  loaders do. The dispatch is also available as
+  `tracelens.loaders.load_tasks()`, which raises `EvalSetLoadError` with the
+  CLI's message. Hugging Face Hub datasets stay a Python-API concern. (#50)
+
 ### Changed
 
+- **Eval-set load failures exit 2.** A missing path, unsupported suffix,
+  directory without `--eval-set-format`, invalid JSON, malformed record, or
+  missing input column now prints a concise error naming the file (and the
+  line when the loader knows it) and exits 2 before any agent call;
+  previously these exited 1 or raised. (#50)
 - **Report JSON records the baseline gate decision.** `tracelens run
   --output` now writes a `gate` object (status `not_requested` / `passed` /
   `blocked` / `unevaluable`, exit code, threshold, noise band, task counts,
