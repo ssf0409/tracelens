@@ -21,6 +21,7 @@ Then render the generated JSON report::
     tracelens report --results examples/reports/hello_world_report.json --format markdown
 """
 
+import argparse
 import asyncio
 import json
 from pathlib import Path
@@ -37,6 +38,8 @@ from tracelens import (
 from tracelens.baselines.comparison import RegressionDetector, RegressionSeverity
 from tracelens.baselines.manager import BaselineType, TaskBaseline
 from tracelens.reporting.generator import ReportData, ReportGenerator
+
+DEFAULT_REPORTS_DIR = Path(__file__).parent / "reports"
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +192,10 @@ def _relative_to_cwd(path: Path) -> str:
         return str(path)
 
 
-def _write_reports(report: ReportData, generator: ReportGenerator) -> tuple[Path, Path]:
-    reports_dir = Path(__file__).parent / "reports"
-    reports_dir.mkdir(exist_ok=True)
+def _write_reports(
+    report: ReportData, generator: ReportGenerator, reports_dir: Path
+) -> tuple[Path, Path]:
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = reports_dir / "hello_world_report.json"
     json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n")
@@ -205,7 +209,7 @@ def _write_reports(report: ReportData, generator: ReportGenerator) -> tuple[Path
 # ---------------------------------------------------------------------------
 # 4. Run it.
 # ---------------------------------------------------------------------------
-async def main() -> None:
+async def main(output_dir: Path = DEFAULT_REPORTS_DIR) -> None:
     eval_set = build_eval_set()
     adapter = SimpleAdapter(my_agent)
     grader = ExactMatchGrader("hello.exact_match")
@@ -218,7 +222,7 @@ async def main() -> None:
     batch = await runner.run(eval_set)
     generator = ReportGenerator(k_values=[1, 3], consistency_k_values=[2, 3])
     report = generator.build_report(batch)
-    report_json, report_markdown = _write_reports(report, generator)
+    report_json, report_markdown = _write_reports(report, generator, output_dir)
 
     print("\ntracelens hello-world")
     print("--------------------")
@@ -242,5 +246,16 @@ async def main() -> None:
         )
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_REPORTS_DIR,
+        help="directory for generated JSON and Markdown reports",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(_parse_args().output_dir))
