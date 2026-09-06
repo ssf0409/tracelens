@@ -10,6 +10,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **Actionable CLI errors and discoverable outputs.** `tracelens --debug` (or
+  `TRACELENS_DEBUG=1`) adds the full traceback to input and configuration
+  errors, which are otherwise one or two lines on stderr with the next
+  action; an unimportable adapter or grader now explains the dotted-path
+  and project-root requirement. `tracelens run` validates `--num-runs`,
+  `--max-concurrency`, `--timeout`, and `--max-infra-retries` before doing
+  anything, and lists every artifact it wrote on stderr
+  (`[tracelens] wrote results: ...`) while stdout carries only the summary.
+  (#48)
 - **`tracelens run` accepts JSONL and CSV eval sets.** `--eval-set` picks
   the loader from the file suffix (`.json`, `.jsonl`, `.csv`); a directory
   needs `--eval-set-format json|jsonl|csv`. `--input-field` and
@@ -20,6 +29,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **One exit-code contract for every command.** 0 = success or gate passed;
+  1 = a negative result (blocked gate, unmet `--require-baselines`,
+  calibration below threshold); 2 = a usage, configuration, or input error,
+  or an unevaluable gate. Consequently an unimportable adapter or grader,
+  a missing / invalid / non-trials input to `tracelens sample`, a missing or
+  invalid annotations, results, transcripts, or samples file for
+  `tracelens calibrate` (and a worksheet with no usable rows or
+  `--transcripts` without `--grader`/`--samples`), and `tracelens init`
+  refusing to overwrite without `--force` all exit 2 instead of 1 (or a
+  traceback). Negative results are unchanged. (#48)
 - **Eval-set load failures exit 2.** A missing path, unsupported suffix,
   directory without `--eval-set-format`, invalid JSON, malformed record, or
   missing input column now prints a concise error naming the file (and the

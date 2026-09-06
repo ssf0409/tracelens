@@ -200,7 +200,7 @@ class TestCmdCalibrateIntegration:
         assert exit_code == 0
 
     def test_calibrate_no_transcripts_or_results_returns_error(self, tmp_path: Path) -> None:
-        """cmd_calibrate returns 1 when neither --transcripts nor --results given."""
+        """A worksheet without grader scores is an input error (exit 2)."""
         ann_path = tmp_path / "annotations.json"
         samples_path = tmp_path / "samples.json"
         self._write_json(ann_path, [{"task_id": "t1", "human_score": 0.5, "human_passed": True}])
@@ -213,4 +213,4 @@ class TestCmdCalibrateIntegration:
             "--samples", str(samples_path),
             "--annotations", str(ann_path),
         ])
-        assert cmd_calibrate(args) == 1
+        assert cmd_calibrate(args) == 2

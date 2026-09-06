@@ -193,7 +193,10 @@ every output: the exit code, the summary on stdout, and a `gate` object in the
 
 A misconfigured gate (missing `--baselines-file`, an unreadable baselines
 file, or a gate-only flag without `--baseline-check`) also exits 2, before
-the eval runs. `unevaluable` takes precedence over `blocked`: an observed
+the eval runs. The codes follow the CLI-wide contract (0 success, 1 negative
+result, 2 usage/input error or unevaluable) described in the
+[User Guide](user-guide.md#exit-codes-and-error-output); pass `--debug` for
+tracebacks on input errors. `unevaluable` takes precedence over `blocked`: an observed
 regression is still recorded, but missing evidence cannot authorize either
 verdict.
 

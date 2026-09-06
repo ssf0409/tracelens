@@ -341,7 +341,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         for path in conflicts:
             print(f"  {path}", file=sys.stderr)
         print("Re-run with --force to overwrite generated files.", file=sys.stderr)
-        return 1
+        return 2
 
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)

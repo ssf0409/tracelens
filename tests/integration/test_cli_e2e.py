@@ -299,7 +299,7 @@ def test_init_refuses_to_overwrite_without_force(
     adapter = project / "eval/adapter.py"
     adapter.write_text("# user edit\n")
 
-    assert _run_main(monkeypatch, "init", ".") == 1
+    assert _run_main(monkeypatch, "init", ".") == 2  # refusal is a usage error
     assert adapter.read_text() == "# user edit\n"
 
     assert _run_main(monkeypatch, "init", ".", "--force") == 0
@@ -854,7 +854,7 @@ def test_partial_trial_loss_keeps_gradable_task_comparisons(
     assert "REGRESSION DETECTED" not in captured.out
 
 
-@pytest.mark.parametrize("case", ["empty-suite", "zero-runs", "empty-baselines", "unrelated-baselines"])
+@pytest.mark.parametrize("case", ["empty-suite", "empty-baselines", "unrelated-baselines"])
 def test_baseline_gate_requires_at_least_one_comparison(
     tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str
 ) -> None:
@@ -870,7 +870,7 @@ def test_baseline_gate_requires_at_least_one_comparison(
     assert _run_cli(
         "run", "--eval-set", str(tasks_file),
         "--adapter", ADAPTER, "--graders", GRADER,
-        "--num-runs", "0" if case == "zero-runs" else "1",
+        "--num-runs", "1",
         "--baseline-check", "--baselines-file", str(baselines),
     ) == 2
 
@@ -1272,3 +1272,81 @@ def test_eval_set_load_failures_exit_2_before_running(
     assert expected_error in captured.err
     assert "Traceback" not in captured.err
     assert EchoAdapter.run_count == 0  # nothing ran
+
+
+# --- Issue #48: actionable input errors and discoverable outputs -------------
+
+
+@pytest.mark.parametrize(
+    "flag, value",
+    [("--num-runs", "0"), ("--max-concurrency", "0"), ("--timeout", "0"), ("--max-infra-retries", "-1")],
+)
+def test_invalid_run_parameters_exit_2_before_running(
+    tasks_file: Path, capsys: pytest.CaptureFixture[str], flag: str, value: str
+) -> None:
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        flag, value,
+    ) == 2
+    captured = capsys.readouterr()
+    assert flag in captured.err and captured.err.startswith("Error:")
+    assert captured.out == ""
+    assert EchoAdapter.run_count == 0
+
+
+def test_unimportable_adapter_is_a_usage_error_with_a_hint(
+    tasks_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = [
+        "run", "--eval-set", str(tasks_file),
+        "--adapter", "tests.integration.test_cli_e2e.NoSuchAdapter", "--graders", GRADER,
+    ]
+    assert _run_cli(*argv) == 2
+    captured = capsys.readouterr()
+    assert "could not load adapter 'tests.integration.test_cli_e2e.NoSuchAdapter'" in captured.err
+    assert "dotted path" in captured.err
+    assert "run with --debug" in captured.err
+    assert "Traceback" not in captured.err
+    assert EchoAdapter.run_count == 0
+
+    # --debug (root flag) and TRACELENS_DEBUG=1 add the traceback.
+    assert _run_main(monkeypatch, "--debug", *argv) == 2
+    assert "Traceback" in capsys.readouterr().err
+    monkeypatch.setenv("TRACELENS_DEBUG", "1")
+    assert _run_cli(*argv) == 2
+    assert "Traceback" in capsys.readouterr().err
+
+
+def test_outputs_are_listed_on_stderr_and_stdout_is_only_the_summary(
+    tasks_file: Path, tmp_path: Path
+) -> None:
+    output = tmp_path / "out" / "results.json"
+    report = tmp_path / "out" / "report.md"
+    trials = tmp_path / "out" / "trials.json"
+    result = subprocess.run(
+        [sys.executable, "-m", "tracelens.cli.main", "run",
+         "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+         "--output", str(output), "--report", str(report), "--save-trials", str(trials)],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    stdout_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(stdout_lines) == 1 and stdout_lines[0].startswith("TraceLens: ")
+    assert f"[tracelens] wrote results: {output}" in result.stderr
+    assert f"[tracelens] wrote report: {report}" in result.stderr
+    assert f"[tracelens] wrote trials: {trials}" in result.stderr
+    assert output.exists() and report.exists() and trials.exists()
+
+
+def test_report_and_sample_input_errors_exit_2_in_a_real_process(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.json"
+    for argv in (["report", "--results", str(missing)], ["sample", "--trials", str(missing)]):
+        result = subprocess.run(
+            [sys.executable, "-m", "tracelens.cli.main", *argv],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 2, argv
+        assert "not found" in result.stderr and "Traceback" not in result.stderr
+        assert result.stdout == ""

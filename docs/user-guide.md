@@ -254,6 +254,34 @@ run.
 
 ---
 
+### Exit codes and error output
+
+Every command follows one contract, so a CI step can branch on the code
+without parsing text:
+
+| Exit code | Meaning | Examples |
+|-----------|---------|----------|
+| `0` | Success, or the gate passed | a run completed; `reconcile` found the grader calibrated |
+| `1` | A negative result | the baseline gate blocked; `--require-baselines` unmet; Pearson r below `--threshold` |
+| `2` | A usage, configuration, or input error, or a gate that could not be evaluated | missing or unreadable input file, invalid JSON, an unimportable adapter or grader, `--num-runs 0`, a gate with no gradable trials, `init` refusing to overwrite without `--force` |
+
+Input and configuration problems are reported before any agent call, as one
+or two lines on stderr: the message names the file (and the line, where the
+loader knows it) and the next action. Pass `--debug` (before the subcommand,
+`tracelens --debug run ...`) or set `TRACELENS_DEBUG=1` to add the full
+traceback. Unexpected programming failures are never swallowed.
+
+Streams are separated so scripts can rely on them: stdout carries only the
+result (the run summary and gate lines, a rendered report, the sampled
+worksheet), while progress, warnings, and the list of written artifacts go to
+stderr:
+
+```text
+[tracelens] wrote results: reports/results.json
+[tracelens] wrote report: reports/results.md
+[tracelens] wrote trials: reports/trials.json
+```
+
 ## Where to go next
 
 - [Core Concepts & Glossary](concepts.md) — the object model these decisions act on.

@@ -58,22 +58,23 @@ def add_sample_parser(subparsers: argparse._SubParsersAction) -> None:  # type: 
 
 def cmd_sample(args: argparse.Namespace) -> int:
     """Execute the 'sample' subcommand."""
+    # Input problems are usage errors (exit 2), consistent with `tracelens run`.
     try:
         with open(args.trials) as f:
             batch = TrialBatch.from_dict(json.load(f))
     except FileNotFoundError:
         print(f"Error: trials file not found: {args.trials}", file=sys.stderr)
-        return 1
+        return 2
     except json.JSONDecodeError as exc:
         print(f"Error: invalid JSON in {args.trials}: {exc}", file=sys.stderr)
-        return 1
+        return 2
     except ValidationError as exc:
         print(
             f"Error: {args.trials} is not a valid trials file "
             f"(expected 'tracelens run --save-trials' output): {exc}",
             file=sys.stderr,
         )
-        return 1
+        return 2
 
     worksheet = sample_for_review(
         batch,
