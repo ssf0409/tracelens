@@ -8,6 +8,21 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unevaluable baseline gates no longer pass.** `tracelens run
+  --baseline-check` exits 2 when any baseline-backed task has no gradable
+  trials or no comparable CLI metrics, or when no task can be checked at all
+  (including empty suites, zero runs, and empty/unrelated baseline files).
+  The summary marks the gate `UNEVALUABLE` and retains observed regressions
+  and exclusion counts. This intentionally changes the previous exit-0
+  behavior: infrastructure and grader failures remain excluded from agent
+  regression samples, but missing evidence cannot authorize a passing gate.
+  An unevaluable gate takes precedence over exit 1 for policy violations;
+  otherwise regression and required-baseline failures still exit 1. Partial
+  trial loss remains allowed when every baseline-backed task retains a
+  gradable sample. Non-gated runs are unchanged.
+
 ## [0.4.0] - 2026-07-19
 
 Reliability and data-portability release: CI gates now distinguish agent
