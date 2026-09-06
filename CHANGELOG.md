@@ -10,6 +10,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **pass@k bootstrap intervals preserve repeated task draws.**
+  `PassAtKAnalyzer.compute_confidence_interval` and `analyze_with_ci`
+  resampled task IDs with replacement but collected them into a dict keyed
+  by task ID, so a task drawn twice counted once: the draw `[A, A, B]` with
+  A=1 and B=0 averaged to 1/2 instead of 2/3. Each resample lost about 37 %
+  of its draws and reported intervals were roughly 20–25 % too narrow at
+  typical suite sizes; intervals from earlier releases were overconfident
+  and should be recomputed. Both methods now compute per-task pass@k once
+  (in sorted `task_id` order) and delegate to `bootstrap_ci`, and gain an
+  optional `seed` argument: the same inputs and seed give the same interval,
+  and input task order no longer affects it. `bootstrap_ci`, and therefore
+  the analyzer, now raises `ValueError` for `confidence` outside `(0, 1)` or
+  `n_bootstrap < 1` instead of failing inside NumPy. Point estimates and the
+  `(lower, upper)` return shape are unchanged. The estimator, sampling-unit,
+  and trial-validity definitions every statistic follows are now written
+  down in `docs/statistical-contract.md`. (#44)
 - **Unevaluable baseline gates no longer pass.** `tracelens run
   --baseline-check` exits 2 when any baseline-backed task has no gradable
   trials or no comparable CLI metrics, or when no task can be checked at all

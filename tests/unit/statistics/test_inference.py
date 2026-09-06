@@ -424,3 +424,20 @@ class TestCompareToBaselineSummarySmallSamples:
         )
         assert np.isfinite(result.delta)
         assert np.isfinite(result.p_value)
+
+
+class TestBootstrapCIValidation:
+    """bootstrap_ci rejects parameters that would make the interval meaningless."""
+
+    @pytest.mark.parametrize("confidence", [0.0, 1.0, 1.2])
+    def test_confidence_outside_open_unit_interval_raises(self, confidence):
+        with pytest.raises(ValueError, match="confidence"):
+            bootstrap_ci([0.1, 0.2, 0.3], confidence=confidence)
+
+    def test_non_positive_n_bootstrap_raises(self):
+        with pytest.raises(ValueError, match="n_bootstrap"):
+            bootstrap_ci([0.1, 0.2, 0.3], n_bootstrap=0)
+
+    def test_validation_precedes_empty_input_shortcut(self):
+        with pytest.raises(ValueError):
+            bootstrap_ci([], n_bootstrap=0)
