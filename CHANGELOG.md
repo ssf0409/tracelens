@@ -61,6 +61,29 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **`tracelens init` generates a CI workflow that evaluates agent changes
+  and installs reproducibly.** The generated `.github/workflows/eval.yml`
+  used to trigger only on `eval/**`, `pyproject.toml`, and `uv.lock`, so a
+  pull request that changed only agent code skipped the eval; it installed
+  with `uv pip install tracelens` after `uv sync`, which `uv run` then
+  removed again; it used older action refs than this repository's own CI;
+  and its summary step failed on `cat` when a preflight error meant no
+  report was written. It now runs on every pull request to `main` (a
+  `paths:` filter is shown as an explicit customization), uses
+  `actions/checkout@v6` and the same pinned `astral-sh/setup-uv` as this
+  repository, installs an existing project from `uv.lock` with
+  `uv sync --frozen` (or creates an environment in a bare repository) and
+  installs TraceLens only when the project does not already provide it,
+  pinned to the release that generated the file, runs
+  `.venv/bin/tracelens` directly, tolerates missing report files in the
+  summary and artifact steps, and carries the three gate flags as a
+  commented block. The generated `eval/README.md` is a four-step
+  walkthrough: run, what CI does, make it yours, and enable the gate with a
+  baseline-storing snippet plus a "prove it blocks" step; an end-to-end test
+  executes that walkthrough (init, run, store baselines from the README's
+  own snippet, break the agent, confirm exit 1 and `BLOCKED`).
+  `examples/ci/eval.yml` and the CI/CD guide are aligned with the template.
+  (#49)
 - **The gate decision is made once and shown everywhere.** `tracelens run
   --baseline-check` used to write JSON/Markdown/HTML before comparing against
   baselines, so a run that exited 1 on a severe regression saved artifacts

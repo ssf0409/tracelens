@@ -1101,3 +1101,79 @@ def test_output_write_failure_is_a_clear_error(
     captured = capsys.readouterr()
     assert "could not write output file" in captured.err
     assert "Traceback" not in captured.err
+
+
+# --- Issue #49: the generated scaffold's gate walkthrough actually works ----
+
+
+def _forget_scaffold_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop cached ``eval.*`` modules so a rewritten adapter is re-imported."""
+    for name in list(sys.modules):
+        if name == "eval" or name.startswith("eval."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+
+def test_init_gate_walkthrough_blocks_an_intentional_regression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Follow eval/README.md step 4 literally: store baselines with the README's
+    own snippet, then prove a broken agent is blocked and a fixed one passes."""
+    import textwrap
+
+    import yaml
+
+    project = tmp_path / "starter"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    _forget_scaffold_modules(monkeypatch)
+    assert _run_main(monkeypatch, "init", ".") == 0
+
+    # The generated workflow is valid YAML that evaluates every pull request.
+    workflow = yaml.safe_load((project / ".github/workflows/eval.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert triggers["pull_request"] == {"branches": ["main"]}
+
+    run = [
+        "run", "--eval-set", "eval/tasks.json",
+        "--adapter", "eval.adapter.StarterAdapter", "--graders", "eval.grader.StarterGrader",
+        "--output", "eval/results/results.json", "--report", "eval/results/report.md",
+    ]
+    gate = run + [
+        "--baseline-check", "--baselines-file", "eval/baselines.json",
+        "--fail-on-regression", "moderate",
+    ]
+    results = project / "eval/results/results.json"
+
+    # Step 1: the smoke run passes by construction.
+    assert cmd_run(build_parser().parse_args(run)) == 0
+    assert json.loads(results.read_text())["gate"]["status"] == "not_requested"
+
+    # Step 4.1: store baselines with the snippet from the README, verbatim.
+    readme = (project / "eval/README.md").read_text()
+    snippet = readme.split("python - <<'EOF'\n", 1)[1].split("\n   EOF", 1)[0]
+    exec(compile(textwrap.dedent(snippet), "eval/README.md", "exec"), {})
+    assert (project / "eval/baselines.json").exists()
+
+    # Step 4.2/4.3: the trusted agent passes the gate ...
+    assert cmd_run(build_parser().parse_args(gate)) == 0
+    assert json.loads(results.read_text())["gate"]["status"] == "passed"
+
+    # ... an intentionally broken agent is blocked ...
+    adapter = project / "eval/adapter.py"
+    broken = adapter.read_text().replace(
+        'return {"answer": input_data["answer"]}', 'return {"answer": "wrong"}'
+    )
+    assert broken != adapter.read_text()
+    adapter.write_text(broken)
+    _forget_scaffold_modules(monkeypatch)
+    assert cmd_run(build_parser().parse_args(gate)) == 1
+    data = json.loads(results.read_text())
+    assert data["gate"]["status"] == "blocked" and data["gate"]["exit_code"] == 1
+    assert data["gate"]["blocking_regressions"] == 2
+    assert "BLOCKED" in (project / "eval/results/report.md").read_text()
+    assert "REGRESSION DETECTED" in capsys.readouterr().out
+
+    # ... and reverting the change passes again.
+    _run_main(monkeypatch, "init", ".", "--force")
+    _forget_scaffold_modules(monkeypatch)
+    assert cmd_run(build_parser().parse_args(gate)) == 0

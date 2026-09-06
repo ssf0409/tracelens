@@ -15,16 +15,22 @@ dependencies = [
 ]
 ```
 
-If your project uses `uv`, CI can install normally:
+If your project uses `uv`, CI installs it from the lockfile so the evaluated
+dependency set is the one you tested locally:
 
 ```yaml
-- uses: actions/checkout@v4
-- uses: astral-sh/setup-uv@v4
+- uses: actions/checkout@v6
+- uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
 - name: Set up Python
   run: uv python install 3.12
 - name: Install dependencies
-  run: uv sync
+  run: uv sync --frozen
 ```
+
+`tracelens init` generates a workflow for projects that do not (yet) list
+TraceLens as a dependency; it creates an environment and installs TraceLens
+pinned to the release that generated it. See `eval/README.md` in the
+generated scaffold.
 
 ## Project Contract
 
@@ -89,30 +95,37 @@ name: TraceLens Evaluation
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "app/**"
-      - "eval/**"
-      - "pyproject.toml"
+    # Every pull request is evaluated by default so agent code changes never
+    # skip the eval. To narrow it, list the paths whose changes should
+    # trigger an eval -- and include your agent's source directories.
+    #   paths:
+    #     - "app/**"
+    #     - "eval/**"
+    #     - "pyproject.toml"
+    #     - "uv.lock"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   eval:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Run TraceLens
         run: |
-          uv run tracelens run \
+          uv run --frozen tracelens run \
             --eval-set eval/tasks.json \
             --adapter myproject.eval.adapters.CIAgentAdapter \
             --graders myproject.eval.graders.CIQualityGrader \
@@ -125,21 +138,44 @@ jobs:
             --html-report eval/results/report.html \
             --save-trials eval/results/trials.json
 
+      # The report exists only after a successful preflight; a missing file
+      # must not turn a clear TraceLens error into a `cat` failure.
       - name: Add report to job summary
         if: always()
-        run: cat eval/results/report.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          if [ -f eval/results/report.md ]; then
+            cat eval/results/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No TraceLens report was written; see the run step for the error." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tracelens-results
+          if-no-files-found: ignore
           path: |
             eval/results/results.json
             eval/results/report.md
             eval/results/report.html
             eval/results/trials.json
 ```
+
+Three things this workflow gets right that are easy to get wrong:
+
+1. **Triggers cover agent code.** It runs on every pull request. A `paths:`
+   filter is a project decision; if you add one, list your agent's source
+   directories, or a change that only touches the agent will skip the eval
+   and merge with a green check that never ran.
+2. **Installs are reproducible.** `uv sync --frozen` and `uv run --frozen`
+   install exactly what `uv.lock` records, so CI evaluates the dependency
+   set you tested. Commit the lockfile.
+3. **Failures stay visible.** The run step's exit code is the job's result.
+   The summary and artifact steps run `if: always()` but tolerate files that
+   a failed preflight never wrote, so the original TraceLens error is what
+   you read, not a `cat` failure.
 
 ## Reading the gate
 
