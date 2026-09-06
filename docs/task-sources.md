@@ -25,6 +25,64 @@ eval_set = EvalSet(name="My Suite", tasks=tasks)
 
 ---
 
+## Using the loaders from the CLI
+
+`tracelens run --eval-set PATH` picks the loader from the file suffix, so a
+`.jsonl` or `.csv` file works exactly like a JSON eval set:
+
+| `--eval-set` | Loader | Options |
+|---|---|---|
+| `tasks.json` | `JSONTaskLoader` | none (native `Task` shape) |
+| `tasks.jsonl` | `JSONLTaskLoader` | `--input-field`, `--metadata-fields` |
+| `tasks.csv` | `CSVTaskLoader` | `--input-field`, `--metadata-fields` |
+| a directory | the loader named by `--eval-set-format` | as above |
+
+```bash
+# A JSONL file whose records keep the task input under "prompt"
+tracelens run \
+  --eval-set data/evals.jsonl \
+  --input-field prompt \
+  --metadata-fields subject source \
+  --adapter myproject.eval.adapters.MyAgentAdapter \
+  --graders myproject.eval.graders.QualityGrader
+
+# A directory of CSV files: say which format to load, TraceLens never guesses
+tracelens run --eval-set data/csv-suites/ --eval-set-format csv ...
+```
+
+Rules that keep this predictable:
+
+- The format comes from the suffix (`.json`, `.jsonl`, `.csv`); any other
+  suffix is an error unless `--eval-set-format` names the format.
+- A directory always needs `--eval-set-format`; every file with that
+  format's suffix inside it (recursively, sorted) is loaded.
+- `--input-field` and `--metadata-fields` apply to JSONL and CSV only; a JSON
+  eval set already uses the native `Task` shape and rejects them.
+- Loading problems (missing path, invalid JSON, a malformed record, a missing
+  input column) are usage errors: the CLI prints the file and, where the
+  loader knows it, the line, and exits 2 before any agent is called.
+- Hugging Face Hub datasets are not dispatched from the CLI; load them with
+  `HFDatasetLoader` in Python and save to JSON or JSONL first.
+
+Migrating from the Python API:
+
+```python
+# before
+tasks = CSVTaskLoader(input_field="prompt", metadata_fields=["subject"]).load("evals.csv")
+eval_set = EvalSet(name="My Suite", tasks=tasks)
+```
+
+```bash
+# after: the same mapping, no glue script
+tracelens run --eval-set evals.csv --input-field prompt --metadata-fields subject ...
+```
+
+The same dispatch is available as `tracelens.loaders.load_tasks(path,
+format=..., input_field=..., metadata_fields=...)`, which raises
+`EvalSetLoadError` with the CLI's message.
+
+---
+
 ## JSONLTaskLoader
 
 Read one JSON object per line from a `.jsonl` file.

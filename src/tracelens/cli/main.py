@@ -23,7 +23,7 @@ from tracelens.cli.calibrate import add_calibrate_parser, cmd_calibrate
 from tracelens.cli.init import add_init_parser, cmd_init
 from tracelens.cli.sample import add_sample_parser, cmd_sample
 from tracelens.core.decision_spec import DecisionSpec
-from tracelens.core.task import EvalSet, JSONTaskLoader
+from tracelens.core.task import EvalSet
 from tracelens.core.trial import Trial
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.execution.registry import load_class
@@ -33,6 +33,7 @@ from tracelens.execution.runner import (
     EvaluationRunner,
     RunnerConfig,
 )
+from tracelens.loaders import EVAL_SET_FORMATS, EvalSetLoadError, load_tasks
 from tracelens.reporting.gate import (
     GateResult,
     GateStatus,
@@ -58,7 +59,31 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run an evaluation suite")
     run_parser.add_argument(
         "--eval-set", required=True,
-        help="Path to eval set JSON file",
+        help=(
+            "Path to the eval set: a .json, .jsonl, or .csv file, or a "
+            "directory (then pass --eval-set-format)"
+        ),
+    )
+    run_parser.add_argument(
+        "--eval-set-format", choices=EVAL_SET_FORMATS, default=None,
+        help=(
+            "Format of --eval-set; inferred from the file suffix, required "
+            "for a directory"
+        ),
+    )
+    run_parser.add_argument(
+        "--input-field", default="input",
+        help=(
+            "jsonl/csv eval sets: name of the column holding the task input "
+            "(default: input)"
+        ),
+    )
+    run_parser.add_argument(
+        "--metadata-fields", nargs="+", default=None, metavar="FIELD",
+        help=(
+            "jsonl/csv eval sets: foreign columns to keep in Task.metadata "
+            "(default: all of them)"
+        ),
     )
     run_parser.add_argument(
         "--adapter", required=True,
@@ -384,20 +409,18 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             return 2
 
-    # Load eval set
+    # Load eval set (usage error -> exit 2, before any agent call)
     try:
-        loader = JSONTaskLoader()
-        tasks = loader.load(args.eval_set)
-        eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
-    except FileNotFoundError:
-        print(f"Error: eval-set file not found: {args.eval_set}", file=sys.stderr)
-        return 1
-    except json.JSONDecodeError as exc:
-        print(
-            f"Error: invalid JSON in eval-set file {args.eval_set}: {exc}",
-            file=sys.stderr,
+        tasks = load_tasks(
+            args.eval_set,
+            format=args.eval_set_format,
+            input_field=args.input_field,
+            metadata_fields=args.metadata_fields,
         )
-        return 1
+    except EvalSetLoadError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
 
     # Load adapter and graders
     try:

@@ -911,3 +911,105 @@ class TestTaskFieldsDeriveFromModel:
         expected = set(Task.model_fields) - {"input_data", "metadata"}
         assert expected <= header
         assert "metadata" in header
+
+
+class TestLoadTasksDispatch:
+    """`tracelens.loaders.load_tasks` picks the loader from the path (issue #50)."""
+
+    RECORDS = [
+        {"task_id": "t1", "name": "first", "input": {"value": 0.9}, "subject": "geo"},
+        {"task_id": "t2", "name": "second", "input": {"value": 0.1}, "subject": "math"},
+    ]
+
+    def _write_all(self, tmp_path: Path) -> dict[str, Path]:
+        from tracelens.loaders import load_tasks  # noqa: F401  (import check)
+
+        json_path = tmp_path / "tasks.json"
+        json_path.write_text(json.dumps({"tasks": [
+            {"task_id": r["task_id"], "name": r["name"], "input_data": r["input"],
+             "metadata": {"subject": r["subject"]}}
+            for r in self.RECORDS
+        ]}))
+        jsonl_path = tmp_path / "tasks.jsonl"
+        jsonl_path.write_text("\n".join(json.dumps(r) for r in self.RECORDS) + "\n")
+        csv_path = tmp_path / "tasks.csv"
+        _write_csv(
+            csv_path,
+            [{**r, "input": json.dumps(r["input"])} for r in self.RECORDS],
+            ["task_id", "name", "input", "subject"],
+        )
+        return {"json": json_path, "jsonl": jsonl_path, "csv": csv_path}
+
+    @staticmethod
+    def _shape(tasks):
+        return [(t.task_id, t.name, t.input_data, t.metadata) for t in tasks]
+
+    def test_equivalent_files_load_equivalent_tasks(self, tmp_path: Path) -> None:
+        from tracelens.loaders import load_tasks
+
+        paths = self._write_all(tmp_path)
+        expected = self._shape(load_tasks(paths["json"]))
+        assert expected[0] == ("t1", "first", {"value": 0.9}, {"subject": "geo"})
+        assert self._shape(load_tasks(paths["jsonl"])) == expected
+        assert self._shape(load_tasks(paths["csv"])) == expected
+
+    def test_explicit_format_overrides_the_suffix(self, tmp_path: Path) -> None:
+        from tracelens.loaders import load_tasks
+
+        paths = self._write_all(tmp_path)
+        renamed = tmp_path / "records.txt"
+        renamed.write_text(paths["jsonl"].read_text())
+        assert len(load_tasks(renamed, format="jsonl")) == 2
+
+    def test_directory_requires_a_format_and_loads_recursively(self, tmp_path: Path) -> None:
+        from tracelens.loaders import EvalSetLoadError, load_tasks
+
+        paths = self._write_all(tmp_path)
+        folder = tmp_path / "suite"
+        (folder / "nested").mkdir(parents=True)
+        (folder / "a.jsonl").write_text(json.dumps(self.RECORDS[0]) + "\n")
+        (folder / "nested" / "b.jsonl").write_text(json.dumps(self.RECORDS[1]) + "\n")
+        (folder / "ignored.csv").write_text(paths["csv"].read_text())
+        with pytest.raises(EvalSetLoadError, match="--eval-set-format"):
+            load_tasks(folder)
+        assert [t.task_id for t in load_tasks(folder, format="jsonl")] == ["t1", "t2"]
+
+    def test_input_field_and_metadata_fields_apply_to_foreign_formats(self, tmp_path: Path) -> None:
+        from tracelens.loaders import EvalSetLoadError, load_tasks
+
+        path = tmp_path / "prompts.jsonl"
+        path.write_text(json.dumps({"prompt": "hi", "subject": "geo", "source": "x"}) + "\n")
+        tasks = load_tasks(path, input_field="prompt", metadata_fields=["subject"])
+        assert tasks[0].input_data == {"value": "hi"}
+        assert tasks[0].metadata == {"subject": "geo"}
+        with pytest.raises(EvalSetLoadError, match="apply to jsonl and csv"):
+            load_tasks(self._write_all(tmp_path)["json"], input_field="prompt")
+
+    @pytest.mark.parametrize(
+        "name, content, message",
+        [
+            ("bad.jsonl", '{"input": {"value": 1}}\nnot json\n', "bad.jsonl:2"),
+            ("bad.json", "{not json", "invalid JSON"),
+            ("noinput.json", '{"tasks": [{"name": "x"}]}', "invalid task record"),
+            ("nocol.csv", "name,subject\nfirst,geo\n", "missing required input field 'input'"),
+        ],
+    )
+    def test_load_errors_name_the_file_and_line(
+        self, tmp_path: Path, name: str, content: str, message: str
+    ) -> None:
+        from tracelens.loaders import EvalSetLoadError, load_tasks
+
+        path = tmp_path / name
+        path.write_text(content)
+        with pytest.raises(EvalSetLoadError, match=message):
+            load_tasks(path)
+
+    def test_missing_path_and_unknown_suffix(self, tmp_path: Path) -> None:
+        from tracelens.loaders import EvalSetLoadError, load_tasks
+
+        with pytest.raises(EvalSetLoadError, match="not found"):
+            load_tasks(tmp_path / "nope.json")
+        weird = tmp_path / "tasks.yaml"
+        weird.write_text("tasks: []\n")
+        with pytest.raises(EvalSetLoadError, match="unsupported eval-set file type '.yaml'"):
+            load_tasks(weird)

@@ -193,6 +193,11 @@ tracelens run \
 tracelens report --results reports/results.json --format markdown
 ```
 
+`--eval-set` accepts `.json`, `.jsonl`, and `.csv` files (format inferred from
+the suffix; directories need `--eval-set-format`); `--input-field` and
+`--metadata-fields` map foreign JSONL/CSV columns. Eval-set load failures
+exit 2 before any agent call.
+
 Baseline checks need a baseline file:
 
 ```bash
