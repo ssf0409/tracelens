@@ -10,6 +10,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **`tracelens report --format ci`.** Re-renders the one-line CI summary
+  `tracelens run` printed, gate line included, from a saved results file,
+  so a job summary or script can read it without parsing Markdown. `report`
+  never re-decides the gate: it exits 0. (#75)
 - **Releases create their GitHub Release automatically.** The release
   workflow now runs three jobs: build and verify (tag matches the built
   version; release notes rendered from the changelog's dated section by

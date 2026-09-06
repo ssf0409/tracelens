@@ -284,7 +284,8 @@ comparison activates when both sides carry a `DecisionSpec` — via
 The decision is recorded once (`ReportData.gate`, a `GateResult` with status
 `not_requested` / `passed` / `blocked` / `unevaluable`, per-task outcomes, and
 the observed regressions), written to the `--output` JSON, rendered in every
-report format, and re-rendered by `tracelens report`. Output-write failures
+report format, and re-rendered by `tracelens report` (`--format ci` reprints
+the one-line summary `run` printed). Output-write failures
 and non-results input to `report` exit 2 with a clear message.
 
 Long runs: `--progress` prints per-trial progress to stderr, and

@@ -259,6 +259,7 @@ decision again:
 
 ```bash
 tracelens report --results eval/results/results.json --format markdown
+tracelens report --results eval/results/results.json --format ci   # the one-line summary
 ```
 
 A results file written before gate decisions were recorded has no `gate`

@@ -1570,3 +1570,32 @@ def test_task_ids_from_the_config_file(
     assert "[tracelens] running 1 of 2 task(s): t-pass" in capsys.readouterr().err
     results = json.loads((tmp_path / "results.json").read_text())
     assert [s["task_id"] for s in results["task_summaries"]] == ["t-pass"]
+
+
+# --- Issue #75: tracelens report --format ci ----------------------------------
+
+
+def test_report_format_ci_reprints_the_run_summary(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`report --format ci` prints exactly what `run` printed, gate line included,
+    from the recorded decision, and exits 0 even when the gate blocked."""
+    out = tmp_path / "results.json"
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--output", str(out),
+    ) == 0
+    run_stdout = capsys.readouterr().out
+    assert run_stdout.startswith("TraceLens: ")
+    assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
+    assert capsys.readouterr().out == run_stdout
+
+    baselines = _write_pass_baseline(tmp_path, {"t-pass": 0.9, "t-fail": 0.9})
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--output", str(out), "--baseline-check", "--baselines-file", str(baselines),
+    ) == 1
+    gated_stdout = capsys.readouterr().out
+    assert "Baseline check:" in gated_stdout and "REGRESSION DETECTED" in gated_stdout
+    assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
+    assert capsys.readouterr().out == gated_stdout
