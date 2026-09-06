@@ -230,7 +230,8 @@ Every release should leave these channels agreeing with each other:
 - PyPI shows the same latest version.
 - GitHub Releases has a release for the tag (the release workflow creates it
   from the changelog section; a missing section fails the release before
-  anything is published).
+  anything is published). The tag itself comes from merging the release
+  pull request that the "Release prepare" workflow opens.
 - `mkdocs build --strict` exits cleanly with no project link or rendering
   warnings.
 

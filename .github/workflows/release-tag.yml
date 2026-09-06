@@ -1,0 +1,95 @@
+name: Release tag
+
+# Second half of the release pipeline (issue #88). When the release pull
+# request opened by release-prepare.yml is merged, the resulting commit on
+# main is titled "release: vX.Y.Z" (squash or rebase merge) or "Merge pull
+# request #N from <owner>/release/vX.Y.Z" (merge commit): this workflow tags
+# that commit and hands the tag to release.yml, which publishes to PyPI
+# (release environment) and creates the GitHub Release. Every other push to
+# main is ignored.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: tag the release commit and publish
+    if: >-
+      startsWith(github.event.head_commit.message, 'release: v')
+      || contains(github.event.head_commit.message, '/release/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push the tag
+      actions: write    # run release.yml on the tag
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MESSAGE: ${{ github.event.head_commit.message }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read the version from the commit and check the changelog and tags
+        id: version
+        run: |
+          set -euo pipefail
+          TITLE="$(printf '%s\n' "$MESSAGE" | head -n1)"
+          # Squash and rebase merges keep the release commit's own title; a
+          # merge commit names the release branch instead.
+          squash='^release: v([0-9][^[:space:]]*)'
+          merge='^Merge pull request #[0-9]+ from .+/release/v([0-9][^[:space:]]*)$'
+          VERSION=""
+          if [[ "$TITLE" =~ $squash ]] || [[ "$TITLE" =~ $merge ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "not a release commit, nothing to do: $TITLE"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+            echo "CHANGELOG.md has no dated section for $VERSION" >&2
+            exit 1
+          fi
+          # A re-run after a failed dispatch finds the tag already on this
+          # commit: keep it and dispatch again. A tag elsewhere is an error.
+          if EXISTING="$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}")"; then
+            if [ "$EXISTING" != "$GITHUB_SHA" ]; then
+              echo "tag v$VERSION already exists at $EXISTING, not at $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "tag v$VERSION already points at $GITHUB_SHA; dispatching the release again"
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagging v$VERSION at $GITHUB_SHA"
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push the tag
+        if: steps.version.outputs.release == 'true' && steps.version.outputs.tagged == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "release: v$VERSION" "$GITHUB_SHA"
+          git push origin "v$VERSION"
+
+      - name: Publish by running release.yml on the tag
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A tag pushed with the workflow token does not raise the tag-push
+          # event (GitHub prevents workflow loops), so the dispatch is the
+          # trigger; publish=true makes it a real release, not a dry run.
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "v$VERSION" -f publish=true
+          echo "tagged v$VERSION and started release.yml with publish=true" >> "$GITHUB_STEP_SUMMARY"

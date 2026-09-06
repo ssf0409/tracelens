@@ -10,6 +10,14 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Added
 
+- **One-click release preparation.** The "Release prepare" workflow takes a
+  version, validates it against the tags and the changelog, moves the
+  `[Unreleased]` entries into a dated section (`scripts/prepare_release.py`,
+  which refuses to release nothing), and opens a `release: vX.Y.Z` pull
+  request with the rendered notes; merging it makes the "Release tag"
+  workflow tag the merge commit and run the release workflow with
+  `publish=true`. Nothing releases on an ordinary merge, and the manual
+  tag path still works. (#88)
 - **`tracelens report --format ci`.** Re-renders the one-line CI summary
   `tracelens run` printed, gate line included, from a saved results file,
   so a job summary or script can read it without parsing Markdown. `report`
