@@ -98,6 +98,19 @@ class TestReleaseNotes:
             release_notes("## [0.4.0] - 2026-07-19\n\n- Older.\n", "0.5.0", allow_unreleased=True)
 
 
+def test_dry_run_with_empty_unreleased_renders_a_placeholder():
+    empty = CHANGELOG.replace("### Added\n\n- Something in progress.\n\n## [0.5.0]", "## [0.5.0]")
+    assert empty != CHANGELOG and not sections(empty)["Unreleased"].strip()
+    notes = release_notes(empty, "0.6.0.dev1", allow_unreleased=True)
+    assert notes.startswith(
+        "> Dry run: CHANGELOG.md has no section for 0.6.0.dev1; "
+        "the [Unreleased] section is empty, so there is nothing to release yet."
+    )
+    assert "[Full changelog]" in notes and "pip install" not in notes
+    with pytest.raises(LookupError, match="add the dated section"):
+        release_notes(empty, "0.6.0.dev1")  # no fallback without the flag
+
+
 class TestCommandLine:
     def _run(self, *args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -119,9 +132,13 @@ class TestCommandLine:
         no_file = self._run("--version", "0.5.0", "--changelog", "nope.md", cwd=tmp_path)
         assert no_file.returncode == 2 and "error:" in no_file.stderr
 
-    def test_real_changelog_has_the_last_release_and_a_dry_run_works(self):
+    def test_real_changelog_renders_its_latest_release_and_a_dry_run(self):
+        # Must hold in every release state: with entries under [Unreleased]
+        # and right after a release, when that section is empty.
         repo = SCRIPT.parents[1]
-        released = self._run("--version", "0.4.0", cwd=repo)
-        assert released.returncode == 0 and "tracelens==0.4.0" in released.stdout
+        text = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+        latest = next(name for name in sections(text) if name != "Unreleased")
+        released = self._run("--version", latest, cwd=repo)
+        assert released.returncode == 0 and f"tracelens=={latest}" in released.stdout
         dry = self._run("--version", "0.0.0.dev0", "--allow-unreleased", cwd=repo)
-        assert dry.returncode == 0 and dry.stdout.startswith("> Dry run:")
+        assert dry.returncode == 0 and dry.stdout.startswith("> Dry run:"), dry.stderr

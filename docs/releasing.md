@@ -25,10 +25,12 @@ version constraint.
   succeeded. Tags whose version is not a final `X.Y.Z` (`rc`, `a`, `b`,
   `dev`, `post`) are marked as pre-releases on GitHub.
 
-## One-Time PyPI Setup
+## One-Time Setup
 
 TraceLens already has a PyPI project and trusted publishing configured. Re-run
-this section only if the repository, workflow name, or PyPI ownership changes.
+this section only if the repository, workflow name, or PyPI ownership changes,
+or when the "Release prepare" workflow reports that it may not open pull
+requests.
 
 1. Confirm the package metadata:
 
@@ -45,6 +47,11 @@ this section only if the repository, workflow name, or PyPI ownership changes.
 
 3. In GitHub, create the `release` environment under repository settings.
    Add required reviewers if you want a manual approval gate before publishing.
+
+4. Let the "Release prepare" workflow open pull requests: Settings → Actions →
+   General → Workflow permissions → enable "Allow GitHub Actions to create and
+   approve pull requests". Without it the workflow pushes the release branch,
+   fails to open the pull request, removes the branch again, and says so.
 
 No PyPI API token is required when trusted publishing is configured correctly.
 
@@ -133,6 +140,10 @@ If the workflows are unavailable, the tag-driven path still works on its own:
   (`workflow_dispatch`) on the release workflow with `publish` left off, on a
   branch or a tag: it builds, verifies, and shows the rendered notes in the
   job summary without publishing anything.
+- **"Release prepare" fails with "GitHub Actions is not permitted to create
+  or approve pull requests".** Enable the setting in step 4 of
+  [One-Time Setup](#one-time-setup) and run the workflow again; it removed
+  the release branch it had pushed, so nothing needs cleaning up.
 - **A release pull request must be abandoned.** Close it and delete the
   `release/vX.Y.Z` branch; nothing was tagged or published. Run "Release
   prepare" again later, with the same version if it is still right.
