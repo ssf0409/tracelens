@@ -17,8 +17,7 @@ proposing a broad new abstraction.
 
 ## Before Starting Work
 
-These rules apply to every issue and to all contributors and maintainers, not
-just issues labelled `good first issue`.
+These rules apply to every issue and to all contributors and maintainers.
 
 Before starting, read the issue discussion for existing claims. If someone has
 already claimed the issue, coordinate with them there instead of opening a
@@ -31,15 +30,14 @@ coding agent, search the
 for its issue number. If work is already in progress, coordinate on the issue
 and any existing PR before starting a separate implementation.
 
-## First PR Path
+## Contribution Workflow
 
 1. Pick a scoped issue with concrete acceptance criteria from the
-   [open `good first issue` list](https://github.com/ssf0409/tracelens/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22).
+   [open issues list](https://github.com/ssf0409/tracelens/issues?q=is%3Aissue%20is%3Aopen).
 
-   Statistical design (estimators, comparison semantics, gate policy) is
-   owner-level work and is never labelled a first issue; it starts from the
-   [statistical contract](docs/statistical-contract.md) and a maintainer
-   discussion.
+   Changes to statistical design (estimators, comparison semantics, gate policy)
+   start with a maintainer discussion based on the
+   [statistical contract](docs/statistical-contract.md).
 2. Follow [Before Starting Work](#before-starting-work) to coordinate your approach.
 3. Keep the PR to one behavior change. If you discover a larger architecture
    cleanup, call it out in the PR body instead of expanding silently.
