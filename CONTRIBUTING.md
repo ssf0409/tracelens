@@ -15,6 +15,22 @@ proposing a broad new abstraction.
 - **Pull requests** — see below.
 - **Benchmark contributions** — new task packs for public benchmarks under `benchmarks/` are very welcome.
 
+## Before Starting Work
+
+These rules apply to every issue and to all contributors and maintainers, not
+just issues labelled `good first issue`.
+
+Before starting, read the issue discussion for existing claims. If someone has
+already claimed the issue, coordinate with them there instead of opening a
+competing PR. Otherwise, comment with a one-line plan and wait for a maintainer
+thumbs-up or 24 hours after your comment, whichever comes first.
+
+**Maintainers:** Before implementing or delegating an issue, including to a
+coding agent, search the
+[open pull request queue](https://github.com/ssf0409/tracelens/pulls?q=is%3Apr%20is%3Aopen)
+for its issue number. If work is already in progress, coordinate on the issue
+and any existing PR before starting a separate implementation.
+
 ## First PR Path
 
 1. Pick a scoped issue with concrete acceptance criteria from the
@@ -24,19 +40,11 @@ proposing a broad new abstraction.
    owner-level work and is never labelled a first issue; it starts from the
    [statistical contract](docs/statistical-contract.md) and a maintainer
    discussion.
-2. Before starting, comment on the issue with a one-line plan and wait for a
-   maintainer thumbs-up or 24 hours after your comment, whichever comes first.
-   If someone has already claimed the issue, coordinate with them there instead
-   of opening a competing PR.
+2. Follow [Before Starting Work](#before-starting-work) to coordinate your approach.
 3. Keep the PR to one behavior change. If you discover a larger architecture
    cleanup, call it out in the PR body instead of expanding silently.
 4. Add or update tests for every behavior change.
 5. Run `make verify` before requesting review.
-
-**Maintainers:** Before implementing an issue yourself, search the
-[open pull request queue](https://github.com/ssf0409/tracelens/pulls?q=is%3Apr%20is%3Aopen)
-for its issue number. If a PR already addresses it, coordinate on the issue and
-existing PR before starting a separate implementation.
 
 ## Where things live
 
