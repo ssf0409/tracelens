@@ -17,27 +17,26 @@ proposing a broad new abstraction.
 
 ## First PR Path
 
-1. Pick a scoped issue from the GitHub `good first issue` label. Three that
-   are genuinely small, each with concrete acceptance criteria in the issue:
-   - [#74](https://github.com/ssf0409/tracelens/issues/74) — stop the
-     hello-world test rewriting the checked-in sample reports (one example,
-     one test, one doc note).
-   - [#75](https://github.com/ssf0409/tracelens/issues/75) — `tracelens
-     report --format ci`, re-rendering the one-line CI summary from a saved
-     results file (one CLI branch, tests, one doc paragraph).
-   - [#76](https://github.com/ssf0409/tracelens/issues/76) — show
-     `provenance_version` in the adapter and grader examples and the
-     scaffold templates (docs and two template strings).
+1. Pick a scoped issue with concrete acceptance criteria from the
+   [open `good first issue` list](https://github.com/ssf0409/tracelens/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22).
 
    Statistical design (estimators, comparison semantics, gate policy) is
    owner-level work and is never labelled a first issue; it starts from the
    [statistical contract](docs/statistical-contract.md) and a maintainer
    discussion.
-2. Comment on the issue with the approach you plan to take.
+2. Before starting, comment on the issue with a one-line plan and wait for a
+   maintainer thumbs-up or 24 hours after your comment, whichever comes first.
+   If someone has already claimed the issue, coordinate with them there instead
+   of opening a competing PR.
 3. Keep the PR to one behavior change. If you discover a larger architecture
    cleanup, call it out in the PR body instead of expanding silently.
 4. Add or update tests for every behavior change.
 5. Run `make verify` before requesting review.
+
+**Maintainers:** Before implementing an issue yourself, search the
+[open pull request queue](https://github.com/ssf0409/tracelens/pulls?q=is%3Apr%20is%3Aopen)
+for its issue number. If a PR already addresses it, coordinate on the issue and
+existing PR before starting a separate implementation.
 
 ## Where things live
 

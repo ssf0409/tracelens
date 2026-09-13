@@ -36,6 +36,8 @@ What alternatives did you consider and why did you reject them?
 
 <!-- Closes #123 / Refs #456 -->
 
+Claimed in the issue: yes/no (link)
+
 ## Notes for the reviewer
 
 <!-- Anything subtle, controversial, or worth flagging. -->
