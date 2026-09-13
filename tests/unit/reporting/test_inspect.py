@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from tracelens.core.outcome import Outcome
+from tracelens.core.provenance import (
+    CandidateSpec,
+    ComponentIdentity,
+    MeasurementSetup,
+    RunnerSettings,
+    RunProvenance,
+    task_content_hash,
+)
 from tracelens.core.task import Task, TaskExpectation
 from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
 from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 from tracelens.reporting.inspect import (
     FAILURE_KINDS,
     InspectionReport,
+    TaskContentMismatchError,
+    TaskContextStatus,
+    TaskDuplicateIdError,
     TrialKind,
     build_inspection,
     classify,
@@ -232,3 +245,68 @@ class TestBuildAndRender:
         data = json.loads(report.model_dump_json())
         assert InspectionReport.model_validate(data) == report
         assert data["totals"]["agent_failure"] == 2 and data["trials"][0]["kind"] == "agent_failure"
+
+    def test_task_content_hash_matching_and_unverified(self):
+        t1 = Task(task_id="b", name="task b", input_data={"q": "question b"}, expectation=TaskExpectation(expected_output="ans b"))
+        t2 = Task(task_id="c", name="task c", input_data={"q": "question c"}, expectation=TaskExpectation(expected_output="ans c"))
+
+        batch = _batch(FAILED, TIMEOUT)
+        batch.provenance = RunProvenance(
+            run_id="run-1",
+            measurement=MeasurementSetup(
+                eval_set_name="test",
+                eval_set_hash="hash",
+                task_hashes={
+                    "b": task_content_hash(t1),
+                    "c": task_content_hash(t2),
+                },
+                runner=RunnerSettings(
+                    num_runs=1,
+                    max_concurrency=1,
+                    timeout_seconds=1.0,
+                    max_infra_retries=0,
+                ),
+            ),
+            candidate=CandidateSpec(
+                adapter=ComponentIdentity(class_path="test.Adapter"),
+            ),
+        )
+
+        # Matching hashes succeed with VERIFIED status
+        report = build_inspection(batch, source="trials.json", tasks=[t1, t2])
+        assert report.task_context_status == TaskContextStatus.VERIFIED
+        assert report.trials[0].task_name == "task b"
+        assert report.trials[0].expected == "ans b"
+        assert report.trials[0].task_context_status == TaskContextStatus.VERIFIED
+
+        # Unrelated modified task in eval set does not fail if not inspected/displayed
+        t3_modified = Task(task_id="other", name="other", input_data={"q": "changed"})
+        batch.provenance.measurement.task_hashes["other"] = "different_hash"
+        report2 = build_inspection(batch, source="trials.json", tasks=[t1, t2, t3_modified])
+        assert report2.task_context_status == TaskContextStatus.VERIFIED
+
+        # Mismatched hash on attached task raises TaskContentMismatchError
+        t1_tampered = Task(task_id="b", name="task b", input_data={"q": "different question"}, expectation=TaskExpectation(expected_output="ans b"))
+        with pytest.raises(TaskContentMismatchError) as exc_info:
+            build_inspection(batch, source="trials.json", tasks=[t1_tampered, t2])
+        assert exc_info.value.task_id == "b"
+        assert "task 'b' content does not match" in str(exc_info.value)
+
+        # Duplicate task IDs in eval set raise TaskDuplicateIdError
+        t_dup = Task(task_id="b", name="task b dup", input_data={"q": "question b dup"})
+        with pytest.raises(TaskDuplicateIdError) as exc_info_dup:
+            build_inspection(batch, source="trials.json", tasks=[t1, t_dup])
+        assert exc_info_dup.value.task_id == "b"
+        assert "duplicate task ID 'b'" in str(exc_info_dup.value)
+
+        # Legacy batch without provenance hashes marks context as UNVERIFIED
+        legacy_batch = _batch(FAILED)
+        legacy_report = build_inspection(legacy_batch, source="trials.json", tasks=[t1])
+        assert legacy_report.task_context_status == TaskContextStatus.UNVERIFIED
+        assert legacy_report.trials[0].task_context_status == TaskContextStatus.UNVERIFIED
+        rendered = render_text(legacy_report)
+        assert "expected outputs: unverified (trials file carries no task hashes)" in rendered
+        assert "task:     task b (unverified)" in rendered
+        html = render_html(legacy_report)
+        assert "Expected outputs: unverified" in html
+        assert "task b (unverified)" in html

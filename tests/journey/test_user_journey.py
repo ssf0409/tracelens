@@ -137,7 +137,26 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert gate["blocking_regressions"] == 2
     assert "BLOCKED" in report.read_text()
 
-    # 6. inspect explains the failure from the trials file.
+    # 6. inspect explains the failure from the trials file, validating task content.
+    # Tampering with a task's question causes inspect to reject the eval set (exit 2).
+    orig_tasks = tasks.read_text()
+    tasks.write_text(orig_tasks.replace("What is the capital of France?", "What is the capital of Germany?"))
+    tampered_inspect = tracelens(
+        "inspect", "eval/results/trials.json", "--failures", "--eval-set", "eval/tasks.json",
+        cwd=project, expect=2,
+    )
+    assert "starter-capital" in tampered_inspect.stderr
+    assert "does not match the task recorded in the trials" in tampered_inspect.stderr
+    # Without --eval-set, inspect succeeds on the recorded trials evidence alone.
+    no_eval_inspect = tracelens(
+        "inspect", "eval/results/trials.json", "--failures",
+        cwd=project, expect=0,
+    )
+    assert "starter-capital run 0  agent failure" in no_eval_inspect.stdout
+    assert "expected: not supplied (pass --eval-set to show it)" in no_eval_inspect.stdout
+
+    # Restoring original task content allows inspect with --eval-set to succeed.
+    tasks.write_text(orig_tasks)
     inspect = tracelens(
         "inspect", "eval/results/trials.json", "--failures", "--eval-set", "eval/tasks.json",
         "--html", "eval/results/failures.html", cwd=project, expect=0,

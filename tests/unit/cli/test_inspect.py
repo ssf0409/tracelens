@@ -163,3 +163,41 @@ def test_real_process_prints_the_report_only(artifacts):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.startswith("Inspected ") and "t-crash" in result.stdout
     assert result.stderr == ""
+
+
+def test_eval_set_task_content_mismatch_exits_2(artifacts, capsys):
+    tampered_set = artifacts["root"] / "tampered_tasks.json"
+    tasks_data = [t.model_dump(mode="json") for t in _tasks()]
+    for td in tasks_data:
+        if td["task_id"] == "t-fail":
+            td["input_data"] = {"behaviour": "tampered"}
+    tampered_set.write_text(json.dumps({"tasks": tasks_data}))
+
+    html_out = artifacts["root"] / "out" / "tampered.html"
+    json_out = artifacts["root"] / "out" / "tampered.json"
+    if html_out.exists():
+        html_out.unlink()
+    if json_out.exists():
+        json_out.unlink()
+
+    code = _run(str(artifacts["trials"]), "--task-id", "t-fail", "--eval-set", str(tampered_set), "--html", str(html_out), "--json", str(json_out))
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "task 't-fail' content does not match" in captured.err
+    assert "Supply the original eval set used for the run, or run without --eval-set" in captured.err
+    assert not html_out.exists()
+    assert not json_out.exists()
+
+
+def test_eval_set_duplicate_task_id_exits_2(artifacts, capsys):
+    dup_set = artifacts["root"] / "dup_tasks.json"
+    tasks_data = [t.model_dump(mode="json") for t in _tasks()]
+    tasks_data.append(tasks_data[0].copy())
+    dup_set.write_text(json.dumps({"tasks": tasks_data}))
+
+    code = _run(str(artifacts["trials"]), "--eval-set", str(dup_set))
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "duplicate task ID 't-pass' in eval set" in captured.err

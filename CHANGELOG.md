@@ -8,6 +8,14 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tracelens inspect` validates task content before attaching context to saved trials.**
+  When `--eval-set` is passed, task content is verified against the provenance hashes
+  recorded in the trials file. Mismatched content for attached tasks raises an actionable
+  error and exits 2, duplicate task IDs in the eval set exit 2, and legacy trial runs
+  lacking provenance hashes render attached context marked as `(unverified)`. (#100)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.
