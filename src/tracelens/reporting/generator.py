@@ -455,11 +455,26 @@ class ReportGenerator:
             lines[0] += f", grader_errors={report.grader_error_rate:.1%}"
 
         if report.gate is not None and report.gate.requested:
-            # Blocking tasks print the detector's own text, then the one-line
-            # gate summary -- the same lines the CLI used to assemble itself.
+            # Blocking tasks print the detector's own text; observed drops
+            # that did not block get one line each with their evidence; then
+            # the suite criterion when it found a drop and the one-line gate
+            # summary -- the same lines the CLI used to assemble itself.
             for task in report.gate.tasks:
-                if task.outcome is TaskGateOutcome.CHECKED and task.blocking:
+                if task.outcome is not TaskGateOutcome.CHECKED:
+                    continue
+                if task.blocking:
                     lines.append(task.regression_report().to_ci_output())
+                    continue
+                for regression in task.regressions:
+                    lines.append(
+                        f"[tracelens] observed drop, not blocking: {task.task_id} "
+                        f"{regression.metric_name} {regression.baseline_mean:.4f} -> "
+                        f"{regression.current_mean:.4f} ({regression.delta_percent:+.1f}%), "
+                        f"{regression.evidence_text()}"
+                    )
+            for suite in report.gate.suite:
+                if suite.is_regression:
+                    lines.append(f"[tracelens] suite-level {suite.describe()}")
             lines.append(report.gate.summary_line())
         elif report.regression_report and report.regression_report.has_regression:
             # Prefer the noise-aware "blocking" count if specs were provided.
@@ -713,17 +728,24 @@ def _regression_notes(task: Any, regression: Any) -> str:
     notes: list[str] = []
     if regression.within_noise_band:
         notes.append("within infra-noise band; not blocking")
-    elif task.blocking:
+    elif regression.is_significant and task.blocking:
         notes.append("blocking")
-    if regression.insufficient_data:
-        notes.append("insufficient samples; severity from thresholds")
+    elif regression.is_significant:
+        notes.append("significant; below the blocking threshold")
+    else:
+        notes.append("not blocking: not significant")
     if task.infra_config_mismatch:
         notes.append("infra config differs from baseline")
     return "; ".join(notes)
 
 
-def _gate_rows(gate: GateResult) -> list[tuple[str, str, str, str, str, str, str]]:
-    rows = []
+_GATE_TABLE_HEADER = (
+    "Task", "Metric", "Baseline", "Current", "Change", "Severity", "Evidence", "Notes",
+)
+
+
+def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
+    rows: list[tuple[str, ...]] = []
     for task in gate.tasks:
         for regression in task.regressions:
             rows.append((
@@ -733,9 +755,14 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, str, str, str, str, str, str
                 f"{regression.current_mean:.4f}",
                 f"{regression.delta_percent:+.1f}%",
                 regression.severity.value,
+                regression.evidence_text(),
                 _regression_notes(task, regression),
             ))
     return rows
+
+
+def _gate_suite_lines(gate: GateResult) -> list[str]:
+    return [suite.describe() for suite in gate.suite]
 
 
 def _gate_skipped_lines(gate: GateResult) -> list[str]:
@@ -753,21 +780,20 @@ def _gate_section_md(report: ReportData) -> list[str]:
     lines = ["## Baseline Gate", "", f"- **Status**: {_gate_status_text(gate)}"]
     if gate.requested:
         lines.append(f"- **Policy**: {_gate_policy_text(gate)}")
+        lines.append(f"- **Significance**: {gate.policy_text()}")
         lines.append(f"- **Tasks**: {_gate_task_counts(gate)}")
         lines.append(f"- **Blocking regressions**: {gate.blocking_regressions}")
         for reason in gate.reasons:
             lines.append(f"- **Why**: {reason}")
         for warning in gate.warnings:
             lines.append(f"- **Warning**: {warning}")
+        for suite_line in _gate_suite_lines(gate):
+            lines.append(f"- **Suite**: {suite_line}")
         rows = _gate_rows(gate)
         if rows:
             lines.append("")
-            lines.append(
-                "| Task | Metric | Baseline | Current | Change | Severity | Notes |"
-            )
-            lines.append(
-                "|------|--------|----------|---------|--------|----------|-------|"
-            )
+            lines.append("| " + " | ".join(_GATE_TABLE_HEADER) + " |")
+            lines.append("|" + "|".join("-" * (len(h) + 2) for h in _GATE_TABLE_HEADER) + "|")
             for row in rows:
                 lines.append("| " + " | ".join(row) + " |")
         skipped = _gate_skipped_lines(gate)
@@ -790,6 +816,7 @@ def _gate_section_html(report: ReportData) -> str:
     body = f"<p><strong>Status</strong>: {escape(_gate_status_text(gate))}</p>"
     if gate.requested:
         body += f"<p><strong>Policy</strong>: {escape(_gate_policy_text(gate))}</p>"
+        body += f"<p><strong>Significance</strong>: {escape(gate.policy_text())}</p>"
         body += f"<p><strong>Tasks</strong>: {escape(_gate_task_counts(gate))}</p>"
         body += (
             f"<p><strong>Blocking regressions</strong>: {gate.blocking_regressions}</p>"
@@ -798,12 +825,14 @@ def _gate_section_html(report: ReportData) -> str:
             body += f"<p><strong>Why</strong>: {escape(reason)}</p>"
         for warning in gate.warnings:
             body += f'<p class="na"><strong>Warning</strong>: {escape(warning)}</p>'
+        for suite_line in _gate_suite_lines(gate):
+            body += f"<p><strong>Suite</strong>: {escape(suite_line)}</p>"
         rows = _gate_rows(gate)
         if rows:
             body += (
-                "<table><thead><tr><th>Task</th><th>Metric</th><th>Baseline</th>"
-                "<th>Current</th><th>Change</th><th>Severity</th><th>Notes</th>"
-                "</tr></thead><tbody>"
+                "<table><thead><tr>"
+                + "".join(f"<th>{escape(h)}</th>" for h in _GATE_TABLE_HEADER)
+                + "</tr></thead><tbody>"
             )
             for row in rows:
                 body += "<tr>" + "".join(f"<td>{escape(cell)}</td>" for cell in row) + "</tr>"

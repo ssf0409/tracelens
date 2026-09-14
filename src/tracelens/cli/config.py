@@ -53,6 +53,7 @@ RUN_DEFAULTS: dict[str, Any] = {
     "baselines_file": None,
     "require_baselines": False,
     "fail_on_regression": "moderate",
+    "multiplicity": "holm",
     "output": None,
     "report": None,
     "html_report": None,
@@ -67,6 +68,7 @@ RUN_DEFAULTS: dict[str, Any] = {
 
 _EVAL_SET_FORMATS = ("json", "jsonl", "csv")
 _SEVERITIES = ("minor", "moderate", "severe")
+_MULTIPLICITY = ("holm", "none")
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ _FIELDS: tuple[_Field, ...] = (
     _Field(("run", "baseline", "file"), "baselines_file", "str", is_path=True),
     _Field(("run", "baseline", "fail_on_regression"), "fail_on_regression", "str", choices=_SEVERITIES),
     _Field(("run", "baseline", "require_baselines"), "require_baselines", "bool"),
+    _Field(("run", "baseline", "multiplicity"), "multiplicity", "str", choices=_MULTIPLICITY),
     _Field(("run", "baseline", "noise_band"), "noise_band", "number"),
 )
 

@@ -106,7 +106,7 @@ class TestConfigTemplate:
             "eval_set": str(base / "eval/tasks.json"),
             "adapter": "eval.adapter.StarterAdapter",
             "graders": ["eval.grader.StarterGrader"],
-            "num_runs": 1,
+            "num_runs": 5,
             "output": str(base / "eval/results/results.json"),
             "report": str(base / "eval/results/report.md"),
             "html_report": str(base / "eval/results/report.html"),

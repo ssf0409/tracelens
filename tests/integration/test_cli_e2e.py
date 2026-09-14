@@ -781,7 +781,7 @@ def test_agent_execution_failures_remain_regression_observations(
 
     assert _run_cli(
         "run", "--eval-set", str(tasks_file), "--adapter", adapter,
-        "--graders", GRADER, "--timeout", "0.01",
+        "--graders", GRADER, "--timeout", "0.01", "--num-runs", "2",
         "--baseline-check", "--baselines-file", str(baselines),
     ) == 1
 

@@ -591,7 +591,9 @@ class TestGateReporting:
         assert "**Status**: BLOCKED (exit code 1)" in md
         assert "block at `moderate` or worse" in md
         assert "1 checked, 1 skipped (no baseline)" in md
-        assert "| t1 | pass_rate | 1.0000 | 0.0000 | -100.0% | severe | blocking |" in md
+        assert "| Task | Metric | Baseline | Current | Change | Severity | Evidence | Notes |" in md
+        assert "| t1 | pass_rate | 1.0000 | 0.0000 | -100.0% | severe | p=0.0009, significant | blocking |" in md
+        assert "**Significance**: alpha=0.05, Holm-adjusted across 1 checked task(s)" in md
         assert "Skipped tasks: t2 (no baseline stored for this task)" in md
 
         ci = gen.render_ci_summary(report)

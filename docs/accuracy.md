@@ -24,10 +24,19 @@ tasks you need depends on the scenario:
 
 | Scenario | Minimum Runs | Recommended |
 |----------|-------------|-------------|
-| Deterministic agent + CodeGrader | 1 | 1 |
+| Deterministic agent + CodeGrader, reading results only | 1 | 1 |
 | Non-deterministic agent | 3 | 5–10 |
 | LLMGrader (any agent) | 3 | 5 |
+| Any suite behind the baseline gate (`--baseline-check`) | 3 | 5 for checks, 10+ for the stored baseline |
 | High-stakes decision | 10 | 20+ |
+
+The gate blocks only on evidence, so the run count sets what it can see: with
+five trials a side a task that always passed and now fails every run blocks,
+and so does one that passes 1 of 5; a drop to 3 of 5 is reported with the
+trials that would decide it. Fewer than three trials a side cannot decide
+even a total failure, and a check none of whose tasks could have blocked is
+`UNEVALUABLE`. The error-rate tables are in the
+[statistical contract](statistical-contract.md#baseline-regression-detection).
 
 **Rule of thumb:** if your confidence-interval width is `> 0.1`, you need more
 runs. Put a CI on every metric with `estimate_metric` and watch `ci_width` — the
