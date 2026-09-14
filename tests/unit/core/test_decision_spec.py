@@ -235,6 +235,31 @@ class TestDecisionSpec:
 
         assert spec1.fingerprint != spec2.fingerprint
 
+    def test_fingerprint_roundtrip_with_complex_extras(self):
+        """Test that fingerprint is stable across model_dump(mode='json') and load for datetime, enum, int."""
+        from enum import Enum
+        class Strategy(Enum):
+            GREEDY = "greedy"
+
+        spec = DecisionSpec(
+            model=ModelConfig(
+                provider="openai",
+                model_id="gpt-4o",
+                extra_params={"strategy": Strategy.GREEDY, "count": 10},
+            ),
+            global_seed=42,
+            extra={
+                "created_at": datetime(2026, 9, 14, 12, 0, 0, tzinfo=UTC),
+                "strategy": Strategy.GREEDY,
+                "retries": 3,
+            },
+        )
+        fp_before = spec.fingerprint
+        dumped = spec.model_dump(mode="json")
+        loaded = DecisionSpec.model_validate(dumped)
+        fp_after = loaded.fingerprint
+        assert fp_before == fp_after
+
     def test_fingerprint_short(self):
         """Test short fingerprint is first 12 characters."""
         spec = DecisionSpec(

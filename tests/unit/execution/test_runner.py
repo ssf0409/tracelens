@@ -314,6 +314,29 @@ class TestRunnerLifecycleHooks:
         assert "teardown" in adapter.calls
         assert batch.trials[0].status == TrialStatus.TIMEOUT
 
+    async def test_task_timeout_seconds_honoured_when_smaller_than_runner_budget(self):
+        """Task.timeout_seconds times out trial even if runner budget is larger."""
+        adapter = _LifecycleTracker()
+
+        async def slow_run(task: Task) -> Transcript:
+            adapter.calls.append("run")
+            await asyncio.sleep(10)
+            return adapter.start_transcript(task)
+
+        adapter.run = slow_run  # type: ignore[assignment]
+
+        task = Task(task_id="t1", name="Slow Task", input_data={}, timeout_seconds=0.05)
+        eval_set = EvalSet(name="Set", tasks=[task])
+
+        # Runner config has a large 10s budget, but task specifies 0.05s
+        config = RunnerConfig(timeout_seconds=10.0)
+        runner = EvaluationRunner(adapter, [_PassGrader()], config)
+        batch = await runner.run(eval_set)
+
+        assert "teardown" in adapter.calls
+        assert batch.trials[0].status == TrialStatus.TIMEOUT
+        assert "0.05s" in batch.trials[0].error_message
+
 
 # --- Infra-error vs task-failure classification (Track 2 / Anthropic) ---
 

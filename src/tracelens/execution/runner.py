@@ -508,10 +508,15 @@ class EvaluationRunner:
 
             # --- run (skipped if setup failed) ---
             if not setup_failed:
+                effective_timeout = (
+                    min(task.timeout_seconds, self.config.timeout_seconds)
+                    if getattr(task, "timeout_seconds", None) is not None
+                    else self.config.timeout_seconds
+                )
                 try:
                     transcript = await asyncio.wait_for(
                         self._call_adapter_run(task),
-                        timeout=self.config.timeout_seconds,
+                        timeout=effective_timeout,
                     )
                     if transcript.decision_spec is None and self.decision_spec is not None:
                         transcript.decision_spec = self.decision_spec
@@ -523,13 +528,13 @@ class EvaluationRunner:
                     # _call_adapter_run so it classifies below instead.
                     trial.status = TrialStatus.TIMEOUT
                     trial.error_message = (
-                        f"Trial timed out after {self.config.timeout_seconds}s"
+                        f"Trial timed out after {effective_timeout}s"
                     )
                     logger.warning(
                         "Trial timed out for task %s run %d after %.1fs",
                         task.task_id,
                         run_index,
-                        self.config.timeout_seconds,
+                        effective_timeout,
                     )
                 except Exception as exc:
                     if isinstance(exc, _AdapterTimeoutError):

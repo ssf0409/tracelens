@@ -19,7 +19,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, TypeAdapter, computed_field
 
 
 class ModelConfig(BaseModel):
@@ -467,7 +467,9 @@ class DecisionSpec(BaseModel):
         in ``_to_hash_dict``); it says nothing about anything the spec does
         not capture.
         """
-        hash_data = self._to_hash_dict()
+        hash_data = TypeAdapter(dict[str, Any]).dump_python(
+            self._to_hash_dict(), mode="json"
+        )
         # Serialize deterministically (sorted keys)
         serialized = json.dumps(hash_data, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode()).hexdigest()
