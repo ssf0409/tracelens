@@ -122,10 +122,7 @@ For public API or dependency changes, test from the perspective of a downstream
 project:
 
 ```toml
-[project]
-dependencies = [
-    "tracelens>=0.3.0",
-]
+--8<-- "docs/snippets/dependency_pin.toml"
 ```
 
 Before a release, install the locally built wheel into the downstream

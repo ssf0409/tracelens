@@ -1,0 +1,4 @@
+[project]
+dependencies = [
+    "tracelens>=0.5.0",
+]
