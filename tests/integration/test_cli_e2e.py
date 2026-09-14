@@ -1605,3 +1605,57 @@ def test_report_format_ci_reprints_the_run_summary(
     assert "Baseline check:" in gated_stdout and "REGRESSION DETECTED" in gated_stdout
     assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
     assert capsys.readouterr().out == gated_stdout
+
+
+# --- Issue #129: exit-code contract and strict input models ------------------
+
+
+def test_eval_set_with_misspelled_key_exits_two_before_agent_call(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad_eval = tmp_path / "bad_tasks.json"
+    bad_eval.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "task_id": "t1",
+                        "name": "test",
+                        "input_data": {"value": 1.0},
+                        "expectaton": {"expected_output": "42"},
+                    }
+                ]
+            }
+        )
+    )
+    code = _run_cli(
+        "run", "--eval-set", str(bad_eval), "--adapter", ADAPTER, "--graders", GRADER
+    )
+    assert code == 2
+    assert EchoAdapter.run_count == 0
+    captured = capsys.readouterr()
+    assert "expectaton" in captured.err
+    assert "extra_forbidden" in captured.err
+
+
+def test_report_on_results_with_extra_summary_key_exits_zero_never_tracebacks(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "results.json"
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--output", str(out),
+    ) == 0
+    capsys.readouterr()
+
+    # Inject unknown keys into the task summaries (e.g. from future TraceLens versions)
+    data = json.loads(out.read_text())
+    data["task_summaries"][0]["future_field"] = "value"
+    data["task_summaries"][0]["another_metric"] = 123
+    out.write_text(json.dumps(data))
+
+    code = _run_report(capsys, out, "markdown")
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out

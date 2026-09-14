@@ -5,7 +5,8 @@ summaries, statistical analysis, and optional regression detection.
 Supports markdown, CI summary, and self-contained HTML dashboard output.
 """
 
-from dataclasses import dataclass, field
+import warnings
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from html import escape
 from typing import Any
@@ -190,7 +191,25 @@ class ReportData:
             raise ValueError("missing required keys: " + ", ".join(missing))
         if not isinstance(data["task_summaries"], list):
             raise ValueError("task_summaries must be a list")
-        summaries = [TaskSummary(**s) for s in data["task_summaries"]]
+        known_summary_fields = {f.name for f in fields(TaskSummary)}
+        summaries: list[TaskSummary] = []
+        for i, s in enumerate(data["task_summaries"]):
+            if not isinstance(s, dict):
+                raise ValueError(f"task summary at index {i} must be a dictionary, got {type(s).__name__}")
+            unknown_keys = set(s.keys()) - known_summary_fields
+            if unknown_keys:
+                warnings.warn(
+                    f"ignoring unknown keys in task summary: {', '.join(sorted(unknown_keys))}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                filtered_s = {k: v for k, v in s.items() if k in known_summary_fields}
+            else:
+                filtered_s = s
+            try:
+                summaries.append(TaskSummary(**filtered_s))
+            except TypeError as exc:
+                raise ValueError(f"invalid task summary at index {i}: {exc}") from exc
         gate_data = data.get("gate")
         gate = GateResult.from_dict(gate_data) if isinstance(gate_data, dict) else None
         provenance: RunProvenance | None = None
@@ -203,10 +222,16 @@ class ReportData:
         reliability: dict[str, float | None] = dict(data.get("reliability", {}))
         recorded = "metric_availability" in data
         if recorded:
-            availability = {
-                name: MetricValue.from_dict(entry)
-                for name, entry in data["metric_availability"].items()
-            }
+            if not isinstance(data["metric_availability"], dict):
+                raise ValueError("metric_availability must be a dictionary")
+            availability = {}
+            for name, entry in data["metric_availability"].items():
+                if not isinstance(entry, dict):
+                    raise ValueError(f"metric_availability entry for {name!r} must be a dictionary")
+                try:
+                    availability[name] = MetricValue.from_dict(entry)
+                except (TypeError, ValueError, KeyError) as exc:
+                    raise ValueError(f"invalid metric_availability entry for {name!r}: {exc}") from exc
         else:
             availability = {
                 name: MetricValue.legacy(name, value)

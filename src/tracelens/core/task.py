@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tracelens._paths import prepare_destination_path
 from tracelens.core._time import utc_now
@@ -23,6 +23,8 @@ class TaskExpectation(BaseModel):
     These are optional hints that graders can use to validate outputs.
     Not all graders require expectations - LLM graders often work without them.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     expected_output: Any | None = None
     expected_tool_calls: list[str] | None = None
@@ -54,6 +56,8 @@ class Task(BaseModel):
         )
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     task_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     description: str | None = None
@@ -74,6 +78,14 @@ class Task(BaseModel):
 
     # Execution configuration
     timeout_seconds: float = 300.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_legacy_max_retries(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "max_retries" in data:
+            data = dict(data)
+            data.pop("max_retries", None)
+        return data
 
     def matches_filter(
         self,
@@ -154,6 +166,8 @@ class JSONTaskLoader(TaskLoader):
 class EvalSetMetadata(BaseModel):
     """Metadata for an evaluation set."""
 
+    model_config = ConfigDict(extra="forbid")
+
     author: str | None = None
     version: str = "1.0.0"
     created_at: datetime = Field(default_factory=utc_now)
@@ -177,6 +191,8 @@ class EvalSet(BaseModel):
         )
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     eval_set_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
 
@@ -192,6 +208,42 @@ class EvalSet(BaseModel):
     # Configuration
     default_num_runs: int = 1  # For pass@k
     default_timeout_seconds: float = 300.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _route_metadata_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            metadata_dict = None
+            if "metadata" in data and isinstance(data["metadata"], (dict, EvalSetMetadata)):
+                metadata_dict = (
+                    data["metadata"].model_dump()
+                    if isinstance(data["metadata"], EvalSetMetadata)
+                    else dict(data["metadata"])
+                )
+            else:
+                metadata_dict = {}
+
+            modified = False
+            data = dict(data)
+            for field in ("description", "version", "author", "tags"):
+                if field in data and field not in metadata_dict:
+                    metadata_dict[field] = data.pop(field)
+                    modified = True
+                elif field in data:
+                    data.pop(field)
+                    modified = True
+
+            if modified:
+                data["metadata"] = metadata_dict
+        return data
+
+    @property
+    def description(self) -> str | None:
+        return self.metadata.description
+
+    @property
+    def version(self) -> str:
+        return self.metadata.version
 
     def filter_tasks(
         self,

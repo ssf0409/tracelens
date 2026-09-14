@@ -80,6 +80,56 @@ class TestReportData:
         d = report.to_dict()
         assert "regression" not in d
 
+    def test_from_dict_ignores_unknown_task_summary_keys_with_warning(self):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [
+                {
+                    "task_id": "t1",
+                    "num_trials": 1,
+                    "pass_rate": 1.0,
+                    "mean_score": 1.0,
+                    "std_score": 0.0,
+                    "future_unknown_metric": "foo",
+                    "another_new_field": 42,
+                }
+            ],
+        }
+        with pytest.warns(UserWarning, match="ignoring unknown keys in task summary"):
+            report = ReportData.from_dict(d)
+        assert len(report.task_summaries) == 1
+        assert report.task_summaries[0].task_id == "t1"
+        assert not hasattr(report.task_summaries[0], "future_unknown_metric")
+
+    def test_from_dict_rejects_non_dict_task_summary(self):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": ["not-a-dict"],
+        }
+        with pytest.raises(ValueError, match="task summary at index 0 must be a dictionary"):
+            ReportData.from_dict(d)
+
+    def test_from_dict_rejects_malformed_metric_availability(self):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [],
+            "metric_availability": "not-a-dict",
+        }
+        with pytest.raises(ValueError, match="metric_availability must be a dictionary"):
+            ReportData.from_dict(d)
+
+        d_bad_entry = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [],
+            "metric_availability": {"pass@1": "not-a-dict-entry"},
+        }
+        with pytest.raises(ValueError, match="metric_availability entry for 'pass@1' must be a dictionary"):
+            ReportData.from_dict(d_bad_entry)
+
 
 class TestReportGenerator:
     def test_build_report_basic(self):

@@ -8,6 +8,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Secondary error-path exit codes and strict input validation.** `ReportData.from_dict` now validates that each task summary is a dictionary, builds `TaskSummary` from known fields while ignoring unknown fields with a warning (ensuring forward-compatibility across versions), and validates `metric_availability`. `tracelens report` maps unexpected errors to usage errors (exit code 2) rather than unhandled tracebacks. Evaluation input models (`Task`, `TaskExpectation`, `EvalSet`, `EvalSetMetadata`) now forbid extra unrecognized fields (`extra="forbid"`), preventing misspelled keys from silently disappearing. (#129)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.

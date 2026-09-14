@@ -7,7 +7,7 @@ import pytest
 
 from tracelens.cli.calibrate import cmd_calibrate
 from tracelens.cli.config import ConfigError, resolve_run_settings
-from tracelens.cli.main import build_parser
+from tracelens.cli.main import build_parser, cmd_report
 
 
 class TestBuildParser:
@@ -229,3 +229,43 @@ class TestCmdCalibrateIntegration:
             "--annotations", str(ann_path),
         ])
         assert cmd_calibrate(args) == 2
+
+
+class TestCmdReport:
+    def test_report_with_extra_task_summary_keys_exits_zero(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        results_file = tmp_path / "results.json"
+        data = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [
+                {
+                    "task_id": "t1",
+                    "num_trials": 1,
+                    "pass_rate": 1.0,
+                    "mean_score": 1.0,
+                    "std_score": 0.0,
+                    "future_unknown_metric": "val",
+                }
+            ],
+        }
+        results_file.write_text(json.dumps(data))
+        parser = build_parser()
+        args = parser.parse_args(["report", "--results", str(results_file), "--format", "json"])
+        code = cmd_report(args)
+        assert code == 0
+
+    def test_report_with_malformed_task_summaries_exits_two(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        results_file = tmp_path / "results.json"
+        data = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": ["not-a-dict"],
+        }
+        results_file.write_text(json.dumps(data))
+        parser = build_parser()
+        args = parser.parse_args(["report", "--results", str(results_file)])
+        code = cmd_report(args)
+        assert code == 2
+        captured = capsys.readouterr()
+        assert "not a TraceLens results file" in captured.err
+        assert "Traceback" not in captured.err

@@ -3,8 +3,12 @@
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from tracelens.core.task import (
     EvalSet,
+    EvalSetMetadata,
     JSONTaskLoader,
     Task,
     TaskExpectation,
@@ -37,6 +41,31 @@ class TestTask:
         task = Task(name="t", input_data={}, max_retries=5)
 
         assert not hasattr(task, "max_retries")
+
+    def test_task_extra_fields_forbidden(self):
+        """Misspelled or foreign keys raise ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            Task(name="t", input_data={}, expectaton="misspelled")
+        assert "expectaton" in str(exc_info.value)
+        assert "extra_forbidden" in str(exc_info.value)
+
+    def test_task_expectation_extra_fields_forbidden(self):
+        with pytest.raises(ValidationError) as exc_info:
+            TaskExpectation(expected_output="ok", unk="junk")
+        assert "unk" in str(exc_info.value)
+        assert "extra_forbidden" in str(exc_info.value)
+
+    def test_eval_set_extra_fields_forbidden(self):
+        with pytest.raises(ValidationError) as exc_info:
+            EvalSet(name="t", unknown_suite_field="bad")
+        assert "unknown_suite_field" in str(exc_info.value)
+        assert "extra_forbidden" in str(exc_info.value)
+
+    def test_eval_set_metadata_extra_fields_forbidden(self):
+        with pytest.raises(ValidationError) as exc_info:
+            EvalSetMetadata(author="alice", bogus="val")
+        assert "bogus" in str(exc_info.value)
+        assert "extra_forbidden" in str(exc_info.value)
 
     def test_task_creation_full(self, sample_task: Task):
         """Test creating a task with all fields."""
