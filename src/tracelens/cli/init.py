@@ -15,9 +15,12 @@ STARTER_TASKS: dict[str, object] = {
             "name": "Answer a simple geography question",
             "input_data": {
                 "question": "What is the capital of France?",
-                "answer": "Paris",
             },
-            "metadata": {"expected_answer": "Paris"},
+            "expectation": {
+                "expected_output": {
+                    "answer": "Paris",
+                },
+            },
             "tags": ["starter"],
         },
         {
@@ -25,9 +28,12 @@ STARTER_TASKS: dict[str, object] = {
             "name": "Answer a simple arithmetic question",
             "input_data": {
                 "question": "What is 2 + 2?",
-                "answer": "4",
             },
-            "metadata": {"expected_answer": "4"},
+            "expectation": {
+                "expected_output": {
+                    "answer": "4",
+                },
+            },
             "tags": ["starter"],
         },
     ]
@@ -43,13 +49,22 @@ from typing import Any
 
 from tracelens import SimpleAdapter
 
+# Canned responses for the starter eval set. A real agent receives input_data
+# and generates answers dynamically; this lookup keeps the scaffold runnable
+# offline before you wire in your real model or code.
+CANNED_ANSWERS: dict[str, str] = {
+    "What is the capital of France?": "Paris",
+    "What is 2 + 2?": "4",
+}
+
 
 async def starter_agent(input_data: dict[str, Any]) -> dict[str, Any]:
-    """Return the canned starter answer from the task input.
+    """Return a deterministic answer for the starter tasks.
 
     This keeps the generated eval runnable before you wire in a real agent.
     """
-    return {"answer": input_data["answer"]}
+    question = input_data.get("question", "")
+    return {"answer": CANNED_ANSWERS.get(question, "unknown")}
 
 
 class StarterAdapter(SimpleAdapter):
@@ -67,11 +82,23 @@ class StarterAdapter(SimpleAdapter):
 
 GRADER_TEMPLATE = '''"""Starter grader for a TraceLens eval suite."""
 
-from tracelens import CodeGrader, Task, Transcript
+from typing import Any
+
+from tracelens import CodeGrader, Outcome, Task, Transcript
+
+
+def _get_expected(task: Task) -> str | None:
+    if task.expectation is None or task.expectation.expected_output is None:
+        return None
+    expected_output = task.expectation.expected_output
+    if isinstance(expected_output, dict):
+        val = expected_output.get("answer")
+        return str(val) if val is not None else None
+    return str(expected_output)
 
 
 class StarterGrader(CodeGrader):
-    """Passes when ``final_output["answer"]`` matches task metadata."""
+    """Passes when ``final_output["answer"]`` matches task expectation."""
 
     # Declared identity recorded in every run's provenance. Uncomment and bump
     # it when the rubric changes: a changed grader is a different measurement,
@@ -82,17 +109,52 @@ class StarterGrader(CodeGrader):
         super().__init__("starter")
 
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
-        expected = str(task.metadata["expected_answer"]).strip().lower()
-        actual = str(transcript.final_output.get("answer", "")).strip().lower()
-        return {"exact_match": float(actual == expected)}
+        expected = _get_expected(task)
+        if expected is None:
+            return {"exact_match": 0.0}
+        final_output = transcript.final_output
+        if not isinstance(final_output, dict) or "answer" not in final_output:
+            return {"exact_match": 0.0}
+        actual = str(final_output["answer"]).strip().lower()
+        return {"exact_match": float(actual == expected.strip().lower())}
 
     def determine_pass(
         self,
         metrics: dict[str, float],
         task: Task,
     ) -> tuple[bool, float]:
-        score = metrics["exact_match"]
+        score = metrics.get("exact_match", 0.0)
         return score == 1.0, score
+
+    async def grade(self, transcript: Transcript, task: Task) -> Outcome:
+        metrics = self.compute_metrics(transcript, task)
+        passed, score = self.determine_pass(metrics, task)
+
+        expected = _get_expected(task)
+        final_output = transcript.final_output
+
+        if expected is None:
+            feedback = "task declares no expected answer"
+        elif final_output is None:
+            feedback = f"expected {expected!r}, got null output"
+        elif not isinstance(final_output, dict):
+            feedback = f"expected dict output, got {type(final_output).__name__}"
+        elif "answer" not in final_output:
+            keys = sorted(final_output.keys())
+            feedback = f"expected key 'answer' in output, got keys {keys!r}"
+        elif not passed:
+            actual = final_output["answer"]
+            feedback = f"expected {expected!r}, got {actual!r}"
+        else:
+            feedback = None
+
+        return self.create_outcome(
+            trial_id=transcript.task_id,
+            passed=passed,
+            score=score,
+            metrics=metrics,
+            feedback=feedback,
+        )
 '''
 
 
@@ -144,8 +206,8 @@ command line overrides the file, so
 times without editing anything. The command works from any directory when
 given the path to the file.
 
-The starter agent echoes the answer stored in each task, so this passes by
-construction: it proves the wiring, not your agent.
+The starter agent returns canned answers for the starter questions, so this
+passes by construction: it proves the wiring, not your agent.
 
 ## 2. What the CI workflow does
 
