@@ -38,6 +38,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **pass@k zero-pass boundary and inspect terminal escape sanitization.**
+  - `pass_at_k`: ensured zero passes (`c == 0`) returns `0.0` even when `n < k`, avoiding erroneous `1.0` probability returns. (#139)
+  - `tracelens inspect`: sanitized raw control bytes and ANSI escape sequences in text output values (including `expected_output` and `final_output`) to prevent terminal escape injection. (#139)
+
 - **`mean_score` means the same thing in the report, the baseline gate and
   `compare`.** The trials at issue are gradable but have no score: a
   timeout, or an agent failure before any grader ran.

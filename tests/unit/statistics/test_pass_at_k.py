@@ -26,6 +26,11 @@ class TestPassAtK:
         result = pass_at_k(n=10, c=0, k=5)
         assert result == 0.0
 
+    def test_pass_at_k_none_pass_when_k_greater_than_n(self):
+        """Issue #139: pass_at_k with c=0 must return 0.0 even if n < k."""
+        result = pass_at_k(n=3, c=0, k=5)
+        assert result == 0.0
+
     def test_pass_at_k_half_pass(self):
         """Test when half samples pass."""
         # 10 samples, 5 correct, k=3
