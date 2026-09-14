@@ -485,7 +485,7 @@ class TestGraderCoverageE2E:
         async def token_heavy_agent(input_data: dict) -> dict:
             return {"result": "done"}
 
-        adapter = SimpleAdapter(token_heavy_agent)
+        adapter = SimpleAdapter(token_heavy_agent, usage_fn=lambda _: (100, 200))
         graders = [TokenBudgetGrader("token_check", max_tokens=50000)]
 
         runner = EvaluationRunner(adapter, graders, RunnerConfig(num_runs=1))

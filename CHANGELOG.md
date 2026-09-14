@@ -8,6 +8,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Budget graders fail on absent evidence.** `LatencyGrader` and `TokenBudgetGrader`
+  previously scored 1.0 (pass) when timing or token usage was absent from transcripts.
+  They now mark `evidence_present=0.0`, score 0.0, and fail with informative feedback
+  when required timing or token evidence was not recorded by the adapter. `SimpleAdapter`
+  now supports an optional `usage_fn` to extract token usage, and `AgentAdapter` provides
+  `record_llm_call` and `record_tool_call` helpers. (#124)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.

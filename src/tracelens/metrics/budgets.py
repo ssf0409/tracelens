@@ -7,6 +7,7 @@ patterns (tool call compliance, trace consistency).
 from __future__ import annotations
 
 from tracelens.core.grader import CodeGrader, EvalPolicy, GraderConfig
+from tracelens.core.outcome import Outcome
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, Transcript
 
@@ -39,8 +40,11 @@ class LatencyGrader(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
-        actual = transcript.duration_ms or 0.0
+        if transcript.duration_ms is None:
+            return {"evidence_present": 0.0}
+        actual = transcript.duration_ms
         return {
+            "evidence_present": 1.0,
             "duration_ms": actual,
             "budget_ratio": actual / self.max_ms,
         }
@@ -50,10 +54,29 @@ class LatencyGrader(CodeGrader):
         metrics: dict[str, float],
         task: Task,
     ) -> tuple[bool, float]:
+        if metrics.get("evidence_present") == 0.0 or "duration_ms" not in metrics:
+            return False, 0.0
         duration = metrics["duration_ms"]
         passed = duration <= self.max_ms
         score = max(0.0, 1.0 - duration / self.max_ms)
         return passed, score
+
+    async def grade(self, transcript: Transcript, task: Task) -> Outcome:
+        metrics = self.compute_metrics(transcript, task)
+        passed, score = self.determine_pass(metrics, task)
+        feedback = None
+        if metrics.get("evidence_present") == 0.0:
+            feedback = (
+                f"Timing data not recorded by adapter for task '{task.task_id}'. "
+                "LatencyGrader requires transcript.started_at and completed_at to be set."
+            )
+        return self.create_outcome(
+            trial_id=transcript.task_id,
+            passed=passed,
+            score=score,
+            metrics=metrics,
+            feedback=feedback,
+        )
 
 
 class TokenBudgetGrader(CodeGrader):
@@ -84,8 +107,11 @@ class TokenBudgetGrader(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
+        if not transcript.has_token_data:
+            return {"evidence_present": 0.0}
         actual = float(transcript.total_tokens)
         return {
+            "evidence_present": 1.0,
             "total_tokens": actual,
             "budget_ratio": actual / self.max_tokens,
         }
@@ -95,10 +121,29 @@ class TokenBudgetGrader(CodeGrader):
         metrics: dict[str, float],
         task: Task,
     ) -> tuple[bool, float]:
+        if metrics.get("evidence_present") == 0.0 or "total_tokens" not in metrics:
+            return False, 0.0
         total = metrics["total_tokens"]
         passed = total <= self.max_tokens
         score = max(0.0, 1.0 - total / self.max_tokens)
         return passed, score
+
+    async def grade(self, transcript: Transcript, task: Task) -> Outcome:
+        metrics = self.compute_metrics(transcript, task)
+        passed, score = self.determine_pass(metrics, task)
+        feedback = None
+        if metrics.get("evidence_present") == 0.0:
+            feedback = (
+                f"Token usage not recorded by adapter for task '{task.task_id}'. "
+                "TokenBudgetGrader requires steps with tokens_in/tokens_out or streaming token counts."
+            )
+        return self.create_outcome(
+            trial_id=transcript.task_id,
+            passed=passed,
+            score=score,
+            metrics=metrics,
+            feedback=feedback,
+        )
 
 
 class ToolCallGrader(CodeGrader):
