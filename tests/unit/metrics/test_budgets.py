@@ -120,8 +120,20 @@ class TestLatencyGrader:
         transcript = _make_transcript()  # no duration
 
         metrics = grader.compute_metrics(transcript, task)
-        assert metrics["duration_ms"] == 0.0
-        assert metrics["budget_ratio"] == 0.0
+        assert metrics["evidence_present"] == 0.0
+        passed, score = grader.determine_pass(metrics, task)
+        assert passed is False
+        assert score == 0.0
+
+    def test_no_duration_grade_async(self, task: Task) -> None:
+        grader = LatencyGrader("latency", max_ms=1000.0)
+        transcript = _make_transcript()  # no duration
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics["evidence_present"] == 0.0
+        assert "Timing data not recorded" in (outcome.feedback or "")
 
     def test_grade_async(self, task: Task) -> None:
         grader = LatencyGrader("latency", max_ms=2000.0)
@@ -189,11 +201,29 @@ class TestTokenBudgetGrader:
         assert passed is False
         assert score == 0.0
 
-    def test_zero_tokens_passes(self, task: Task) -> None:
+    def test_no_token_data_fails(self, task: Task) -> None:
         grader = TokenBudgetGrader("tokens", max_tokens=1000)
-        transcript = _make_transcript()
+        transcript = _make_transcript()  # no steps with tokens
 
         metrics = grader.compute_metrics(transcript, task)
+        assert metrics["evidence_present"] == 0.0
+
+        passed, score = grader.determine_pass(metrics, task)
+        assert passed is False
+        assert score == 0.0
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert "Token usage not recorded" in (outcome.feedback or "")
+
+    def test_explicit_zero_tokens_passes(self, task: Task) -> None:
+        grader = TokenBudgetGrader("tokens", max_tokens=1000)
+        steps = [TranscriptStep(step_type=StepType.LLM_CALL, tokens_in=0, tokens_out=0)]
+        transcript = _make_transcript(steps=steps)
+
+        metrics = grader.compute_metrics(transcript, task)
+        assert metrics["evidence_present"] == 1.0
         assert metrics["total_tokens"] == 0.0
 
         passed, score = grader.determine_pass(metrics, task)

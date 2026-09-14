@@ -41,6 +41,48 @@ class TestSimpleAdapter:
         assert len(transcript.steps) == 1
         assert transcript.steps[0].step_type == StepType.AGENT_OUTPUT
         assert transcript.steps[0].content == "result"
+        assert transcript.steps[0].tokens_in is None
+        assert transcript.steps[0].tokens_out is None
+        assert not transcript.has_token_data
+
+    async def test_usage_fn_populates_tokens(self, task: Task):
+        """SimpleAdapter extracts tokens with usage_fn."""
+        async def fn(input_data: dict) -> dict:
+            return {"text": "hello"}
+
+        adapter = SimpleAdapter(fn, usage_fn=lambda res: (15, 30))
+        transcript = await adapter.run(task)
+
+        assert len(transcript.steps) == 1
+        assert transcript.steps[0].tokens_in == 15
+        assert transcript.steps[0].tokens_out == 30
+        assert transcript.has_token_data
+        assert transcript.total_tokens == 45
+
+    async def test_adapter_record_helpers(self, task: Task):
+        """AgentAdapter record_llm_call and record_tool_call helpers."""
+        class CustomAdapter(AgentAdapter):
+            async def run(self, task: Task) -> Transcript:
+                transcript = self.start_transcript(task)
+                self.record_llm_call(transcript, model="gpt-4o", tokens_in=10, tokens_out=20)
+                self.record_tool_call(
+                    transcript,
+                    tool_name="search",
+                    arguments={"query": "pytest"},
+                    result="success",
+                    duration_ms=50.0,
+                )
+                return transcript
+
+        adapter = CustomAdapter()
+        transcript = await adapter.run(task)
+        assert len(transcript.steps) == 2
+        assert transcript.steps[0].step_type == StepType.LLM_CALL
+        assert transcript.steps[0].tokens_in == 10
+        assert transcript.steps[0].tokens_out == 20
+        assert transcript.steps[1].step_type == StepType.TOOL_CALL
+        assert transcript.steps[1].tool_call is not None
+        assert transcript.steps[1].tool_call.tool_name == "search"
 
     async def test_error_recording(self, task: Task):
         """SimpleAdapter records errors and re-raises."""
