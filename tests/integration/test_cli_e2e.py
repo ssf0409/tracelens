@@ -1201,6 +1201,31 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     captured = capsys.readouterr()
     assert "task content changed" in captured.out + captured.err
 
+    # Issue #121: An adapter raising ConnectionError (infra error) for every task
+    # in an ungated run (before step 4 enables baseline check) exits 1 when
+    # fail_on_infra_errors is enabled (scaffold default), and exits 0 when
+    # --no-fail-on-infra-errors is passed.
+    tasks["tasks"][0]["input_data"]["question"] = "What is the capital of France?"
+    tasks_json.write_text(json.dumps(tasks, indent=2))
+    adapter.write_text(trusted.replace(
+        'return {"answer": input_data["answer"]}', 'raise ConnectionError("backend down")'
+    ))
+    _forget_scaffold_modules(monkeypatch)
+    # With gate disabled, test ungated fail_on_infra_errors behavior
+    run_ungated = ["run", "--config", "tracelens.yaml", "--no-baseline-check"]
+    capsys.readouterr()
+    assert cmd_run(build_parser().parse_args(run_ungated)) == 1
+    out_err = capsys.readouterr()
+    assert "infra error rate is 100.0%" in out_err.err
+    assert "mean_score=n/a" in out_err.out
+
+    # Without the flag, ungated run exits 0 (contract unchanged)
+    run_no_fail = ["run", "--config", "tracelens.yaml", "--no-baseline-check", "--no-fail-on-infra-errors"]
+    capsys.readouterr()
+    assert cmd_run(build_parser().parse_args(run_no_fail)) == 0
+    out_err2 = capsys.readouterr()
+    assert "mean_score=n/a" in out_err2.out
+
 
 # --- Issue #50: JSONL and CSV eval sets through the CLI ----------------------
 

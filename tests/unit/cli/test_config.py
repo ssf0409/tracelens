@@ -46,6 +46,8 @@ run:
     fail_on_regression: severe
     require_baselines: true
     noise_band: 0.05
+  fail_on_infra_errors: true
+  max_infra_error_rate: 0.2
 """
 
 MINIMAL = "run:\n  eval_set: t.json\n  adapter: a.A\n  graders: [g.G]\n"
@@ -97,6 +99,8 @@ class TestLoadRunConfig:
             "fail_on_regression": "severe",
             "require_baselines": True,
             "noise_band": 0.05,
+            "fail_on_infra_errors": True,
+            "max_infra_error_rate": 0.2,
         }
         # Every config value lands on a real run setting, and the file covers
         # every setting the CLI has (import_root is config-only).

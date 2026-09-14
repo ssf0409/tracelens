@@ -554,8 +554,13 @@ class TestMetricAvailabilityReporting:
         assert report.pass_at_k["pass@1"] is None
         assert report.metric_availability["pass@1"].reason == "needs at least 1 gradable runs per task"
         assert "**Pass Rate**: N/A (no gradable trials)" in gen.render_markdown(report)
+        assert "- **Mean Score**: N/A" in gen.render_markdown(report)
+        assert "| t1 | 2 (0 gradable) | N/A | N/A |" in gen.render_markdown(report)
         assert "pass_rate=n/a" in gen.render_ci_summary(report)
-        assert ">N/A<" in gen.render_html(report)
+        assert "mean_score=n/a" in gen.render_ci_summary(report)
+        html = gen.render_html(report)
+        assert ">N/A<" in html
+        assert "<td>N/A</td>" in html
 
 
 class TestGateReporting:

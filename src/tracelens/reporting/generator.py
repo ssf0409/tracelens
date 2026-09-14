@@ -358,7 +358,7 @@ class ReportGenerator:
             f"- **Tasks**: {report.total_tasks}",
             f"- **Trials**: {report.total_trials}",
             f"- **Pass Rate**: {_format_pass_rate(report)}",
-            f"- **Mean Score**: {report.overall_mean_score:.4f}",
+            f"- **Mean Score**: {_format_mean_score(report)}",
         ]
         if report.infra_error_count > 0:
             lines.append(
@@ -400,7 +400,8 @@ class ReportGenerator:
             for s in report.task_summaries:
                 lines.append(
                     f"| {s.task_id} | {_format_trial_count(s)} | "
-                    f"{_format_task_pass_rate(s, report)} | {s.mean_score:.4f} |"
+                    f"{_format_task_pass_rate(s, report)} | "
+                    f"{_format_task_mean_score(s, report)} |"
                 )
             lines.append("")
 
@@ -437,13 +438,15 @@ class ReportGenerator:
         """
         if report.availability_recorded and report.gradable_trials == 0:
             pass_rate_text = "n/a"
+            mean_score_text = "n/a"
         else:
             pass_rate_text = f"{report.overall_pass_rate:.1%}"
+            mean_score_text = f"{report.overall_mean_score:.4f}"
         lines = [
             f"TraceLens: {report.total_tasks} tasks, "
             f"{report.total_trials} trials, "
             f"pass_rate={pass_rate_text}, "
-            f"mean_score={report.overall_mean_score:.4f}",
+            f"mean_score={mean_score_text}",
         ]
 
         for key, val in sorted(report.pass_at_k.items()):
@@ -492,7 +495,7 @@ class ReportGenerator:
             _html_card("Tasks", str(report.total_tasks), "#3b82f6")
             + _html_card("Trials", str(report.total_trials), "#6366f1")
             + _html_card("Pass Rate", pass_rate_text, pass_rate_color)
-            + _html_card("Mean Score", f"{report.overall_mean_score:.4f}", "#8b5cf6")
+            + _html_card("Mean Score", _format_mean_score(report), "#8b5cf6")
         )
         # Only surface the infra-error card when there's something to
         # see — zero infra errors shouldn't clutter the dashboard.
@@ -526,7 +529,7 @@ class ReportGenerator:
                 f"<td>{escape(_format_trial_count(s))}</td>"
                 f'<td style="color:{pr_color};font-weight:600">'
                 f"{escape(_format_task_pass_rate(s, report))}</td>"
-                f"<td>{s.mean_score:.4f}</td>"
+                f"<td>{escape(_format_task_mean_score(s, report))}</td>"
                 f"<td>{s.std_score:.4f}</td></tr>\n"
             )
 
@@ -833,6 +836,18 @@ def _format_task_pass_rate(summary: TaskSummary, report: ReportData) -> str:
     if report.availability_recorded and summary.gradable_trials == 0:
         return "N/A"
     return f"{summary.pass_rate:.1%}"
+
+
+def _format_mean_score(report: ReportData) -> str:
+    if report.availability_recorded and report.gradable_trials == 0:
+        return "N/A"
+    return f"{report.overall_mean_score:.4f}"
+
+
+def _format_task_mean_score(summary: TaskSummary, report: ReportData) -> str:
+    if report.availability_recorded and summary.gradable_trials == 0:
+        return "N/A"
+    return f"{summary.mean_score:.4f}"
 
 
 def _format_trial_count(summary: TaskSummary) -> str:

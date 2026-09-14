@@ -8,6 +8,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **`--fail-on-infra-errors` flag and `run.max_infra_error_rate` config option.**
+  Ungated runs and CI smoke workflows can now fail non-zero (exit 1) when
+  infrastructure failures prevent evaluation (e.g. 100% infra error rate, or
+  exceeding `max_infra_error_rate`). The scaffolded `tracelens.yaml` enables
+  failure on 100% infra errors by default (`fail_on_infra_errors: true`).
+  The ungated exit-0 contract remains intact when the flag is not set. (#121)
+
+### Changed
+
+- **Format mean score as `N/A` (or `n/a`) when gradable trials are zero.**
+  When all trials fail due to infrastructure or grader crashes, the CI summary,
+  Markdown report, HTML dashboard cards, and per-task table now display
+  mean score as `n/a` / `N/A` instead of a misleading `0.0000`. (#121)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.

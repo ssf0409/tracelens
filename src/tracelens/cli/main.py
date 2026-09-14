@@ -248,6 +248,23 @@ def build_parser() -> argparse.ArgumentParser:
             "a 0-1 metric). Requires --baseline-check"
         ),
     )
+    run_parser.add_argument(
+        "--fail-on-infra-errors", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
+        help=(
+            "Fail (exit non-zero) when infra errors prevent evaluation. "
+            "Exits 1 if 100%% of trials (or all gradable trials are lost) "
+            "or if --max-infra-error-rate is exceeded (default: off)"
+        ),
+    )
+    run_parser.add_argument(
+        "--max-infra-error-rate", type=float, default=argparse.SUPPRESS,
+        help=(
+            "Maximum tolerable fraction of trials ending in INFRA_ERROR "
+            "(between 0.0 and 1.0). If the run's infra error rate exceeds "
+            "this rate, exit 1"
+        ),
+    )
 
     # -- tracelens report --
     report_parser = subparsers.add_parser(
@@ -412,6 +429,11 @@ def _validate_run_parameters(args: argparse.Namespace) -> str | None:
         return (
             f"{name('--max-infra-retries', 'run.max_infra_retries')} cannot be negative "
             f"(got {args.max_infra_retries})"
+        )
+    if args.max_infra_error_rate is not None and not (0.0 <= args.max_infra_error_rate <= 1.0):
+        return (
+            f"{name('--max-infra-error-rate', 'run.max_infra_error_rate')} must be between "
+            f"0.0 and 1.0 (got {args.max_infra_error_rate})"
         )
     return None
 
@@ -676,6 +698,36 @@ def cmd_run(args: argparse.Namespace) -> int:
         for reason in gate.reasons:
             print(f"Error: {reason}", file=sys.stderr)
         return 1
+
+    # Check infra-error thresholds when requested
+    fail_on_infra = getattr(args, "fail_on_infra_errors", False)
+    max_infra_rate = getattr(args, "max_infra_error_rate", None)
+    if report.infra_error_count > 0:
+        if fail_on_infra and (
+            report.gradable_trials == 0
+            or (max_infra_rate is not None and report.infra_error_rate > max_infra_rate)
+        ):
+            if report.gradable_trials == 0:
+                print(
+                    f"Error: infra error rate is {report.infra_error_rate:.1%} "
+                    f"({report.infra_error_count}/{report.total_trials} trials failed "
+                    "with infra errors; 0 gradable trials remain)",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"Error: infra error rate is {report.infra_error_rate:.1%} "
+                    f"(exceeds maximum allowed rate of {max_infra_rate:.1%})",
+                    file=sys.stderr,
+                )
+            return 1
+        if max_infra_rate is not None and report.infra_error_rate > max_infra_rate:
+            print(
+                f"Error: infra error rate is {report.infra_error_rate:.1%} "
+                f"(exceeds maximum allowed rate of {max_infra_rate:.1%})",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 
