@@ -38,6 +38,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **Task timeout and decision spec fingerprint stability.**
+  - `EvaluationRunner` now honours `Task.timeout_seconds` when smaller than the runner-level `timeout_seconds` budget. (#136)
+  - `DecisionSpec.fingerprint` serializes consistently across JSON save/load round trips (normalizing structured types like datetime and Enum before hashing) and verifies stored fingerprints on reload to detect tampering. (#136)
+
 - **`mean_score` means the same thing in the report, the baseline gate and
   `compare`.** The trials at issue are gradable but have no score: a
   timeout, or an agent failure before any grader ran.
