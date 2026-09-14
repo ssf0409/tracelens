@@ -38,6 +38,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **`CompositeGrader` fallback when no sub-grader is a gate.** When a composite grader contains no sub-graders configured with `GATE` or `MUST_PASS` policy, `grade()` now falls back to requiring all sub-graders to pass rather than vacously passing, and raises a `ValueError` if constructed with an empty `graders` list. (#125)
+
 - **`mean_score` means the same thing in the report, the baseline gate and
   `compare`.** The trials at issue are gradable but have no score: a
   timeout, or an agent failure before any grader ran.

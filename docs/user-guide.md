@@ -164,6 +164,10 @@ decides whether it can fail the trial:
 - `WARN` — recorded, configurably non-blocking.
 - `TRACK` — pure signal, contributes to the score only.
 
+If no sub-grader has a `GATE` (or `MUST_PASS`) policy, `CompositeGrader`
+falls back to requiring all sub-graders to pass so default graders cannot
+silently pass when all fail.
+
 ```python
 from tracelens import CompositeGrader, JsonSchemaGrader
 
