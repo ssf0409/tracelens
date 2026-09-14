@@ -210,6 +210,32 @@ class TestBuildAndRender:
         assert "expected: missing (the task declares no expected output)" in text
         assert "why:      infrastructure failed before the agent could be judged" in text
 
+    def test_text_escapes_control_characters_and_terminal_escapes(self):
+        """Issue #139: inspect text output must sanitize raw control bytes / ANSI escapes."""
+        tasks = [
+            Task(
+                task_id="t_esc",
+                name="escape task",
+                input_data={"param": "\x1b[31mred\x1b[0m\x00"},
+                expectation=TaskExpectation(expected_output="\x1b[32mgreen\x1b[0m\x07"),
+            )
+        ]
+        trial = _trial(
+            "t_esc",
+            status=TrialStatus.FAILED,
+            error_message="failed with \x1b[33mcode\x1b[0m",
+            transcript=_transcript("t_esc", final_output="\x1b[34mblue\x1b[0m"),
+        )
+        report = build_inspection(_batch(trial), source="t.json", tasks=tasks)
+        text = render_text(report)
+        # Raw escape bytes (0x1b, 0x00, 0x07) should not appear unescaped in text
+        assert "\x1b" not in text
+        assert "\x00" not in text
+        assert "\x07" not in text
+        assert "\\x1b[32mgreen\\x1b[0m" in text
+        assert "\\x1b[34mblue\\x1b[0m" in text
+        assert "\\x1b[33mcode\\x1b[0m" in text
+
     def test_html_is_escaped_offline_and_bounded(self):
         hostile = _trial("<script>alert(1)</script>", outcomes=[("g", False, 0.0)],
                          feedback="<b>bold</b>",

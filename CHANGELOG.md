@@ -8,6 +8,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **pass@k zero-pass boundary and inspect terminal escape sanitization.**
+  - `pass_at_k`: ensured zero passes (`c == 0`) returns `0.0` even when `n < k`, avoiding erroneous `1.0` probability returns. (#139)
+  - `tracelens inspect`: sanitized raw control bytes and ANSI escape sequences in text output values (including `expected_output` and `final_output`) to prevent terminal escape injection. (#139)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.
