@@ -25,14 +25,11 @@ For release mechanics, see [Releasing TraceLens](releasing.md).
 Add to your project's `pyproject.toml`:
 
 ```toml
-[project]
-dependencies = [
-    "tracelens>=0.3.0",
-]
+--8<-- "docs/snippets/dependency_pin.toml"
 
 # With LLM extras
 dependencies = [
-    "tracelens[llm]>=0.3.0",
+    "tracelens[llm]>=0.5.0",
 ]
 ```
 
@@ -76,7 +73,7 @@ uv pip install "tracelens[http,llm,datasets]"
 ## CI Installation
 
 For GitHub Actions, install your project dependencies normally. If your
-project depends on `tracelens>=0.3.0`, `uv sync` or `pip install -e .`
+project depends on `tracelens>=0.5.0`, `uv sync` or `pip install -e .`
 is enough; no extra repository checkout or authentication is required.
 
 ```yaml
@@ -120,31 +117,26 @@ tracelens report --results examples/reports/hello_world_report.json --format mar
 
 ## Project Structure for Integration
 
-When integrating `tracelens` into your project, we recommend this structure:
+When integrating `tracelens` into your project, run `tracelens init .` to generate
+the starter evaluation suite:
 
 ```
 your-project/
 ├── eval/
 │   ├── __init__.py
-│   ├── tasks/                    # Task definitions
-│   │   ├── __init__.py
-│   │   ├── task_schema.py        # Your Task subclass
-│   │   └── scenarios/            # JSON task files
-│   │       ├── scenario_001.json
-│   │       └── scenario_002.json
-│   ├── graders/                  # Grader implementations
-│   │   ├── __init__.py
-│   │   ├── quality_grader.py
-│   │   └── domain_grader.py
-│   ├── baselines/
-│   │   └── baselines.json        # Stored baselines
-│   ├── harness.py                # Evaluation orchestrator
-│   └── conftest.py               # Test fixtures
+│   ├── adapter.py                # Agent adapter
+│   ├── grader.py                 # Graders
+│   ├── tasks.json                # Task definitions
+│   ├── baselines.json            # Stored baselines (from step 4)
+│   └── README.md                 # Evaluation guide and baseline walkthrough
 ├── .github/
 │   └── workflows/
 │       └── eval.yml              # CI evaluation workflow
+├── tracelens.yaml                # Run configuration
 └── pyproject.toml                # Include tracelens dependency
 ```
+
+See [Getting Started (5 min)](./getting-started.md) for a full walkthrough of the generated scaffold.
 
 ## Next Steps
 

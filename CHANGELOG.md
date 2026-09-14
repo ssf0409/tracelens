@@ -8,6 +8,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Align onboarding path, version constraints, and baseline locations.**
+  Replaced stale `tracelens>=0.3.0` version pins with a shared `>=0.5.0` snippet
+  across installation, CI/CD, releasing, and testing docs. Standardized repository
+  layout in `docs/installation.md` to match `tracelens init`, unified baseline paths
+  to `eval/baselines.json`, refined reproducibility wording to emphasize declared
+  attribution rather than causal identity, and provided a PyPI-first quickstart in
+  the README demo. (#135)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.
