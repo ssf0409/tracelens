@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
 from tracelens.core.decision_spec import (
     AgentSpec,
     DecisionSpec,
@@ -593,3 +595,44 @@ class TestDecisionSpecWithInfra:
         )
         summary = spec.to_summary()
         assert "infra" not in summary
+
+
+class TestDecisionSpecFingerprintStability:
+    """Issue #136: DecisionSpec fingerprint stability across serialization and load verification."""
+
+    def test_fingerprint_stable_across_json_roundtrip_with_datetime_enum_int(self):
+        from enum import Enum
+
+        class Color(str, Enum):
+            BLUE = "blue"
+
+        spec = DecisionSpec(
+            model=ModelConfig(provider="openai", model_id="gpt-4o"),
+            extra={
+                "created_at": datetime(2026, 4, 16, 9, 0, tzinfo=UTC),
+                "color": Color.BLUE,
+                "count": 42,
+            },
+        )
+        dumped = spec.model_dump(mode="json")
+        reloaded = DecisionSpec.model_validate(dumped)
+
+        assert reloaded.fingerprint == spec.fingerprint
+        assert reloaded.stored_fingerprint == spec.fingerprint
+
+    def test_tampered_fingerprint_raises_value_error(self):
+        spec = DecisionSpec(
+            model=ModelConfig(provider="openai", model_id="gpt-4o"),
+            extra={"key": "original"},
+        )
+        dumped = spec.model_dump(mode="json")
+        # Tamper with content while keeping original fingerprint
+        dumped["extra"]["key"] = "tampered"
+
+        with pytest.raises(ValueError, match="does not match computed fingerprint"):
+            DecisionSpec.model_validate(dumped)
+
+    def test_fresh_spec_has_none_stored_fingerprint(self):
+        spec = DecisionSpec(model=ModelConfig(provider="openai", model_id="gpt-4o"))
+        assert spec.stored_fingerprint is None
+

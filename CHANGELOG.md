@@ -8,6 +8,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Task timeout and decision spec fingerprint stability.**
+  - `EvaluationRunner` now honours `Task.timeout_seconds` when smaller than the runner-level `timeout_seconds` budget. (#136)
+  - `DecisionSpec.fingerprint` serializes consistently across JSON save/load round trips (normalizing structured types like datetime and Enum before hashing) and verifies stored fingerprints on reload to detect tampering. (#136)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.
