@@ -113,6 +113,13 @@ git log -1 --format=%B > /tmp/msg.txt        # or write the intended title
 python scripts/next_version.py --message-file /tmp/msg.txt
 ```
 
+A release freezes the section it creates. A pull request updated after a
+release must keep its entries under `[Unreleased]` (a merge or rebase can
+leave them inside the section that was just released); CI's changelog check
+(`scripts/check_changelog.py`, run by the `lint` job on every pull request)
+refuses entries added to a released section. The contributor side is in
+[CONTRIBUTING.md](https://github.com/ssf0409/tracelens/blob/main/CONTRIBUTING.md#changelog).
+
 To batch several pull requests into one release, put `[release: skip]` in
 every merge title but the last. To stop automatic releases altogether,
 disable the "Release on merge" workflow under Actions; the other two paths

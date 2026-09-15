@@ -29,7 +29,8 @@ What alternatives did you consider and why did you reject them?
 - [ ] `ruff check src/ tests/` passes
 - [ ] `mypy src/tracelens/` passes (strict)
 - [ ] New / changed code is covered by tests
-- [ ] If touching `DecisionSpec`, baseline, or regression logic: backwards-compat note added to `CHANGELOG.md`
+- [ ] `CHANGELOG.md`: entry under `[Unreleased]` for every user-visible change (never inside a released section; none needed for internal changes)
+- [ ] If touching `DecisionSpec`, baseline, or regression logic: backwards-compat note in that entry
 - [ ] If adding to `src/tracelens/__init__.py`: this symbol is intended as stable public API
 
 ## Linked issues
