@@ -8,6 +8,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **Releases happen on merge.** The "Release on merge" workflow
+  (`.github/workflows/release-auto.yml`) runs after CI passes on a push to
+  `main`: when `CHANGELOG.md` has entries under `[Unreleased]`, it picks the
+  next version (`scripts/next_version.py`: `[release: X.Y.Z]`,
+  `[release: major|minor|patch]`, or `[release: skip]` in the commit title;
+  otherwise a minor bump for Added, Changed, Removed, or Deprecated entries
+  and a patch bump for fixes), moves the entries into a dated section,
+  commits `release: vX.Y.Z`, tags it, and runs the release workflow with
+  `publish=true`. A release commit, a red CI run, an empty `[Unreleased]`
+  section, or a pre-release as the latest tag never release; when `main`
+  rejects the push, the workflow opens the release pull request through
+  "Release prepare" instead. "Release prepare" stays for pre-releases and
+  named versions.
+
 ### Fixed
 
 - **Markdown reports render hostile table cells safely.** Task ids or gate

@@ -144,17 +144,23 @@ These guide reviews; deviations should be justified in the PR description:
 
 ## Releasing (maintainers only)
 
-Releases are tag-driven and the tag is created for you:
+Releases are tag-driven and happen on merge:
 
 1. Keep `CHANGELOG.md` current: every user-visible change lands under
-   `[Unreleased]` in the same pull request as the code.
-2. Run the "Release prepare" workflow with the version. It moves
-   `[Unreleased]` into a dated section and opens a `release: vX.Y.Z` pull
-   request with the rendered notes.
-3. Review and merge that pull request (any merge method). The "Release tag"
-   workflow tags the commit that lands on `main` and the release workflow
-   publishes to PyPI and creates the GitHub Release from the changelog
-   section.
+   `[Unreleased]` in the same pull request as the code, under the heading
+   that says what it is (`### Added`, `### Changed`, `### Fixed`, ...). The
+   headings decide the version: Added, Changed, Removed, or Deprecated
+   entries make a minor release, fixes alone a patch release.
+2. Merge. Once CI is green on `main`, the "Release on merge" workflow moves
+   `[Unreleased]` into a dated section, commits `release: vX.Y.Z`, tags it,
+   and the release workflow publishes to PyPI and creates the GitHub Release
+   from that section. To hold the changes for a later release, put
+   `[release: skip]` in the merge title; to choose the version, put
+   `[release: patch]`, `[release: minor]`, `[release: major]`, or
+   `[release: X.Y.Z]` there.
+3. For a pre-release or a version the rules would not pick, run the
+   "Release prepare" workflow with the version instead: it opens a
+   `release: vX.Y.Z` pull request, and merging it tags the merge commit.
 
 The full checklist, the verification commands, the manual fallback, and what
 to do when a step fails are in [docs/releasing.md](docs/releasing.md).

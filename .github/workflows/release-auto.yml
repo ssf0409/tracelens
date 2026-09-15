@@ -1,0 +1,187 @@
+name: Release on merge
+
+# Third path into the release pipeline (the other two: the "Release prepare"
+# workflow for a version you name, and a tag pushed by hand). After the CI
+# workflow passes on a push to main, this workflow releases whatever the
+# changelog has queued under [Unreleased]: scripts/next_version.py picks the
+# version (a [release: ...] marker in the commit title, else a minor bump for
+# Added/Changed/Removed/Deprecated entries and a patch bump for fixes),
+# scripts/prepare_release.py moves the entries into a dated section, the
+# result is committed to main as "release: vX.Y.Z", tagged, and handed to
+# release.yml with publish=true (PyPI through the `release` environment,
+# then the GitHub Release). The commit and the tag are pushed with the
+# workflow token, which raises no events: CI does not run again and nothing
+# loops.
+#
+# Never releases: a red or cancelled CI run, a release commit itself (the
+# "Release tag" workflow owns those), a title marked [release: skip], an
+# empty [Unreleased] section, or a pre-release as the latest tag. When main
+# rejects the push (branch protection), the "Release prepare" workflow is
+# started with the same version instead, so a maintainer can merge the
+# release pull request it opens.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-on-merge
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release the merged changes
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push the release commit and the tag
+      actions: write    # run release.yml (or release-prepare.yml as the fallback)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Decide whether this commit releases, and which version
+        id: decide
+        run: |
+          set -euo pipefail
+          TIP="$(git rev-parse HEAD)"
+          if [ "$TIP" != "$HEAD_SHA" ]; then
+            # main moved on. A re-run after this workflow already pushed its
+            # release commit on top of the tested commit resumes at the tag;
+            # anything else is left to the CI run of the newer commit, which
+            # releases everything queued by then.
+            TITLE="$(git log -1 --format=%s "$TIP")"
+            PARENT="$(git rev-parse --verify -q "$TIP^" || true)"
+            pattern='^release: v([0-9][^[:space:]]*)$'
+            if [ "$PARENT" = "$HEAD_SHA" ] && [[ "$TITLE" =~ $pattern ]]; then
+              echo "main is already at the release commit '$TITLE'; resuming at the tag"
+              {
+                echo "release=true"
+                echo "version=${BASH_REMATCH[1]}"
+                echo "resumed=true"
+                echo "sha=$TIP"
+                echo "reason=re-run: main is already at '$TITLE'"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "main moved on from $HEAD_SHA to $TIP; the CI run of the newer commit decides"
+            {
+              echo "release=false"
+              echo "reason=main moved on from the tested commit; the CI run of the newer commit decides"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$MESSAGE" > /tmp/head-commit-message.txt
+          python scripts/next_version.py --message-file /tmp/head-commit-message.txt | tee -a "$GITHUB_OUTPUT"
+          {
+            echo "resumed=false"
+            echo "sha=$TIP"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Move [Unreleased] into the release section and commit it to main
+        if: steps.decide.outputs.release == 'true' && steps.decide.outputs.resumed != 'true'
+        id: commit
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/prepare_release.py --version "$VERSION"
+          python scripts/release_notes.py --version "$VERSION" --output /tmp/release-notes.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "release: v$VERSION"
+          if git push origin HEAD:main; then
+            {
+              echo "pushed=true"
+              echo "sha=$(git rev-parse HEAD)"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The push was rejected: either main moved on (the newer commit's
+          # CI run releases everything queued) or main is protected against
+          # the workflow token. In the second case hand the version to the
+          # Release prepare workflow, which opens the release pull request
+          # for a maintainer to merge.
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$HEAD_SHA" ]; then
+            echo "main moved on while preparing v$VERSION; the CI run of the newer commit decides"
+            exit 0
+          fi
+          echo "::warning::main rejected the release commit (branch protection?); starting Release prepare for v$VERSION instead"
+          gh workflow run release-prepare.yml --repo "$GITHUB_REPOSITORY" --ref main -f "version=$VERSION"
+          {
+            echo "## Release v$VERSION needs a maintainer"
+            echo
+            echo "\`main\` rejected the release commit pushed by this workflow, so the Release prepare"
+            echo "workflow was started instead: review and merge the \`release: v$VERSION\` pull request"
+            echo "it opens to publish. To make this path fully automatic, let GitHub Actions push to"
+            echo "\`main\` (branch protection: allow the workflow to bypass the pull-request rule)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tag the release commit and publish
+        if: >-
+          steps.decide.outputs.release == 'true'
+          && (steps.decide.outputs.resumed == 'true' || steps.commit.outputs.pushed == 'true')
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          SHA: ${{ steps.commit.outputs.sha || steps.decide.outputs.sha }}
+          REASON: ${{ steps.decide.outputs.reason }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A re-run after a failed dispatch finds the tag already on the
+          # release commit: keep it and dispatch again. A tag elsewhere is
+          # an error.
+          if EXISTING="$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}")"; then
+            if [ "$EXISTING" != "$SHA" ]; then
+              echo "tag v$VERSION already exists at $EXISTING, not at $SHA" >&2
+              exit 1
+            fi
+            echo "tag v$VERSION already points at $SHA; dispatching the release again"
+          else
+            git tag -a "v$VERSION" -m "release: v$VERSION" "$SHA"
+            git push origin "v$VERSION"
+          fi
+          # A tag pushed with the workflow token raises no tag-push event, so
+          # the dispatch is the trigger; publish=true makes it a real release.
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "v$VERSION" -f publish=true
+          {
+            echo "## Released v$VERSION"
+            echo
+            echo "Tagged \`v$VERSION\` at \`$SHA\` and started release.yml with publish=true:"
+            echo "PyPI through the \`release\` environment, then the GitHub Release."
+            echo
+            echo "Why: $REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a skipped release
+        if: steps.decide.outputs.release != 'true'
+        env:
+          REASON: ${{ steps.decide.outputs.reason }}
+        run: |
+          {
+            echo "## No release for this commit"
+            echo
+            echo "$REASON"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -6,7 +6,9 @@ name: Release tag
 # request #N from <owner>/release/vX.Y.Z" (merge commit): this workflow tags
 # that commit and hands the tag to release.yml, which publishes to PyPI
 # (release environment) and creates the GitHub Release. Every other push to
-# main is ignored.
+# main is ignored. (The "Release on merge" workflow, release-auto.yml, tags
+# its own release commit itself: pushed with the workflow token, that commit
+# raises no push event and never reaches this workflow.)
 
 on:
   push:
