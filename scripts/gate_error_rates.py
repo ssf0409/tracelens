@@ -35,7 +35,8 @@ SIZES = ((5, 5), (10, 5), (20, 5), (10, 10), (20, 20))
 FLAKY_RATES = (0.9, 0.8, 0.5)
 REGRESSIONS = ((1.0, 0.4), (1.0, 0.6), (1.0, 0.0), (0.8, 0.4))
 
-_detector = RegressionDetector()
+# Only the p-value is read: skip the per-finding "trials needed" scans.
+_detector = RegressionDetector(power_notes=False)
 
 
 @cache

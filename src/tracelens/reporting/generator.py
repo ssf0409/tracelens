@@ -13,7 +13,11 @@ from typing import Any
 import numpy as np
 
 from tracelens._version import __version__
-from tracelens.baselines.comparison import RegressionReport
+from tracelens.baselines.comparison import (
+    RegressionReport,
+    RegressionSeverity,
+    severity_at_least,
+)
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.provenance import RunProvenance
 from tracelens.core.trial import TrialBatch
@@ -727,11 +731,11 @@ def _provenance_section_html(report: ReportData) -> str:
     )
 
 
-def _regression_notes(task: Any, regression: Any) -> str:
+def _regression_notes(task: Any, regression: Any, threshold: RegressionSeverity) -> str:
     notes: list[str] = []
     if regression.within_noise_band:
         notes.append("within infra-noise band; not blocking")
-    elif regression.is_significant and task.blocking:
+    elif regression.is_significant and severity_at_least(regression.severity, threshold):
         notes.append("blocking")
     elif regression.is_significant:
         notes.append("significant; below the blocking threshold")
@@ -762,6 +766,7 @@ _GATE_TABLE_HEADER = (
 
 def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
+    threshold = gate.threshold or RegressionSeverity.MODERATE
     for task in gate.tasks:
         for regression in task.regressions:
             rows.append((
@@ -772,7 +777,7 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
                 f"{regression.delta_percent:+.1f}%",
                 regression.severity.value,
                 regression.evidence_text(),
-                _regression_notes(task, regression),
+                _regression_notes(task, regression, threshold),
             ))
     return rows
 

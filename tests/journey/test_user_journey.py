@@ -203,7 +203,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
         "(-40.0%), p=0.1031 (adjusted 0.2062), not significant; about"
     ) in run.stdout
     assert "trials on each side would decide it" in run.stdout
-    assert "2 observed drop(s) not significant" in run.stdout
+    assert "2 observed drop(s) not significant" in run.stdout  # 2 tasks x 1 stored metric
     gate = load(results)["gate"]
     assert gate["status"] == "passed" and gate["blocking_regressions"] == 0
     regression = next(t for t in gate["tasks"] if t["task_id"] == "starter-math")["regressions"][0]

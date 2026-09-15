@@ -10,6 +10,8 @@ from tracelens.baselines.comparison import (
     RegressionReport,
     RegressionSeverity,
     holm_adjusted,
+    relative_change,
+    severity_at_least,
 )
 from tracelens.baselines.manager import TaskBaseline
 
@@ -29,6 +31,14 @@ class TestRegressionSeverity:
         # Verify they can be compared in order
         for i in range(len(levels) - 1):
             assert levels[i] != levels[i + 1]
+
+    def test_severity_at_least_and_relative_change(self):
+        assert severity_at_least(RegressionSeverity.SEVERE, RegressionSeverity.MODERATE)
+        assert severity_at_least(RegressionSeverity.MODERATE, RegressionSeverity.MODERATE)
+        assert not severity_at_least(RegressionSeverity.MINOR, RegressionSeverity.MODERATE)
+        assert relative_change(-0.2, 0.8) == pytest.approx(-25.0)
+        assert relative_change(0.1, -0.5) == pytest.approx(20.0)
+        assert relative_change(0.3, 0.0) == 100.0 and relative_change(0.0, 0.0) == 0.0
 
 
 class TestRegressionReport:
@@ -646,6 +656,22 @@ class TestBlockingPolicy:
             "more than 200 trials would be needed"
         )
 
+    def test_power_notes_can_be_switched_off(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.0, sample_size=5)
+        trials = [{"pass_rate": 1.0}] * 3 + [{"pass_rate": 0.0}] * 2
+
+        quiet = RegressionDetector(power_notes=False).compare(baseline, trials).regressions[0]
+        assert quiet.p_value == pytest.approx(0.1031, abs=5e-4)
+        assert quiet.is_significant is False and quiet.underpowered is True
+        assert quiet.trials_needed is None and quiet.undetectable is False
+
+        # The notes are computed on request, at the level the caller names.
+        RegressionDetector().annotate(quiet, 0.05)
+        assert quiet.trials_needed == 7
+        full = RegressionDetector().compare(baseline, trials).regressions[0]
+        assert full.trials_needed == 7 and full.evidence_text() == quiet.evidence_text()
+
 
 class TestSmallSampleHonesty:
     """Degenerate samples never fabricate significance and never block.
@@ -699,6 +725,42 @@ class TestSmallSampleHonesty:
         reg = report.regressions[0]
         assert reg.p_value is not None and reg.p_value < 0.001
         assert reg.insufficient_data is False and report.should_block_ci()
+
+    def test_degenerate_table_is_no_evidence(self) -> None:
+        # A declared 10% rate with no recorded sample size, checked with four
+        # failures: at the assumed size the baseline count rounds to zero
+        # too, so the table is [[0, 4], [0, 4]] and scipy has no p-value.
+        # That is "no evidence", never a block.
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="pass_rate", value=0.1, std=0.0, sample_size=1)
+        report = RegressionDetector().compare(baseline, [{"pass_rate": 0.0}] * 4)
+
+        reg = report.regressions[0]
+        assert reg.test == "boschloo_exact" and reg.p_value == 1.0
+        assert reg.is_significant is False and reg.undetectable is True
+        assert reg.trials_needed == 35  # the baseline count first rounds up there
+        assert report.has_regression is False
+        assert report.should_block_ci(RegressionSeverity.MINOR) is False
+
+    def test_lower_is_better_power_notes_follow_the_metric_direction(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("error_rate", 0.0, sample_size=1, higher_is_better=False)
+        detector = RegressionDetector()
+
+        report = detector.compare(baseline, [{"error_rate": 1.0}])
+        reg = report.regressions[0]
+        assert reg.higher_is_better is False and reg.p_value == pytest.approx(0.25)
+        assert reg.is_significant is False
+        # The worst case for this metric is every trial at 1.0, which is what
+        # was observed: still not significant, so the drop is undetectable.
+        assert reg.undetectable is True and reg.trials_needed == 3
+        metric = baseline.get_metric("error_rate")
+        assert metric is not None
+        assert detector.detectability(metric, [1.0], 0.05) == (False, 3)
+
+        decided = detector.compare(baseline, [{"error_rate": 1.0}] * 3).regressions[0]
+        assert decided.p_value == pytest.approx(1 / 64)
+        assert decided.is_significant is True and decided.undetectable is False
 
 
 class TestReportedButNotSignificantPolicy:

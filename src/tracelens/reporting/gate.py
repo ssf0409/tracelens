@@ -53,6 +53,8 @@ from tracelens.baselines.comparison import (
     RegressionReport,
     RegressionSeverity,
     holm_adjusted,
+    relative_change,
+    severity_at_least,
     severity_for,
 )
 from tracelens.baselines.manager import BaselineManager
@@ -94,12 +96,6 @@ CLI_METRICS = ("pass_rate", "mean_score")
 # Multiplicity control across the checked tasks.
 MULTIPLICITY_CHOICES = ("holm", "none")
 
-_SEVERITY_ORDER = [
-    RegressionSeverity.NONE,
-    RegressionSeverity.MINOR,
-    RegressionSeverity.MODERATE,
-    RegressionSeverity.SEVERE,
-]
 # Suite-level bootstrap settings (the contract's run-versus-run defaults).
 _SUITE_CONFIDENCE = 0.95
 _SUITE_BOOTSTRAP = 10000
@@ -177,6 +173,8 @@ class TaskGateResult:
     compared_trials: int = 0
     excluded_trials: int = 0
     available_metrics: list[str] = field(default_factory=list)
+    # The metrics the baseline and the run share: what was actually tested.
+    compared_metrics: list[str] = field(default_factory=list)
     blocking: bool = False
     has_regression: bool = False
     overall_severity: RegressionSeverity = RegressionSeverity.NONE
@@ -214,6 +212,7 @@ class TaskGateResult:
             "compared_trials": self.compared_trials,
             "excluded_trials": self.excluded_trials,
             "available_metrics": list(self.available_metrics),
+            "compared_metrics": list(self.compared_metrics),
             "blocking": self.blocking,
             "has_regression": self.has_regression,
             "overall_severity": self.overall_severity.value,
@@ -236,6 +235,7 @@ class TaskGateResult:
             compared_trials=int(data.get("compared_trials", 0)),
             excluded_trials=int(data.get("excluded_trials", 0)),
             available_metrics=list(data.get("available_metrics", [])),
+            compared_metrics=list(data.get("compared_metrics", [])),
             blocking=bool(data.get("blocking", False)),
             has_regression=bool(data.get("has_regression", False)),
             overall_severity=RegressionSeverity(data.get("overall_severity", "none")),
@@ -423,7 +423,7 @@ class GateResult:
                 f"{self.skipped_task_content_changed} skipped (task content changed)"
             )
         parts.append(f"{self.blocking_regressions} blocking regression(s)")
-        underpowered = len(self.underpowered_tasks)
+        underpowered = sum(len(t.underpowered_regressions) for t in self.underpowered_tasks)
         if underpowered:
             parts.append(f"{underpowered} observed drop(s) not significant")
         if self.status is GateStatus.UNEVALUABLE:
@@ -483,21 +483,24 @@ def _apply_multiplicity(
     *,
     alpha: float,
     multiplicity: str,
-) -> int:
+) -> dict[str, float]:
     """Hold every checked task's findings to the run-level policy.
 
     Under ``holm`` the regression p-values of each metric are adjusted
-    across the checked tasks (a task without a finding for a metric counts
-    as a test with p = 1). Returns the family size ``m``.
+    across the checked tasks that compared that metric (a task without a
+    finding for it counts as a test with p = 1). Returns, per metric, the
+    raw level one test must reach to be significant: ``alpha / m`` for a
+    family of ``m`` tasks, or ``alpha`` without a correction.
     """
     checked = [t for t in tasks if t.outcome is TaskGateOutcome.CHECKED]
-    m = len(checked)
-    if multiplicity == "holm" and m:
-        per_test_level = alpha / m
-        metrics = sorted({r.metric_name for t in checked for r in t.regressions})
-        for metric in metrics:
+    metrics = sorted({m for t in checked for m in t.compared_metrics})
+    levels: dict[str, float] = {}
+    for metric in metrics:
+        family = [t for t in checked if metric in t.compared_metrics]
+        if multiplicity == "holm" and family:
+            levels[metric] = alpha / len(family)
             findings: list[MetricRegression | None] = []
-            for task in checked:
+            for task in family:
                 found = [r for r in task.regressions if r.metric_name == metric]
                 findings.append(found[0] if found else None)
             raw = [
@@ -506,14 +509,14 @@ def _apply_multiplicity(
             for finding, adjusted in zip(findings, holm_adjusted(raw), strict=True):
                 if finding is not None and finding.p_value is not None:
                     finding.p_value_adjusted = adjusted
-    else:
-        per_test_level = alpha
+        else:
+            levels[metric] = alpha
     for task in checked:
         for finding in task.regressions:
-            detector.annotate(finding, alpha, per_test_level)
+            detector.annotate(finding, alpha, levels.get(finding.metric_name, alpha))
         for finding in task.improvements:
             detector.annotate(finding, alpha)
-    return m
+    return levels
 
 
 def _suite_results(
@@ -542,10 +545,7 @@ def _suite_results(
         baseline_mean = sum(b for b, _ in pairs) / len(pairs)
         current_mean = sum(c for _, c in pairs) / len(pairs)
         delta = effect.delta if effect.delta is not None else current_mean - baseline_mean
-        if baseline_mean != 0:
-            delta_percent = delta / abs(baseline_mean) * 100
-        else:
-            delta_percent = 100.0 if delta != 0 else 0.0
+        delta_percent = relative_change(delta, baseline_mean)
         # The sign-flip distribution is symmetric, so the one-sided p-value
         # in the regression direction is half the two-sided one.
         p_one: float | None = None
@@ -556,11 +556,7 @@ def _suite_results(
         severity = severity_for(delta_percent) if is_regression else RegressionSeverity.NONE
         is_significant = is_regression and p_one is not None and p_one <= alpha
         within_noise = is_regression and any_infra_mismatch and abs(delta) < noise_band
-        blocking = (
-            is_significant
-            and not within_noise
-            and _SEVERITY_ORDER.index(severity) >= _SEVERITY_ORDER.index(threshold)
-        )
+        blocking = is_significant and not within_noise and severity_at_least(severity, threshold)
         results.append(SuiteGateResult(
             metric_name=metric,
             tasks=len(pairs),
@@ -633,7 +629,10 @@ def evaluate_gate(
         )
     if not 0.0 < alpha < 1.0:
         raise ValueError(f"alpha must be strictly between 0 and 1, got {alpha!r}")
-    detector = RegressionDetector(significance_level=alpha, noise_band_absolute=noise_band)
+    # Power notes are computed once, after the run-level correction.
+    detector = RegressionDetector(
+        significance_level=alpha, noise_band_absolute=noise_band, power_notes=False
+    )
     trials_by_task: dict[str, list[Trial]] = {}
     for trial in batch.trials:
         trials_by_task.setdefault(trial.task_id, []).append(trial)
@@ -725,6 +724,7 @@ def evaluate_gate(
             compared_trials=len(current_results),
             excluded_trials=excluded,
             available_metrics=current_metrics,
+            compared_metrics=[m for m in current_metrics if m in baseline.metrics],
             infra_config_mismatch=report.infra_config_mismatch,
             infra_config_diff=dict(report.infra_config_diff),
             regressions=list(report.regressions),
@@ -733,11 +733,14 @@ def evaluate_gate(
 
     # Run-level policy: adjust for multiplicity, then decide each task from
     # its significant findings and record what its sample sizes can show.
-    family_size = _apply_multiplicity(
-        tasks, detector, alpha=alpha, multiplicity=multiplicity
-    )
-    per_test_level = alpha / family_size if multiplicity == "holm" and family_size else alpha
+    levels = _apply_multiplicity(tasks, detector, alpha=alpha, multiplicity=multiplicity)
     checked = [t for t in tasks if t.outcome is TaskGateOutcome.CHECKED]
+    family_size = max(
+        (sum(1 for t in checked if metric in t.compared_metrics) for metric in levels),
+        default=0,
+    )
+    # The strictest level any test in the run is held to, for the messages.
+    per_test_level = min(levels.values(), default=alpha)
     for task in checked:
         report = task.regression_report()
         report.recompute()
@@ -747,12 +750,14 @@ def evaluate_gate(
         baseline, current_results = checked_inputs[task.task_id]
         detectable = False
         needed: list[int] = []
-        for metric in task.available_metrics:
+        for metric in task.compared_metrics:
             metric_baseline = baseline.get_metric(metric)
             if metric_baseline is None:
                 continue
             values = [r[metric] for r in current_results if metric in r]
-            ok, trials = detector.detectability(metric_baseline, values, per_test_level)
+            ok, trials = detector.detectability(
+                metric_baseline, values, levels.get(metric, alpha)
+            )
             detectable = detectable or ok
             if trials is not None:
                 needed.append(trials)

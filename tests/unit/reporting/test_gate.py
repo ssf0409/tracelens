@@ -37,12 +37,15 @@ def _trial(
     run_index: int = 0,
     grader_error: bool = False,
     spec: DecisionSpec | None = None,
+    score: float | None = None,
 ) -> Trial:
     trial = Trial(task_id=task_id, run_index=run_index, status=status)
     if passed is not None:
+        if score is None:
+            score = 1.0 if passed else 0.0
         trial.add_outcome(Outcome(
             trial_id=trial.trial_id, grader_id="g", passed=passed,
-            score=1.0 if passed else 0.0, grader_error=grader_error,
+            score=score, grader_error=grader_error,
         ))
     if spec is not None:
         trial.transcript = Transcript(task_id=task_id, final_output={}, decision_spec=spec)
@@ -516,6 +519,66 @@ class TestRunLevelPolicy:
             "least as many)"
         ]
 
+    def test_bounded_continuous_tests_are_undetectable(self, tmp_path):
+        # A declared score with no recorded spread or sample size, checked
+        # with three identical scores: both sides are constant, so the only
+        # test is the exact permutation one and its p-value is fixed at
+        # 1/C(6, 3) = 0.05 by the sizes alone. That reaches alpha for a
+        # single task but not the 0.025 two tasks share under Holm.
+        manager = BaselineManager(tmp_path / "baselines.json")
+        for task_id in ("a", "b"):
+            baseline = TaskBaseline(task_id=task_id)
+            baseline.add_metric("mean_score", 0.9, std=0.0, sample_size=1)
+            manager.set_baseline(baseline)
+        manager.save()
+        batch = _batch(*[
+            _trial(task_id, True, run_index=i, score=0.9)
+            for task_id in ("a", "b") for i in range(3)
+        ])
+
+        holm = evaluate_gate(batch, manager)
+        assert holm.status is GateStatus.UNEVALUABLE and holm.family_size == 2
+        assert all(t.compared_metrics == ["mean_score"] for t in holm.tasks)
+        assert all(t.detectable is False and t.trials_needed is None for t in holm.tasks)
+        assert holm.reasons[0].startswith(
+            "no checked task has enough trials to detect even a total failure "
+            "(0.025 per test, 2 task(s) checked)"
+        )
+        uncorrected = evaluate_gate(batch, manager, multiplicity="none")
+        assert uncorrected.status is GateStatus.PASSED
+        assert all(t.detectable is True for t in uncorrected.tasks)
+
+    def test_holm_families_are_sized_per_metric(self, tmp_path):
+        # Task a stores pass_rate and mean_score, task b only pass_rate: the
+        # pass_rate family has two tests, the mean_score family one.
+        manager = _manager(tmp_path, {
+            "a": {"pass_rate": 1.0, "mean_score": 1.0},
+            "b": {"pass_rate": 1.0},
+        })
+        batch = _batch(*_runs("a", _passes(2, 5)), *_runs("b", _passes(5, 5)))
+
+        gate = evaluate_gate(batch, manager)
+        assert gate.status is GateStatus.BLOCKED and gate.family_size == 2
+        a, b = gate.tasks
+        assert a.compared_metrics == ["mean_score", "pass_rate"]
+        assert b.compared_metrics == ["pass_rate"] and b.regressions == []
+        by_metric = {r.metric_name: r for r in a.regressions}
+        assert by_metric["pass_rate"].p_value == pytest.approx(0.0068, abs=5e-4)
+        assert by_metric["pass_rate"].p_value_adjusted == pytest.approx(
+            2 * by_metric["pass_rate"].p_value
+        )
+        assert by_metric["mean_score"].p_value_adjusted == by_metric["mean_score"].p_value
+        assert all(r.is_significant for r in a.regressions)
+
+    def test_summary_line_counts_drops_not_tasks(self, tmp_path):
+        manager = _manager(tmp_path, {"a": {"pass_rate": 1.0, "mean_score": 1.0}})
+        gate = evaluate_gate(_batch(*_runs("a", _passes(4, 5))), manager)
+        assert gate.status is GateStatus.PASSED
+        assert len(gate.underpowered_tasks) == 1
+        assert len(gate.tasks[0].underpowered_regressions) == 2
+        assert gate.summary_line().endswith(
+            "0 blocking regression(s), 2 observed drop(s) not significant"
+        )
     def test_policy_arguments_are_validated(self, tmp_path):
         manager = _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
         batch = _batch(*_runs("t1", [True, True]))
@@ -534,6 +597,7 @@ class TestRunLevelPolicy:
         assert (restored.alpha, restored.multiplicity, restored.family_size) == (0.1, "none", 6)
         assert [s.describe() for s in restored.suite] == [s.describe() for s in gate.suite]
         assert restored.suite[0].seed == 7
+        assert restored.tasks[0].compared_metrics == ["pass_rate"]
         assert restored.tasks[0].regressions[0].trials_needed == gate.tasks[0].regressions[0].trials_needed
 
     def test_legacy_gate_json_without_the_policy_still_loads(self):

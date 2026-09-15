@@ -33,9 +33,11 @@ tasks you need depends on the scenario:
 The gate blocks only on evidence, so the run count sets what it can see: with
 five trials a side a task that always passed and now fails every run blocks,
 and so does one that passes 1 of 5; a drop to 3 of 5 is reported with the
-trials that would decide it. Fewer than three trials a side cannot decide
-even a total failure, and a check none of whose tasks could have blocked is
-`UNEVALUABLE`. The error-rate tables are in the
+trials that would decide it. A baseline with no recorded sample size needs
+three trials a side to decide even a total failure; a baseline stored from
+five runs is decided by two check trials, and one stored from ten runs by a
+single trial (the contract's table). A check none of whose tasks could have
+blocked is `UNEVALUABLE`. The error-rate tables are in the
 [statistical contract](statistical-contract.md#baseline-regression-detection).
 
 **Rule of thumb:** if your confidence-interval width is `> 0.1`, you need more

@@ -94,7 +94,12 @@ def _boschloo_p(k_b: int, n_b: int, k_c: int, n_c: int, alternative: Alternative
     """
     table = [[k_b, n_b - k_b], [k_c, n_c - k_c]]
     result = stats.boschloo_exact(table, alternative=alternative)
-    return float(min(1.0, max(0.0, float(result.pvalue))))
+    p = float(result.pvalue)
+    if math.isnan(p):
+        # An all-zero column (no success, or no failure, on either side): the
+        # two rates are equal, so there is no evidence of a difference.
+        return 1.0
+    return float(min(1.0, max(0.0, p)))
 
 
 def holm_adjusted(p_values: Sequence[float]) -> list[float]:
@@ -261,6 +266,27 @@ class RegressionSeverity(str, Enum):
     SEVERE = "severe"       # > 15% decline
 
 
+# The severity ladder, least to most severe; blocking compares positions.
+SEVERITY_ORDER: list[RegressionSeverity] = [
+    RegressionSeverity.NONE,
+    RegressionSeverity.MINOR,
+    RegressionSeverity.MODERATE,
+    RegressionSeverity.SEVERE,
+]
+
+
+def severity_at_least(severity: RegressionSeverity, threshold: RegressionSeverity) -> bool:
+    """Whether ``severity`` is at or above ``threshold`` on the ladder."""
+    return SEVERITY_ORDER.index(severity) >= SEVERITY_ORDER.index(threshold)
+
+
+def relative_change(delta: float, baseline: float) -> float:
+    """``delta`` as a percentage of ``|baseline|`` (100 when the baseline is 0)."""
+    if baseline != 0:
+        return (delta / abs(baseline)) * 100
+    return 100.0 if delta != 0 else 0.0
+
+
 def severity_for(delta_percent: float) -> RegressionSeverity:
     """Severity from the size of a relative change alone."""
     abs_pct = abs(delta_percent)
@@ -315,6 +341,7 @@ class MetricRegression(BaseModel):
     baseline_n_assumed: bool = False
     baseline_std: float | None = None
     current_std: float | None = None
+    higher_is_better: bool = True
 
     # A change that is reported but not significant is underpowered;
     # ``trials_needed`` is about how many trials would decide the observed
@@ -437,12 +464,6 @@ class RegressionReport(BaseModel):
         Returns:
             True if CI should be blocked
         """
-        severity_order = [
-            RegressionSeverity.NONE,
-            RegressionSeverity.MINOR,
-            RegressionSeverity.MODERATE,
-            RegressionSeverity.SEVERE,
-        ]
         # When the regressions list is populated, recompute severity from
         # the significant findings — filtered to blocking_regressions on the
         # lenient path, unfiltered on the strict path — so the stored
@@ -461,7 +482,7 @@ class RegressionReport(BaseModel):
             )
         else:
             effective_severity = self.overall_severity
-        return severity_order.index(effective_severity) >= severity_order.index(threshold)
+        return severity_at_least(effective_severity, threshold)
 
     def to_ci_output(self) -> str:
         """Generate CI-friendly output."""
@@ -522,6 +543,7 @@ class RegressionDetector:
         min_delta_percent: float = 5.0,
         noise_band_absolute: float = DEFAULT_NOISE_BAND_ABSOLUTE,
         noise_band_aware: bool = True,
+        power_notes: bool = True,
     ):
         """Initialize the detector.
 
@@ -538,11 +560,15 @@ class RegressionDetector:
                 sub-noise-band regressions as ``within_noise_band`` when
                 infra configs differ. Set to False to disable the
                 downgrade (always treat every delta as real).
+            power_notes: Compute ``trials_needed`` / ``undetectable`` on
+                every finding ``compare()`` reports. The gate turns this off
+                and annotates once more after the run-level correction.
         """
         self.significance_level = significance_level
         self.min_delta_percent = min_delta_percent
         self.noise_band_absolute = noise_band_absolute
         self.noise_band_aware = noise_band_aware
+        self.power_notes = power_notes
 
     def compare(
         self,
@@ -615,12 +641,7 @@ class RegressionDetector:
             return None
         sides = _sides(metric_baseline, current_values)
         delta = sides.mean_c - sides.mean_b
-
-        # Calculate percentage change
-        if sides.mean_b != 0:
-            delta_percent = (delta / abs(sides.mean_b)) * 100
-        else:
-            delta_percent = 100.0 if delta != 0 else 0.0
+        delta_percent = relative_change(delta, sides.mean_b)
 
         # Skip if change is too small
         if abs(delta_percent) < self.min_delta_percent:
@@ -643,14 +664,16 @@ class RegressionDetector:
             baseline_n_assumed=sides.baseline_n_assumed,
             baseline_std=sides.std_b,
             current_std=sides.std_c,
+            higher_is_better=metric_baseline.higher_is_better,
         )
-        self.annotate(finding, self.significance_level)
+        self.annotate(finding, self.significance_level, power_notes=self.power_notes)
         return finding
 
     @staticmethod
-    def _sides_of(finding: MetricRegression, higher_is_better: bool = True) -> _Sides | None:
+    def _sides_of(finding: MetricRegression) -> _Sides | None:
         if finding.baseline_n is None or finding.current_n is None:
             return None
+        higher_is_better = finding.higher_is_better
         return _Sides(
             binary=finding.test == TEST_BOSCHLOO,
             mean_b=finding.baseline_mean,
@@ -668,6 +691,8 @@ class RegressionDetector:
         finding: MetricRegression,
         alpha: float,
         per_test_level: float | None = None,
+        *,
+        power_notes: bool = True,
     ) -> None:
         """Set ``is_significant`` and the power notes of a finding.
 
@@ -675,7 +700,8 @@ class RegressionDetector:
         a correction, its raw p-value) is held to. ``per_test_level`` is the
         raw level one test must reach to be significant — ``alpha`` itself
         without a correction, ``alpha / m`` under Holm over ``m`` tests —
-        and drives ``trials_needed`` and ``undetectable``.
+        and drives ``trials_needed`` and ``undetectable``. With
+        ``power_notes=False`` only the significance fields are set.
         """
         level = alpha if per_test_level is None else per_test_level
         p = finding.p_value_adjusted if finding.p_value_adjusted is not None else finding.p_value
@@ -685,7 +711,7 @@ class RegressionDetector:
         finding.trials_needed_on_both_sides = False
         finding.undetectable = False
         sides = self._sides_of(finding)
-        if sides is None or finding.p_value is None or not finding.underpowered:
+        if not power_notes or sides is None or finding.p_value is None or not finding.underpowered:
             return
         finding.trials_needed = _trials_needed(sides, level)
         if finding.trials_needed is None and not sides.baseline_n_assumed:
@@ -714,9 +740,15 @@ class RegressionDetector:
             return False, None
         sides = _sides(metric_baseline, current_values)
         if not sides.binary:
-            probe = replace(sides, mean_c=sides.mean_b - 1.0)
+            # A change far beyond any plausible spread: a t-test then rejects
+            # whenever it can, while the exact permutation p-value of two
+            # constant sides is fixed by the sizes and may never reach the
+            # level.
+            scale = max(abs(sides.mean_b), sides.std_b or 0.0, sides.std_c or 0.0, 1.0)
+            shift = -1e3 * scale if sides.higher_is_better else 1e3 * scale
+            probe = replace(sides, mean_c=sides.mean_b + shift)
             _test, p = _p_value(probe, _alternative(probe))
-            return p is not None, None
+            return p is not None and p <= level, None
         worst = sides.worst_case()
         _test, p = _p_value(worst, _alternative(worst))
         if p is not None and p <= level:
