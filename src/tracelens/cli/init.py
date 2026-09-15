@@ -163,6 +163,10 @@ Installation in CI:
 - TraceLens is installed only if the project does not already provide it,
   pinned to `__REQUIREMENT__`. Bump the pin on purpose.
 
+Note on artifacts: `trials.json` and checkpoints contain raw evidence
+(inputs, outputs, transcripts, error messages) and are ignored by `.gitignore`.
+Treat them with appropriate data hygiene before uploading or sharing.
+
 Every pull request is evaluated by default so agent code changes cannot skip
 the eval. To evaluate only when specific paths change, uncomment the
 `paths:` block in the workflow and list your agent's source directories.
@@ -302,6 +306,9 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Raw evidence: trials.json contains unscrubbed transcripts, outputs,
+      # and error messages. Review artifact access if your suite evaluates
+      # sensitive inputs or keys.
       - name: Upload evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -378,6 +385,13 @@ def _starter_files() -> dict[Path, str]:
     }
 
 
+GITIGNORE_ENTRIES = (
+    "eval/results/",
+    "eval/worksheets/",
+    "*.bak*",
+)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Execute the 'init' subcommand."""
     root = Path(args.path)
@@ -419,6 +433,33 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"overwrote {path} (backed up to {backup})")
         else:
             print(f"kept {path} (edited); pass --overwrite-edited to replace it")
+
+    gitignore_path = root / ".gitignore"
+    if not gitignore_path.exists():
+        gitignore_content = (
+            "# TraceLens evaluation artifacts (raw evidence may contain secrets/PII)\n"
+            + "\n".join(GITIGNORE_ENTRIES)
+            + "\n"
+        )
+        gitignore_path.parent.mkdir(parents=True, exist_ok=True)
+        gitignore_path.write_text(gitignore_content, encoding="utf-8")
+    else:
+        try:
+            current_gi = gitignore_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            current_gi = ""
+        gi_lines = [line.strip() for line in current_gi.splitlines()]
+        missing_entries = [entry for entry in GITIGNORE_ENTRIES if entry not in gi_lines]
+        if missing_entries:
+            addition = ""
+            if current_gi and not current_gi.endswith("\n"):
+                addition += "\n"
+            addition += (
+                "# TraceLens evaluation artifacts (raw evidence may contain secrets/PII)\n"
+                + "\n".join(missing_entries)
+                + "\n"
+            )
+            gitignore_path.write_text(current_gi + addition, encoding="utf-8")
 
     print(f"Initialized TraceLens eval scaffold in {root}")
     print(f"Next: tracelens run --config {root / 'tracelens.yaml'}")

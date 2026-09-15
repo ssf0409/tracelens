@@ -67,6 +67,7 @@ class TestBuildParser:
             "--output", "results.json",
             "--report", "report.md",
             "--max-infra-retries", "2",
+            "--keep-checkpoint",
         ])
         assert args.num_runs == 5
         assert args.max_concurrency == 10
@@ -77,6 +78,7 @@ class TestBuildParser:
         assert args.output == "results.json"
         assert args.report == "report.md"
         assert args.max_infra_retries == 2
+        assert args.keep_checkpoint is True
 
     def test_report_required_args(self):
         """Report command requires results file."""

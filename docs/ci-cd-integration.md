@@ -158,6 +158,9 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Raw evidence: trials.json contains unscrubbed transcripts, outputs,
+      # and error messages. Review artifact access if your suite evaluates
+      # sensitive inputs or keys.
       - name: Upload evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4

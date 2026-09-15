@@ -214,6 +214,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
+        "--keep-checkpoint", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
+        help="Retain checkpoint file after a successful complete run (default: off)",
+    )
+    run_parser.add_argument(
         "--max-infra-retries", type=int, default=argparse.SUPPRESS,
         help=(
             "Re-attempt trials that end in INFRA_ERROR up to N extra times "
@@ -676,6 +681,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         for reason in gate.reasons:
             print(f"Error: {reason}", file=sys.stderr)
         return 1
+
+    if args.checkpoint and not getattr(args, "keep_checkpoint", False):
+        try:
+            ckpt_p = Path(args.checkpoint)
+            if ckpt_p.exists():
+                ckpt_p.unlink()
+        except OSError:
+            pass
+
     return 0
 
 

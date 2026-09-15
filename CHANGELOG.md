@@ -8,6 +8,21 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Artifact hygiene, `.gitignore` scaffolding, and checkpoint cleanup.**
+  `tracelens init` now scaffolds or appends `.gitignore` entries for
+  `eval/results/`, `eval/worksheets/`, and `*.bak*` so raw evaluation evidence
+  is not committed in-tree by default. Generated README and workflow templates
+  note that `trials.json` and checkpoints contain unscrubbed raw evidence.
+  Successful complete runs now remove the temporary checkpoint file on exit 0
+  unless `--keep-checkpoint` (or `run.keep_checkpoint` in config) is set. Runner
+  stderr logs now output bounded, type-only exception summaries to prevent leaking
+  sensitive payload/key data to CI logs, and stored error tracebacks relativize
+  absolute file paths to the workspace. `tracelens sample` gains `--excerpt-field`
+  to extract specific fields for review worksheets. Added a "Data in artifacts"
+  guide and security scope clarifications (#130).
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.
