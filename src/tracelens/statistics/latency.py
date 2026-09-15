@@ -60,13 +60,17 @@ class LatencyAnalyzer:
         if not token_events:
             return LatencyMetrics()
 
+        token_events = sorted(token_events, key=lambda e: e.timestamp_ms)
         first_token_ms = token_events[0].timestamp_ms
-        last_event = transcript.streaming_events[-1]
+        last_event = max(transcript.streaming_events, key=lambda e: e.timestamp_ms)
         time_to_complete_ms = last_event.timestamp_ms
 
         # Each TOKEN event represents at least 1 token for throughput estimation,
-        # even if token_count wasn't explicitly set by the adapter.
-        total_tokens = sum(e.token_count or 1 for e in token_events)
+        # unless token_count was explicitly set to 0.
+        total_tokens = sum(
+            e.token_count if e.token_count is not None else 1
+            for e in token_events
+        )
 
         # Compute TPS using generation window (first token to last event),
         # excluding idle time before the first token arrived.

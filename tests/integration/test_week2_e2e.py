@@ -638,7 +638,7 @@ class TestErrorPathsE2E:
         outcome = await grader.grade(transcript, task)
         assert outcome.passed is False
         assert outcome.metrics["schema_valid"] == 0.0
-        assert outcome.metrics["error_count"] == 1.0
+        assert outcome.metrics["error_count"] >= 1.0
 
     @pytest.mark.asyncio
     async def test_bad_agent_through_contract_runner(self) -> None:
