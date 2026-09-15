@@ -41,12 +41,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tracelens._version import __version__
 from tracelens.core.decision_spec import DecisionSpec
@@ -54,6 +55,8 @@ from tracelens.core.task import EvalSet, Task
 
 if TYPE_CHECKING:
     from tracelens.execution.runner import RunnerConfig
+
+logger = logging.getLogger(__name__)
 
 PROVENANCE_SCHEMA_VERSION = 1
 _SHORT = 12
@@ -182,6 +185,18 @@ class CandidateSpec(BaseModel):
 
 class RunProvenance(BaseModel):
     """Versioned envelope describing one run's measurement and candidate."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _log_dropped_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            dropped = set(data) - set(cls.model_fields)
+            if dropped:
+                logger.warning(
+                    "ignoring unknown fields in RunProvenance: %s",
+                    ", ".join(sorted(dropped)),
+                )
+        return data
 
     schema_version: int = PROVENANCE_SCHEMA_VERSION
     run_id: str

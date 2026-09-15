@@ -5,7 +5,8 @@ summaries, statistical analysis, and optional regression detection.
 Supports markdown, CI summary, and self-contained HTML dashboard output.
 """
 
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from html import escape
 from typing import Any
@@ -21,6 +22,8 @@ from tracelens.reporting.gate import GateResult, GateStatus, TaskGateOutcome
 from tracelens.statistics.availability import MetricValue
 from tracelens.statistics.consistency import ConsistencyAnalyzer
 from tracelens.statistics.pass_at_k import PassAtKAnalyzer
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -190,7 +193,19 @@ class ReportData:
             raise ValueError("missing required keys: " + ", ".join(missing))
         if not isinstance(data["task_summaries"], list):
             raise ValueError("task_summaries must be a list")
-        summaries = [TaskSummary(**s) for s in data["task_summaries"]]
+        known_task_summary_fields = {f.name for f in fields(TaskSummary)}
+        summaries: list[TaskSummary] = []
+        for s in data["task_summaries"]:
+            if not isinstance(s, dict):
+                raise ValueError("each entry in task_summaries must be a JSON object")
+            unknown_keys = set(s) - known_task_summary_fields
+            if unknown_keys:
+                logger.warning(
+                    "ignoring unknown fields in task_summaries entry: %s",
+                    ", ".join(sorted(unknown_keys)),
+                )
+            filtered = {k: v for k, v in s.items() if k in known_task_summary_fields}
+            summaries.append(TaskSummary(**filtered))
         gate_data = data.get("gate")
         gate = GateResult.from_dict(gate_data) if isinstance(gate_data, dict) else None
         provenance: RunProvenance | None = None
@@ -203,10 +218,16 @@ class ReportData:
         reliability: dict[str, float | None] = dict(data.get("reliability", {}))
         recorded = "metric_availability" in data
         if recorded:
-            availability = {
-                name: MetricValue.from_dict(entry)
-                for name, entry in data["metric_availability"].items()
-            }
+            raw_availability = data["metric_availability"]
+            if not isinstance(raw_availability, dict):
+                raise ValueError("metric_availability must be a JSON object")
+            availability = {}
+            for name, entry in raw_availability.items():
+                if not isinstance(entry, dict):
+                    raise ValueError(
+                        f"entry for {name!r} in metric_availability must be a JSON object"
+                    )
+                availability[name] = MetricValue.from_dict(entry)
         else:
             availability = {
                 name: MetricValue.legacy(name, value)

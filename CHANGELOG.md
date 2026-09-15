@@ -8,6 +8,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Exit code contract on `report` and strict input models.** `ReportData.from_dict`
+  now robustly filters known `TaskSummary` fields, warns when unknown fields are
+  present (preserving forward compatibility for older report readers on newer files),
+  and validates `metric_availability`. `cmd_report` catches `TypeError` alongside
+  `ValueError` to return exit code 2 on invalid or foreign results files rather than
+  raising an unhandled traceback. Input models (`Task`, `TaskExpectation`, `EvalSet`,
+  `EvalSetMetadata`) now use `extra='forbid'` to fail fast on misspelled keys with exit
+  code 2 before execution, while artifact models (`Trial`, `Transcript`, `Outcome`,
+  `RunProvenance`) log warnings for dropped keys. (#129)
+
 ## [0.5.0] - 2026-09-06
 
 TraceLens 0.5.0 makes evaluation results comparable and explainable. Every run records provenance (task content hashes, grader and adapter identity, runner settings) so two runs are checked for compatibility before they are compared; `tracelens compare` gives a verdict between two saved runs with a paired task bootstrap; `tracelens inspect` explains failed trials from a trials file; `tracelens run --config tracelens.yaml` replaces long flag lists; every command shares one exit-code contract; and the pass-rate, pass@k, and pass^k estimators were tightened so harness failures leave the denominator and unevaluable gates no longer pass. Releases are now prepared and published by the release pipeline.

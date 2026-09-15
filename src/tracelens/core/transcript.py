@@ -10,17 +10,20 @@ A Transcript is a complete record of an agent's execution, including:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from tracelens.core._time import utc_now
 
 if TYPE_CHECKING:
     from tracelens.core.decision_spec import DecisionSpec
+
+logger = logging.getLogger(__name__)
 
 
 class StepType(StrEnum):
@@ -123,6 +126,17 @@ class Transcript(BaseModel):
         transcript.final_output = result
         transcript.completed_at = utc_now()
     """
+    @model_validator(mode="before")
+    @classmethod
+    def _log_dropped_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            dropped = set(data) - set(cls.model_fields)
+            if dropped:
+                logger.warning(
+                    "ignoring unknown fields in Transcript: %s",
+                    ", ".join(sorted(dropped)),
+                )
+        return data
 
     transcript_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str

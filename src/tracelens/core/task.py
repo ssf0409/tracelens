@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tracelens._paths import prepare_destination_path
 from tracelens.core._time import utc_now
@@ -23,6 +23,8 @@ class TaskExpectation(BaseModel):
     These are optional hints that graders can use to validate outputs.
     Not all graders require expectations - LLM graders often work without them.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     expected_output: Any | None = None
     expected_tool_calls: list[str] | None = None
@@ -53,6 +55,15 @@ class Task(BaseModel):
             tags=["web", "beginner"],
         )
     """
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "max_retries" in data:
+            data = dict(data)
+            data.pop("max_retries", None)
+        return data
 
     task_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -154,6 +165,8 @@ class JSONTaskLoader(TaskLoader):
 class EvalSetMetadata(BaseModel):
     """Metadata for an evaluation set."""
 
+    model_config = ConfigDict(extra="forbid")
+
     author: str | None = None
     version: str = "1.0.0"
     created_at: datetime = Field(default_factory=utc_now)
@@ -176,6 +189,28 @@ class EvalSet(BaseModel):
             default_grader_ids=["quality", "personalization"],
         )
     """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_metadata_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            metadata_keys = {"description", "version", "author", "tags"}
+            overlapping = set(data) & metadata_keys
+            if overlapping:
+                data = dict(data)
+                meta = data.get("metadata")
+                if isinstance(meta, dict):
+                    meta = dict(meta)
+                elif meta is None:
+                    meta = {}
+                else:
+                    meta = meta.model_dump() if hasattr(meta, "model_dump") else {}
+                for k in overlapping:
+                    meta[k] = data.pop(k)
+                data["metadata"] = meta
+        return data
 
     eval_set_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
