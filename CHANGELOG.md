@@ -8,6 +8,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-15
+
 ### Added
 
 - **Releases happen on merge.** The "Release on merge" workflow
