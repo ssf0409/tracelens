@@ -11,10 +11,11 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 ### Fixed
 
 - **Markdown reports render hostile table cells safely.** Task ids or gate
-  values containing `|`, line breaks, or a leading `<` no longer break the
-  per-task and baseline-gate tables piped into `$GITHUB_STEP_SUMMARY`:
-  every Markdown table cell is escaped before interpolation, so the table
-  keeps its column structure and a cell cannot open a raw HTML element.
+  values containing `|`, line breaks, or HTML metacharacters (`&`, `<`, `>`)
+  no longer break the per-task and baseline-gate tables piped into
+  `$GITHUB_STEP_SUMMARY`: every Markdown table cell escapes its pipes and
+  newlines and then runs through `html.escape`, so the table keeps its
+  column structure and a cell cannot open a raw HTML element.
   (#134)
 
 ## [0.5.0] - 2026-09-06

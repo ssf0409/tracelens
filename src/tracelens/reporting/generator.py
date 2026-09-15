@@ -728,15 +728,14 @@ def _regression_notes(task: Any, regression: Any) -> str:
 def _md_cell(text: str) -> str:
     """Escape a value for interpolation into a Markdown table cell.
 
-    Pipes become ``\\|`` so they cannot act as column delimiters, embedded
-    newlines collapse so one cell cannot split into several table rows, and
-    a leading ``<`` is escaped so a cell cannot open a raw HTML element.
+    Pipes become ``\\|`` so they cannot act as column delimiters and embedded
+    newlines collapse so one cell cannot split into several table rows.
+    ``html.escape`` then neutralises ``&``, ``<`` and ``>`` so no cell can
+    open a raw HTML element.
     """
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
     text = text.replace("|", "\\|")
-    if text.startswith("<"):
-        text = "\\" + text
-    return text
+    return escape(text, quote=False)
 
 
 def _gate_rows(gate: GateResult) -> list[tuple[str, str, str, str, str, str, str]]:

@@ -254,6 +254,7 @@ class TestReportGenerator:
         batch = _make_batch({
             "pipe|id<script-like content>": [(True, 1.0)],
             "<script>alert(1)</script>": [(True, 1.0)],
+            "amp&and": [(True, 1.0)],
             "line1\nline2": [(True, 1.0)],
             "t1": [(True, 1.0)],
         })
@@ -273,13 +274,15 @@ class TestReportGenerator:
             assert len(cells) == 4  # Task | Trials | Pass Rate | Mean Score
             cells_by_task[cells[0]] = cells
 
-        assert cells_by_task["pipe\\|id<script-like content>"] == [
-            "pipe\\|id<script-like content>", "1", "100.0%", "1.0000",
+        assert cells_by_task["pipe\\|id&lt;script-like content&gt;"] == [
+            "pipe\\|id&lt;script-like content&gt;", "1", "100.0%", "1.0000",
         ]
-        assert cells_by_task["\\<script>alert(1)</script>"][0] == \
-            "\\<script>alert(1)</script>"
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in cells_by_task
+        assert cells_by_task["amp&amp;and"][0] == "amp&amp;and"
         assert cells_by_task["line1 line2"][0] == "line1 line2"
         assert cells_by_task["t1"][0] == "t1"
+        # No cell may carry a live tag into the rendered table.
+        assert "<script>" not in md
 
 
 class TestSvgHelpers:
@@ -662,7 +665,7 @@ class TestGateReporting:
         gate_rows = [
             row for row in rows
             if len(_md_row_cells(row)) == 7
-            and _md_row_cells(row)[0] == "pipe\\|id<script-like content>"
+            and _md_row_cells(row)[0] == "pipe\\|id&lt;script-like content&gt;"
         ]
         assert len(gate_rows) == 1
         cells = _md_row_cells(gate_rows[0])
