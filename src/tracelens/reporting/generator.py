@@ -398,10 +398,13 @@ class ReportGenerator:
             lines.append("| Task | Trials | Pass Rate | Mean Score |")
             lines.append("|------|--------|-----------|------------|")
             for s in report.task_summaries:
-                lines.append(
-                    f"| {s.task_id} | {_format_trial_count(s)} | "
-                    f"{_format_task_pass_rate(s, report)} | {s.mean_score:.4f} |"
-                )
+                row = [
+                    _md_cell(s.task_id),
+                    _md_cell(_format_trial_count(s)),
+                    _md_cell(_format_task_pass_rate(s, report)),
+                    _md_cell(f"{s.mean_score:.4f}"),
+                ]
+                lines.append("| " + " | ".join(row) + " |")
             lines.append("")
 
         # Legacy hand-attached regression report (CLI runs use ``gate``)
@@ -739,6 +742,19 @@ def _regression_notes(task: Any, regression: Any) -> str:
     return "; ".join(notes)
 
 
+def _md_cell(text: str) -> str:
+    """Escape a value for interpolation into a Markdown table cell.
+
+    Pipes become ``\\|`` so they cannot act as column delimiters and embedded
+    newlines collapse so one cell cannot split into several table rows.
+    ``html.escape`` then neutralises ``&``, ``<`` and ``>`` so no cell can
+    open a raw HTML element.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+    text = text.replace("|", "\\|")
+    return escape(text, quote=False)
+
+
 _GATE_TABLE_HEADER = (
     "Task", "Metric", "Baseline", "Current", "Change", "Severity", "Evidence", "Notes",
 )
@@ -795,7 +811,7 @@ def _gate_section_md(report: ReportData) -> list[str]:
             lines.append("| " + " | ".join(_GATE_TABLE_HEADER) + " |")
             lines.append("|" + "|".join("-" * (len(h) + 2) for h in _GATE_TABLE_HEADER) + "|")
             for row in rows:
-                lines.append("| " + " | ".join(row) + " |")
+                lines.append("| " + " | ".join(_md_cell(cell) for cell in row) + " |")
         skipped = _gate_skipped_lines(gate)
         if skipped:
             lines.append("")

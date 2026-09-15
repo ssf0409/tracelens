@@ -1,6 +1,7 @@
 """Tests for report generator module."""
 
 import json
+import re
 
 import pytest
 
@@ -36,6 +37,11 @@ def _make_batch(task_configs: dict[str, list[tuple[bool, float]]]) -> TrialBatch
             ))
             batch.add_trial(trial)
     return batch
+
+
+def _md_row_cells(row: str) -> list[str]:
+    """Split a Markdown table row into cells on unescaped pipe delimiters."""
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", row)[1:-1]]
 
 
 class TestTaskSummary:
@@ -242,6 +248,41 @@ class TestReportGenerator:
 
         assert "task<script>" not in html
         assert "task&lt;script&gt;" in html
+
+    def test_render_markdown_escapes_hostile_task_ids(self):
+        """Issue #134: hostile task ids cannot break the per-task table."""
+        batch = _make_batch({
+            "pipe|id<script-like content>": [(True, 1.0)],
+            "<script>alert(1)</script>": [(True, 1.0)],
+            "amp&and": [(True, 1.0)],
+            "line1\nline2": [(True, 1.0)],
+            "t1": [(True, 1.0)],
+        })
+
+        gen = ReportGenerator()
+        report = gen.build_report(batch)
+        md = gen.render_markdown(report)
+        rows = [line for line in md.splitlines() if line.startswith("|")]
+
+        # Header + separator + exactly one physical row per task: no cell
+        # may add a column or split itself across several table rows.
+        assert len(rows) == 2 + len(report.task_summaries)
+
+        cells_by_task: dict[str, list[str]] = {}
+        for row in rows[2:]:
+            cells = _md_row_cells(row)
+            assert len(cells) == 4  # Task | Trials | Pass Rate | Mean Score
+            cells_by_task[cells[0]] = cells
+
+        assert cells_by_task["pipe\\|id&lt;script-like content&gt;"] == [
+            "pipe\\|id&lt;script-like content&gt;", "1", "100.0%", "1.0000",
+        ]
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in cells_by_task
+        assert cells_by_task["amp&amp;and"][0] == "amp&amp;and"
+        assert cells_by_task["line1 line2"][0] == "line1 line2"
+        assert cells_by_task["t1"][0] == "t1"
+        # No cell may carry a live tag into the rendered table.
+        assert "<script>" not in md
 
 
 class TestSvgHelpers:
@@ -603,6 +644,36 @@ class TestGateReporting:
         html = gen.render_html(report)
         assert "Baseline Gate" in html and ">BLOCKED<" in html
         assert "<td>pass_rate</td>" in html
+
+    def test_gate_rows_escape_hostile_task_ids(self, tmp_path):
+        """Issue #134: hostile task ids cannot break the gate table."""
+        from tracelens.baselines.manager import BaselineManager, TaskBaseline
+        from tracelens.reporting.gate import evaluate_gate
+
+        hostile = "pipe|id<script-like content>"
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id=hostile)
+        baseline.add_metric("pass_rate", 1.0, std=0.05, sample_size=10)
+        manager.set_baseline(baseline)
+        manager.save()
+        batch = _make_batch({hostile: [(False, 0.0)] * 3})
+        gen = ReportGenerator(k_values=[1], consistency_k_values=[2])
+        report = gen.build_report(batch)
+        report.gate = evaluate_gate(batch, manager, task_ids=[hostile])
+        assert report.gate is not None and report.gate.status.value == "blocked"
+
+        md = gen.render_markdown(report)
+        rows = [line for line in md.splitlines() if line.startswith("|")]
+        gate_rows = [
+            row for row in rows
+            if len(_md_row_cells(row)) == 8  # Task .. Severity, Evidence, Notes
+            and _md_row_cells(row)[0] == "pipe\\|id&lt;script-like content&gt;"
+        ]
+        assert len(gate_rows) == 1
+        cells = _md_row_cells(gate_rows[0])
+        assert cells[1] == "pass_rate"
+        assert cells[6].startswith("p=") and cells[6].endswith(", significant")
+        assert cells[7] == "blocking"
 
     def test_passed_and_not_requested_gates(self, tmp_path):
         gen, report = self._gated_report(tmp_path, passing=True)
