@@ -34,6 +34,11 @@ def changelog(unreleased: str) -> str:
     )
 
 
+def first_changelog(unreleased: str) -> str:
+    """A changelog with nothing released yet."""
+    return "# Changelog\n\n## [Unreleased]\n\n" + unreleased
+
+
 FIXES = "### Fixed\n\n- A bug. (#12)\n"
 FEATURES = "### Added\n\n- **A feature.** Details.\n\n### Fixed\n\n- A bug. (#12)\n"
 
@@ -145,8 +150,21 @@ class TestDecide:
             decide(changelog(FIXES), "x [release: 0.4.1]", TAGS)
         with pytest.raises(ReleaseError, match="tag v0.5.0 already exists"):
             decide(changelog(FIXES), "x [release: 0.5.0]", TAGS)
-        with pytest.raises(ReleaseError, match="already has a section for 0.5.0"):
-            decide(changelog(FIXES), "x [release: 0.5.0]", ["v0.4.0"])
+        # An undated section (no tag, not counted as a release) still blocks
+        # its version: the dated one would be reported as a missing tag.
+        already = changelog(FIXES) + "\n## [0.6.0]\n\n- x\n"
+        with pytest.raises(ReleaseError, match="already has a section for 0.6.0"):
+            decide(already, "x [release: 0.6.0]", TAGS)
+
+    def test_a_changelog_section_without_its_tag_is_an_error(self):
+        # A release commit landed but was never tagged, or the checkout has
+        # no tags: guessing a version from either state would be wrong.
+        with pytest.raises(ReleaseError, match="section for 0.5.0 but there is no tag v0.5.0"):
+            decide(changelog(FIXES), "fix: x", ["v0.4.0"])
+        with pytest.raises(ReleaseError, match="no version tags are visible"):
+            decide(changelog(FIXES), "fix: x", [])
+        # A tag newer than every section is fine: the tag decides.
+        assert decide(changelog(FIXES), "fix: x", [*TAGS, "v0.5.2"]).version == "0.5.3"
 
     def test_a_pre_release_tag_waits_for_a_maintainer(self):
         tags = [*TAGS, "v0.6.0rc1"]
@@ -156,9 +174,9 @@ class TestDecide:
         assert decide(changelog(FIXES), "fix: x [release: 0.6.0]", tags).version == "0.6.0"
 
     def test_first_release_ever(self):
-        assert decide(changelog(FEATURES), "feat: x", []).version == "0.1.0"
-        assert decide(changelog(FIXES), "fix: x", []).version == "0.0.1"
-        assert decide(changelog(FIXES), "fix: x", []).reason.endswith("as the first release tag")
+        assert decide(first_changelog(FEATURES), "feat: x", []).version == "0.1.0"
+        assert decide(first_changelog(FIXES), "fix: x", []).version == "0.0.1"
+        assert decide(first_changelog(FIXES), "fix: x", []).reason.endswith("as the first release tag")
 
     def test_no_unreleased_section_is_an_error(self):
         with pytest.raises(ReleaseError, match="no '## \\[Unreleased\\]'"):
@@ -199,17 +217,20 @@ class TestCommandLine:
         assert self._run("--message-file", "missing.txt", cwd=tmp_path).returncode == 2
         assert self._run("--tags", cwd=tmp_path).returncode == 2  # a message is required
 
-    def test_real_repository_state_is_decidable(self):
-        # Tags come from git; the changelog is the real one. Whatever state
-        # the repository is in, the script must decide without an error:
-        # a release (above the latest tag) or "nothing to release".
-        result = self._run("--message", "chore: check the release state", cwd=REPO)
+    def test_real_changelog_is_decidable_in_every_release_state(self):
+        # The real changelog with every dated section standing in for its
+        # tag (a CI checkout has no tags). Whatever state the repository is
+        # in, the script must decide without an error: a release above the
+        # latest section, or "nothing to release" right after one.
+        text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+        tags = [f"v{m.group('name')}" for m in module.SECTION.finditer(text)]
+        assert tags, "the changelog must have dated sections"
+        result = self._run(
+            "--message", "chore: check the release state", "--tags", *tags, cwd=REPO
+        )
         assert result.returncode == 0, result.stderr
         output = dict(line.split("=", 1) for line in result.stdout.splitlines())
-        tags = subprocess.run(
-            ["git", "tag", "--list", "v*"], cwd=REPO, capture_output=True, text=True, check=True,
-        ).stdout.split()
-        _tag, base, _final = latest_tag(tags)
+        _section, base, _final = module.latest_section(text)
         if output["release"] == "true":
             assert module.version_key(output["version"]) > base
         else:

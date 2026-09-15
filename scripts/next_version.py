@@ -16,6 +16,9 @@ Used by ``.github/workflows/release-auto.yml`` after CI passes on a push to
   entries only under Fixed (or Security, and so on) a patch release.
 - When the latest tag is a pre-release (``v1.0.0rc1``) nothing is released
   automatically: finish it with the "Release prepare" workflow.
+- A changelog section newer than every visible tag is an error, not a
+  release: either that release never got its tag, or the checkout has no
+  tags (fetch them first).
 
 Only the first line of the message (the title) is read for markers, so a
 pull request description may talk about them freely.
@@ -110,6 +113,14 @@ def latest_tag(tags: Sequence[str]) -> tuple[str | None, tuple[int, int, int], b
     if best is None:
         return None, (0, 0, 0), True
     return best[2], best[0], best[1] == 1
+
+
+SECTION = re.compile(r"^## \[(?P<name>[^\]]+)\] - ", re.MULTILINE)
+
+
+def latest_section(changelog: str) -> tuple[str | None, tuple[int, int, int], bool]:
+    """``(version, (major, minor, patch), is_final)`` of the newest dated section."""
+    return latest_tag([f"v{m.group('name')}" for m in SECTION.finditer(changelog)])
 
 
 def parse_title(message: str) -> Marker:
@@ -209,6 +220,18 @@ def decide(changelog: str, message: str, tags: Sequence[str]) -> Decision:
     if not any(line.startswith("- ") for line in body.splitlines()):
         return Decision(False, "the [Unreleased] section has no entries; nothing to release")
     tag, base, final = latest_tag(tags)
+    section, section_base, section_final = latest_section(changelog)
+    if section is not None and (section_base, section_final) > (base, final):
+        version = section.removeprefix("v")
+        hint = (
+            "no version tags are visible (a checkout without tags? fetch them first)"
+            if tag is None
+            else f"the latest tag is {tag}"
+        )
+        raise ReleaseError(
+            f"CHANGELOG.md already has a section for {version} but there is no tag v{version}: "
+            f"{hint}; finish that release (tag it) before releasing again"
+        )
     since = f"after {tag}" if tag else "as the first release tag"
     if marker.kind == "version":
         assert marker.value is not None

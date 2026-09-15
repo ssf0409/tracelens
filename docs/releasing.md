@@ -234,6 +234,10 @@ If the workflows are unavailable, the tag-driven path still works on its own:
   points there, and dispatches the release again. Or push the tag by hand
   (`git tag -a vX.Y.Z -m "release: vX.Y.Z" <sha> && git push origin vX.Y.Z`),
   which triggers the release workflow directly.
+- **"Release on merge" fails with "CHANGELOG.md already has a section for
+  X.Y.Z but there is no tag vX.Y.Z".** A release commit landed without its
+  tag. Re-run the "Release tag" job for that commit (or "Release on merge",
+  or tag by hand as above); the next merge then releases normally.
 - **"Release on merge" opened a release pull request instead of releasing.**
   `main` rejected its push. Merge that pull request to publish, and see step
   5 of [One-Time Setup](#one-time-setup) to make the next release automatic.
