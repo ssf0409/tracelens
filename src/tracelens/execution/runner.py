@@ -33,6 +33,31 @@ from tracelens.execution.agent_adapter import AgentAdapter
 logger = logging.getLogger(__name__)
 
 
+def _format_relative_traceback(exc: BaseException) -> str:
+    """Format an exception traceback with project-relative file paths."""
+    try:
+        te = traceback.TracebackException.from_exception(exc)
+        cwd = os.getcwd()
+
+        def _relativize_stack(stack: Any) -> None:
+            for frame in stack:
+                if os.path.isabs(frame.filename):
+                    try:
+                        rel = os.path.relpath(frame.filename, cwd)
+                        if not rel.startswith(".."):
+                            frame.filename = rel
+                    except ValueError:
+                        pass
+
+        curr: Any = te
+        while curr is not None:
+            _relativize_stack(curr.stack)
+            curr = curr.__context__ if curr.__cause__ is None else curr.__cause__
+        return "".join(te.format())
+    except Exception:
+        return traceback.format_exc()
+
+
 # Default exceptions that the runner treats as infrastructure failures (as
 # opposed to task-level failures). Adapters can also raise ``InfraError``
 # explicitly for cases the runner can't infer from the exception type.
@@ -497,13 +522,13 @@ class EvaluationRunner:
                     TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                 )
                 trial.error_message = f"Setup failed: {exc}"
-                trial.error_traceback = traceback.format_exc()
+                trial.error_traceback = _format_relative_traceback(exc)
                 logger.error(
                     "Setup %s for task %s run %d: %s",
                     "hit an infra error" if is_infra else "failed",
                     task.task_id,
                     run_index,
-                    exc,
+                    type(exc).__name__,
                 )
 
             # --- run (skipped if setup failed) ---
@@ -539,13 +564,13 @@ class EvaluationRunner:
                         TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                     )
                     trial.error_message = str(exc)
-                    trial.error_traceback = traceback.format_exc()
+                    trial.error_traceback = _format_relative_traceback(exc)
                     logger.error(
                         "Agent execution %s for task %s run %d: %s",
                         "hit an infra error" if is_infra else "failed",
                         task.task_id,
                         run_index,
-                        exc,
+                        type(exc).__name__,
                     )
 
             # --- teardown (always called) ---
@@ -557,7 +582,7 @@ class EvaluationRunner:
                     trial.error_message = (
                         f"Teardown failed: {teardown_exc}"
                     )
-                    trial.error_traceback = traceback.format_exc()
+                    trial.error_traceback = _format_relative_traceback(teardown_exc)
                     # The run itself succeeded; record the distinction so
                     # fail_fast doesn't abort a suite over cleanup flakiness.
                     trial.metadata["teardown_failed"] = True
@@ -570,7 +595,7 @@ class EvaluationRunner:
                     "Teardown failed for task %s run %d: %s",
                     task.task_id,
                     run_index,
-                    teardown_exc,
+                    type(teardown_exc).__name__,
                 )
 
         trial.completed_at = utc_now()

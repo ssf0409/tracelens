@@ -43,6 +43,10 @@ In scope:
   paths reachable from a normal evaluation run.
 - Tampering with `DecisionSpec` fingerprints in a way that breaks
   reproducibility guarantees.
+- Artifact data exposure in aggregate outputs: aggregate artifacts (`results.json`,
+  `report.md`, `report.html`) must not leak unscrubbed agent inputs, outputs, or error
+  bodies. Raw evidence artifacts (`trials.json`, `checkpoint.json`, worksheets) are
+  documented as containing raw execution data and must be managed via local data hygiene.
 
 Out of scope:
 
