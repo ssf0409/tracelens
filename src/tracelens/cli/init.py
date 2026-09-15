@@ -109,7 +109,7 @@ run:
   adapter: eval.adapter.StarterAdapter
   graders:
     - eval.grader.StarterGrader
-  num_runs: 1
+  num_runs: 5
   outputs:
     results: eval/results/results.json
     report: eval/results/report.md
@@ -179,7 +179,12 @@ the eval. To evaluate only when specific paths change, uncomment the
 ## 4. Enable the regression gate
 
 The gate compares each task with a stored baseline and blocks the pull
-request on a regression.
+request on a regression. It blocks on evidence: with `num_runs: 5` a task
+that always passed and now fails every run blocks, one that passes 1 of 5
+blocks, and a smaller drop is reported with the number of runs that would
+decide it. Keep `num_runs` at 5 or more for the baseline run; checks against
+a 5-run baseline can decide a total failure from 2 runs, and a check that
+could not have blocked at all exits 2 instead of passing.
 
 1. Run the suite on a version you trust (step 1), then store baselines from
    that run and commit `eval/baselines.json`:

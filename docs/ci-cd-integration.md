@@ -217,6 +217,9 @@ The `gate` object in `results.json` (abridged):
   "threshold": "moderate",
   "noise_band": 0.03,
   "require_baselines": false,
+  "alpha": 0.05,
+  "multiplicity": "holm",
+  "family_size": 2,
   "checked": 2,
   "skipped_no_baseline": 0,
   "skipped_no_gradable": 0,
@@ -224,22 +227,42 @@ The `gate` object in `results.json` (abridged):
   "skipped_task_content_changed": 0,
   "blocking_regressions": 1,
   "reasons": ["1 blocking regression(s) at threshold 'moderate': t-fail (severe)"],
+  "suite": [
+    {"metric_name": "pass_rate", "tasks": 2, "baseline_mean": 0.95, "current_mean": 0.5,
+     "delta": -0.45, "delta_percent": -47.4, "ci_lower": -0.9, "ci_upper": 0.0,
+     "p_value": 0.25, "severity": "severe", "is_regression": true,
+     "is_significant": false, "blocking": false}
+  ],
   "tasks": [
     {
       "task_id": "t-fail",
       "outcome": "checked",
-      "compared_trials": 2,
+      "compared_trials": 5,
       "excluded_trials": 0,
       "blocking": true,
+      "detectable": true,
       "regressions": [
         {"metric_name": "pass_rate", "baseline_mean": 0.9, "current_mean": 0.0,
-         "delta_percent": -100.0, "severity": "severe", "is_significant": true,
-         "within_noise_band": false}
+         "delta_percent": -100.0, "severity": "severe",
+         "test": "boschloo_exact", "p_value": 0.0004, "p_value_adjusted": 0.0008,
+         "is_significant": true, "baseline_n": 10, "current_n": 5,
+         "baseline_n_assumed": false, "underpowered": false,
+         "trials_needed": null, "undetectable": false, "within_noise_band": false}
       ]
     }
   ]
 }
 ```
+
+Each regression carries its evidence: the `test` that produced `p_value`
+(one-sided, in the observed direction), the Holm-adjusted `p_value_adjusted`
+the decision used, both sample sizes (and `baseline_n_assumed` when the
+baseline recorded none), and for a drop that is not significant,
+`underpowered` with `trials_needed` (`trials_needed_on_both_sides` when the
+stored baseline is too small for any check to decide it). `suite` holds the
+suite-level criterion per metric; `alpha`, `multiplicity`, and `family_size`
+record the policy. The Markdown and HTML tables show the same evidence in an
+**Evidence** column.
 
 To see *why* a blocked task regressed, read its trials rather than its
 numbers: `tracelens inspect eval/results/trials.json --task-id <id>
@@ -264,6 +287,53 @@ tracelens report --results eval/results/results.json --format ci   # the one-lin
 
 A results file written before gate decisions were recorded has no `gate`
 key; `tracelens report` renders it without inventing one.
+
+### What the gate can detect
+
+The gate blocks on evidence, not on the size of a drop alone, so the number
+of trials on each side decides what it can see. Per task, a 0/1 metric such
+as `pass_rate` is tested with Boschloo's exact test on the two counts; the
+baseline's `sample_size` is the other half of the evidence. With `T` checked
+tasks the p-values are Holm-adjusted (`--multiplicity holm`, the default), so
+an unchanged suite blocks by chance on some task at most 5 % of the time no
+matter how many tasks are flaky. A suite-level criterion, the mean of the
+per-task differences with a task bootstrap and sign-flip test, catches a
+broad regression that no single task can show. The procedure and the full
+tables are in the
+[statistical contract](statistical-contract.md#baseline-regression-detection);
+`scripts/gate_error_rates.py` regenerates them.
+
+Probability that one regressed task blocks, by trials a side and suite size:
+
+| drop | baseline runs | check runs | 1 task | 2 tasks | 10 tasks | 50 tasks |
+|---|---|---|---|---|---|---|
+| always passed → fails every run | any | 5 | 100 % | 100 % | 100 % | 100 % |
+| 1.0 → 0.4 | 5 | 5 | 68 % | 34 % | 8 % | 8 % |
+| 1.0 → 0.4 | 20 | 5 | 91 % | 91 % | 68 % | 34 % |
+| 1.0 → 0.4 | 10 | 10 | 99 % | 95 % | 63 % | 38 % |
+| 1.0 → 0.4 | 20 | 20 | 100 % | 100 % | 100 % | 98 % |
+| 1.0 → 0.6 | 20 | 5 | 66 % | 66 % | 32 % | 9 % |
+| 1.0 → 0.6 | 20 | 20 | 98 % | 98 % | 87 % | 58 % |
+
+How to read it:
+
+- **Store baselines from ten runs or more.** The baseline is the long-lived
+  side; a five-run check against a twenty-run baseline decides a 60-point
+  drop on one task 91 % of the time in a small suite.
+- **Check with five runs or more.** Fewer than three runs a side cannot
+  decide even a total failure; a check none of whose tasks could have
+  blocked is `UNEVALUABLE` (exit 2) with the runs it would need, and tasks
+  that cannot block on their own are named in a warning.
+- **Large suites need larger checks for single-task drops.** With fifty
+  tasks and five runs a side only a total failure of one task is decidable
+  per task; a broad drop across many tasks is the suite criterion's job.
+  `--multiplicity none` restores per-task sensitivity at the price of a
+  false-alarm rate that grows with the number of flaky tasks (ten flaky
+  tasks at an 80 % pass rate: 18 % of clean runs blocked).
+- **A drop that is reported but not significant is not a pass.** The gate
+  prints it (`observed drop, not blocking`) with the trials that would
+  decide it; rerun with more trials, or re-store the baseline from more
+  runs when the note says the baseline limits the evidence.
 
 ### Details
 
@@ -298,6 +368,9 @@ key; `tracelens report` renders it without inventing one.
   `decision_spec` to enable infra-noise-aware comparison: sub-noise-band
   regressions under a mismatched infra config are flagged but not
   blocking. Tune the band with `--noise-band` (default 0.03).
+- `--multiplicity holm|none` (config: `run.baseline.multiplicity`) sets
+  how the checked tasks share the 5 % significance level; see
+  [What the gate can detect](#what-the-gate-can-detect).
 - `--infra-exceptions builtins.OSError myproject.errors.RateLimitError`
   extends which exception types count as `INFRA_ERROR` instead of agent
   failures — downstream policy, conservative by default.

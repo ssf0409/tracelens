@@ -40,6 +40,7 @@ from tracelens.execution.runner import (
 )
 from tracelens.loaders import EVAL_SET_FORMATS, EvalSetLoadError, load_tasks
 from tracelens.reporting.gate import (
+    MULTIPLICITY_CHOICES,
     GateResult,
     GateStatus,
     TaskGateOutcome,
@@ -182,6 +183,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Minimum regression severity to fail "
             f"(default: {d['fail_on_regression']})"
+        ),
+    )
+    run_parser.add_argument(
+        "--multiplicity", default=argparse.SUPPRESS,
+        choices=list(MULTIPLICITY_CHOICES),
+        help=(
+            "How the baseline check holds many tasks to one significance "
+            "level: 'holm' adjusts each metric's per-task p-values across "
+            "the checked tasks so the run's chance of a false block is at "
+            "most alpha; 'none' tests every task at alpha on its own "
+            f"(default: {d['multiplicity']})"
         ),
     )
     run_parser.add_argument(
@@ -630,6 +642,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             require_baselines=args.require_baselines,
             decision_spec=decision_spec,
             task_ids=[summary.task_id for summary in report.task_summaries],
+            multiplicity=args.multiplicity,
         )
         _print_gate_diagnostics(gate)
     else:

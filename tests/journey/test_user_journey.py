@@ -102,7 +102,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
 
     # 2. The one documented command: outputs land where the config says.
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
-    assert run.stdout.startswith("TraceLens: 2 tasks, 2 trials, pass_rate=100.0%")
+    assert run.stdout.startswith("TraceLens: 2 tasks, 10 trials, pass_rate=100.0%")
     assert f"[tracelens] wrote results: {results}" in run.stderr
     assert trials.is_file() and report.is_file() and (project / "eval/results/report.html").is_file()
     data = load(results)
@@ -145,7 +145,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
         "inspect", "eval/results/trials.json", "--failures", "--eval-set", "eval/tasks.json",
         "--html", "eval/results/failures.html", cwd=project, expect=0,
     )
-    assert "passed 0, agent failure 2, infra error 0, grader error 0, not run 0" in inspect.stdout
+    assert "passed 0, agent failure 10, infra error 0, grader error 0, not run 0" in inspect.stdout
     assert "starter-capital run 0  agent failure  status=completed" in inspect.stdout
     assert 'actual:   {"answer": "wrong"}' in inspect.stdout
     assert "task:     Answer a simple geography question" in inspect.stdout
@@ -162,6 +162,54 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     decision = load(project / "eval/results/compare.json")
     assert decision["verdict"] == "regression" and decision["delta"] == -1.0
     assert decision["alignment"]["compared"] == 2 and decision["alignment"]["aligned_by"] == "content"
+
+    # 7b. A partial regression (1 of 5 runs passes) is blocked on its evidence:
+    # the exact test on 5/5 -> 1/5 gives p=0.0069, under the level shared by
+    # the two checked tasks.
+    partial = project / "partial.log"
+    adapter.write_text(source.replace(
+        TRUSTED,
+        "from pathlib import Path\n"
+        '    seen = Path("partial.log")\n'
+        '    calls = seen.read_text().splitlines() if seen.exists() else []\n'
+        '    seen.write_text("\\n".join([*calls, input_data["question"]]) + "\\n")\n'
+        '    if calls.count(input_data["question"]) >= PASSING_RUNS:\n'
+        '        return {"answer": "wrong"}\n'
+        f"    {TRUSTED}",
+    ).replace("PASSING_RUNS", "1"))
+    run = tracelens(
+        "run", "--config", "tracelens.yaml", "--max-concurrency", "1", cwd=project, expect=1,
+    )
+    assert "REGRESSION DETECTED [SEVERE]" in run.stdout
+    assert "pass_rate: 1.0000 -> 0.2000 (-80.0%) [p=0.0069 (adjusted 0.0137), significant]" in run.stdout
+    gate = load(results)["gate"]
+    assert gate["status"] == "blocked" and gate["blocking_regressions"] == 2
+    assert gate["multiplicity"] == "holm" and gate["family_size"] == 2
+    regression = next(t for t in gate["tasks"] if t["task_id"] == "starter-math")["regressions"][0]
+    assert regression["test"] == "boschloo_exact" and regression["is_significant"]
+    assert regression["baseline_n"] == 5 and regression["current_n"] == 5
+    assert "| starter-math | pass_rate | 1.0000 | 0.2000 | -80.0% | severe | p=0.0069" in report.read_text()
+    partial.unlink()
+
+    # 7c. A smaller drop (3 of 5 runs pass) is reported with the trials it
+    # would take to decide it, and does not block.
+    adapter.write_text(adapter.read_text().replace(">= 1:", ">= 3:"))
+    run = tracelens(
+        "run", "--config", "tracelens.yaml", "--max-concurrency", "1", cwd=project, expect=0,
+    )
+    assert "REGRESSION DETECTED" not in run.stdout
+    assert (
+        "[tracelens] observed drop, not blocking: starter-math pass_rate 1.0000 -> 0.6000 "
+        "(-40.0%), p=0.1031 (adjusted 0.2062), not significant; about"
+    ) in run.stdout
+    assert "trials on each side would decide it" in run.stdout
+    assert "2 observed drop(s) not significant" in run.stdout  # 2 tasks x 1 stored metric
+    gate = load(results)["gate"]
+    assert gate["status"] == "passed" and gate["blocking_regressions"] == 0
+    regression = next(t for t in gate["tasks"] if t["task_id"] == "starter-math")["regressions"][0]
+    assert regression["underpowered"] is True and regression["trials_needed_on_both_sides"] is True
+    assert "not blocking: not significant" in report.read_text()
+    partial.unlink()
 
     # 8. Fix it and rerun only the affected task; the gate checks just that task.
     adapter.write_text(source)
@@ -201,9 +249,9 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     ))
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=2)
     assert load(results)["gate"]["status"] == "unevaluable"
-    assert load(results)["grader_error_count"] == 2
+    assert load(results)["grader_error_count"] == 10
     inspect = tracelens("inspect", "eval/results/trials.json", "--kind", "grader", cwd=project, expect=0)
-    assert "grader error 2" in inspect.stdout and "starter CRASHED score=0.00" in inspect.stdout
+    assert "grader error 10" in inspect.stdout and "starter CRASHED score=0.00" in inspect.stdout
     assert "rubric missing" in inspect.stdout
     grader.write_text(grader_source)
 
@@ -214,7 +262,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert "tasks.json" in run.stderr and run.stdout == ""
     tasks.write_text(task_source)
     bad_config = project / "bad.yaml"
-    bad_config.write_text(config.read_text().replace("  num_runs: 1\n", "  num_run: 1\n"))
+    bad_config.write_text(config.read_text().replace("  num_runs: 5\n", "  num_run: 5\n"))
     run = tracelens("run", "--config", "bad.yaml", cwd=project, expect=2)
     assert "unknown key(s) under run: num_run" in run.stderr and run.stdout == ""
 
