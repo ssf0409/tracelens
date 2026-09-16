@@ -213,3 +213,50 @@ class TestCalibrationAnalyzer:
         analyzer = CalibrationAnalyzer()
         result = analyzer.analyze(outcomes, annotations)
         assert result.sample_count == 1
+
+    def test_constant_scores_fallback_to_agreement(self):
+        """When grader scores are constant (Pearson undefined), fallback to pass/fail agreement."""
+        outcomes = {
+            "t1": _make_outcome(1.0, True),
+            "t2": _make_outcome(1.0, True),
+            "t3": _make_outcome(1.0, True),
+        }
+        annotations = AnnotationSet(annotations=[
+            HumanAnnotation(task_id="t1", human_score=1.0, human_passed=True),
+            HumanAnnotation(task_id="t2", human_score=1.0, human_passed=True),
+            HumanAnnotation(task_id="t3", human_score=1.0, human_passed=True),
+        ])
+
+        analyzer = CalibrationAnalyzer(threshold=0.7)
+        result = analyzer.analyze(outcomes, annotations)
+
+        assert result.pearson_r is None
+        assert result.pass_fail_agreement == 1.0
+        assert result.statistic_used == "pass_fail_agreement"
+        assert result.is_calibrated is True
+        table = result.render_table()
+        assert "YES (via pass_fail_agreement)" in table
+
+    def test_constant_scores_disagreement_fallback(self):
+        """When grader scores are constant and disagreement is high, verdict is NO - DRIFT DETECTED via agreement."""
+        outcomes = {
+            "t1": _make_outcome(1.0, True),
+            "t2": _make_outcome(1.0, True),
+            "t3": _make_outcome(1.0, True),
+        }
+        annotations = AnnotationSet(annotations=[
+            HumanAnnotation(task_id="t1", human_score=0.0, human_passed=False),
+            HumanAnnotation(task_id="t2", human_score=0.0, human_passed=False),
+            HumanAnnotation(task_id="t3", human_score=1.0, human_passed=True),
+        ])
+
+        analyzer = CalibrationAnalyzer(threshold=0.7)
+        result = analyzer.analyze(outcomes, annotations)
+
+        assert result.pearson_r is None
+        assert result.pass_fail_agreement == pytest.approx(1 / 3)
+        assert result.statistic_used == "pass_fail_agreement"
+        assert result.is_calibrated is False
+        table = result.render_table()
+        assert "NO - DRIFT DETECTED (via pass_fail_agreement)" in table
+

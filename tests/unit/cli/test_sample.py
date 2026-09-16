@@ -141,3 +141,35 @@ def test_cmd_reconcile_from_self_contained_worksheet(tmp_path: Path) -> None:
 
     # Grader tracks human closely here -> calibrated -> exit 0.
     assert rc == 0
+
+
+def test_cmd_sample_with_eval_set(tmp_path: Path) -> None:
+    trials = _trials_file(tmp_path, [0.8])
+    eval_set_file = tmp_path / "tasks.json"
+    eval_set_file.write_text(json.dumps([
+        {
+            "task_id": "task-0",
+            "name": "Add numbers",
+            "input_data": {"val": 42},
+            "expectation": {"expected_output": 84},
+        }
+    ]))
+    out = tmp_path / "review.json"
+
+    args = argparse.Namespace(
+        trials=str(trials),
+        eval_set=str(eval_set_file),
+        size=1,
+        strategy="diverse",
+        seed=0,
+        excerpt_chars=280,
+        output=str(out),
+    )
+    rc = cmd_sample(args)
+    assert rc == 0
+    rows = json.loads(out.read_text())
+    assert len(rows) == 1
+    assert rows[0]["task_name"] == "Add numbers"
+    assert rows[0]["task_input"] == {"val": 42}
+    assert rows[0]["expected_output"] == 84
+

@@ -74,6 +74,8 @@ class CalibrationResult(BaseModel):
     # Verdict
     threshold: float = 0.7
     is_calibrated: bool = False
+    statistic_used: str = "pearson_r"
+    status: str | None = None
 
     @property
     def sample_count(self) -> int:
@@ -91,11 +93,26 @@ class CalibrationResult(BaseModel):
             "grader_bias": self.grader_bias,
             "threshold": self.threshold,
             "is_calibrated": self.is_calibrated,
+            "statistic_used": self.statistic_used,
+            "status": self.status,
             "pairs": [p.model_dump() for p in self.pairs],
         }
 
     def render_table(self) -> str:
         """Render a text summary table."""
+        if self.status is not None:
+            calibrated_str = self.status
+        elif self.is_calibrated:
+            if self.statistic_used == "pearson_r":
+                calibrated_str = "YES"
+            else:
+                calibrated_str = f"YES (via {self.statistic_used})"
+        else:
+            if self.statistic_used == "pearson_r":
+                calibrated_str = "NO - DRIFT DETECTED"
+            else:
+                calibrated_str = f"NO - DRIFT DETECTED (via {self.statistic_used})"
+
         lines = [
             "Calibration Report",
             "=" * 50,
@@ -109,7 +126,7 @@ class CalibrationResult(BaseModel):
             f"Grader bias:          {self._fmt(self.grader_bias)}",
             "-" * 50,
             f"Threshold:            {self.threshold}",
-            f"Calibrated:           {'YES' if self.is_calibrated else 'NO - DRIFT DETECTED'}",
+            f"Calibrated:           {calibrated_str}",
         ]
         return "\n".join(lines)
 
@@ -226,9 +243,11 @@ class CalibrationAnalyzer:
 
         # Spearman rank correlation
         spearman_rho: float | None = None
-        if len(pairs) >= 3:
+        if len(pairs) >= 3 and np.std(grader_scores) > 0 and np.std(human_scores) > 0:
             spearman_result = stats.spearmanr(grader_scores, human_scores)
-            spearman_rho = float(spearman_result.statistic)
+            stat = float(spearman_result.statistic)
+            if not np.isnan(stat):
+                spearman_rho = stat
 
         # Pass/fail agreement
         pass_agreements = [p.pass_agree for p in pairs]
@@ -243,7 +262,20 @@ class CalibrationAnalyzer:
         grader_bias = mean_score_delta  # positive = grader scores higher
 
         # Calibration verdict
-        is_calibrated = pearson_r is not None and pearson_r >= self.threshold
+        # When Pearson r is defined, it is the primary deciding statistic.
+        # When Pearson r is undefined (e.g. constant scores where std == 0),
+        # fall back to pass/fail agreement or kappa, or report NOT EVALUABLE (constant scores).
+        statistic_used = "pearson_r"
+        status: str | None = None
+        if pearson_r is not None:
+            is_calibrated = pearson_r >= self.threshold
+        elif pass_fail_agreement is not None:
+            statistic_used = "pass_fail_agreement"
+            is_calibrated = pass_fail_agreement >= self.threshold
+        else:
+            is_calibrated = False
+            statistic_used = "none"
+            status = "NOT EVALUABLE (constant scores)"
 
         return CalibrationResult(
             pairs=pairs,
@@ -256,6 +288,8 @@ class CalibrationAnalyzer:
             grader_bias=grader_bias,
             threshold=self.threshold,
             is_calibrated=is_calibrated,
+            statistic_used=statistic_used,
+            status=status,
         )
 
     @staticmethod

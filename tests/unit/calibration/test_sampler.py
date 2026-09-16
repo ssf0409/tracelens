@@ -128,3 +128,37 @@ def test_unknown_strategy_raises() -> None:
     batch = _batch([0.5])
     with pytest.raises(ValueError, match="strategy"):
         sample_for_review(batch, size=1, strategy="nonsense")
+
+
+def test_sample_for_review_with_task_context() -> None:
+    from tracelens.core.task import Task, TaskExpectation
+
+    batch = TrialBatch()
+    trial = _trial("t1", 0.9, output="response text")
+    trial.outcomes[0].feedback = "Well structured"
+    batch.add_trial(trial)
+
+    tasks = [
+        Task(
+            task_id="t1",
+            name="Test Task 1",
+            input_data={"prompt": "hello"},
+            expectation=TaskExpectation(expected_output="world"),
+        )
+    ]
+
+    sheet = sample_for_review(batch, size=1, strategy="diverse", tasks=tasks)
+    assert len(sheet.items) == 1
+    item = sheet.items[0]
+    assert item.task_name == "Test Task 1"
+    assert item.task_input == {"prompt": "hello"}
+    assert item.expected_output == "world"
+    assert item.grader_feedback == "Well structured"
+
+    template = sheet.to_annotation_template()
+    assert len(template) == 1
+    assert template[0]["task_name"] == "Test Task 1"
+    assert template[0]["task_input"] == {"prompt": "hello"}
+    assert template[0]["expected_output"] == "world"
+    assert template[0]["grader_feedback"] == "Well structured"
+

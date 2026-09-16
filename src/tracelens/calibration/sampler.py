@@ -11,9 +11,12 @@ boundary (``boundary``) is where grader/human disagreement actually shows up.
 """
 
 import random
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from tracelens.core.task import Task
 from tracelens.core.trial import Trial, TrialBatch
 
 # Normalized pass/fail threshold. Outcome scores are 0-1 (see Outcome.score),
@@ -35,6 +38,12 @@ class ReviewItem(BaseModel):
     grader_score: float
     grader_passed: bool
     output_excerpt: str
+
+    # Task context for reviewer
+    task_name: str | None = None
+    task_input: Any | None = None
+    expected_output: Any | None = None
+    grader_feedback: str | None = None
 
     # Filled in by the human reviewer.
     human_score: float | None = None
@@ -67,6 +76,10 @@ class ReviewWorksheet(BaseModel):
                 "grader_score": item.grader_score,
                 "grader_passed": item.grader_passed,
                 "output_excerpt": item.output_excerpt,
+                "task_name": item.task_name,
+                "task_input": item.task_input,
+                "expected_output": item.expected_output,
+                "grader_feedback": item.grader_feedback,
             }
             for item in self.items
         ]
@@ -136,6 +149,7 @@ def sample_for_review(
     strategy: str = "diverse",
     seed: int = 0,
     excerpt_chars: int = 280,
+    tasks: Sequence[Task] | Mapping[str, Task] | None = None,
 ) -> ReviewWorksheet:
     """Select trials from `batch` for human review.
 
@@ -149,6 +163,8 @@ def sample_for_review(
             trials only), or ``random`` (reproducible random sample).
         seed: Seed for the ``random`` strategy, for reproducible worksheets.
         excerpt_chars: Max characters of each trial's final output to include.
+        tasks: Optional tasks sequence or mapping by task_id to enrich the worksheet
+            with task name, input, and expected output.
 
     Returns:
         A :class:`ReviewWorksheet` whose items have blank human-score fields.
@@ -161,6 +177,13 @@ def sample_for_review(
             f"Unknown sampling strategy {strategy!r}; choose from {STRATEGIES}"
         )
 
+    task_map: Mapping[str, Task] = {}
+    if tasks is not None:
+        if isinstance(tasks, Mapping):
+            task_map = tasks
+        else:
+            task_map = {t.task_id: t for t in tasks}
+
     trials = _gradeable_trials(batch)
 
     if strategy == "diverse":
@@ -172,16 +195,38 @@ def sample_for_review(
     else:  # "random"
         selected = _random(trials, size, seed)
 
-    items = [
-        ReviewItem(
-            task_id=t.task_id,
-            trial_id=t.trial_id,
-            grader_score=t.aggregate_score or 0.0,
-            grader_passed=t.passed,
-            output_excerpt=_excerpt(t, excerpt_chars),
+    items = []
+    for t in selected:
+        task = task_map.get(t.task_id)
+        task_name = task.name if task is not None else None
+        task_input = task.input_data if task is not None else None
+        expected_output = None
+        if task is not None and task.expectation is not None:
+            expected_output = task.expectation.expected_output
+
+        # Grader feedback from trial outcomes
+        grader_feedback = None
+        feedbacks = [
+            f"{o.grader_id}: {o.feedback}" if len(t.outcomes) > 1 else o.feedback
+            for o in t.outcomes
+            if o.feedback
+        ]
+        if feedbacks:
+            grader_feedback = "\n".join(feedbacks)
+
+        items.append(
+            ReviewItem(
+                task_id=t.task_id,
+                trial_id=t.trial_id,
+                grader_score=t.aggregate_score or 0.0,
+                grader_passed=t.passed,
+                output_excerpt=_excerpt(t, excerpt_chars),
+                task_name=task_name,
+                task_input=task_input,
+                expected_output=expected_output,
+                grader_feedback=grader_feedback,
+            )
         )
-        for t in selected
-    ]
 
     return ReviewWorksheet(
         strategy=strategy,

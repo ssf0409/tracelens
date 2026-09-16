@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from tracelens.calibration.sampler import STRATEGIES, sample_for_review
 from tracelens.core.trial import TrialBatch
+from tracelens.loaders import EvalSetLoadError, load_tasks
 
 
 def add_sample_parser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
@@ -33,6 +34,10 @@ def add_sample_parser(subparsers: argparse._SubParsersAction) -> None:  # type: 
     parser.add_argument(
         "--trials", required=True,
         help="Path to trials JSON from 'tracelens run --save-trials'",
+    )
+    parser.add_argument(
+        "--eval-set",
+        help="Path to eval set file (.json/.jsonl/.csv) to add task context to the worksheet",
     )
     parser.add_argument(
         "--size", type=int, default=20,
@@ -76,12 +81,24 @@ def cmd_sample(args: argparse.Namespace) -> int:
         )
         return 2
 
+    tasks = None
+    if getattr(args, "eval_set", None):
+        try:
+            tasks = load_tasks(args.eval_set)
+        except FileNotFoundError:
+            print(f"Error: eval set file not found: {args.eval_set}", file=sys.stderr)
+            return 2
+        except (EvalSetLoadError, json.JSONDecodeError, ValidationError) as exc:
+            print(f"Error: could not load eval set from '{args.eval_set}': {exc}", file=sys.stderr)
+            return 2
+
     worksheet = sample_for_review(
         batch,
         size=args.size,
         strategy=args.strategy,
         seed=args.seed,
         excerpt_chars=args.excerpt_chars,
+        tasks=tasks,
     )
     rows = worksheet.to_annotation_template()
 

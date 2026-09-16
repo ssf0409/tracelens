@@ -41,10 +41,13 @@ writes a fill-in worksheet:
 ```bash
 tracelens sample \
   --trials trials.json \
+  --eval-set tasks.json \
   --size 20 \
   --strategy diverse \
   --output review.json
 ```
+
+Pass `--eval-set` to enrich the worksheet with the task's name, input, expected output, and grader feedback.
 
 ### Choosing a strategy
 
@@ -64,7 +67,7 @@ them. Trials without a transcript or grader score are skipped automatically.
 ### The worksheet
 
 `review.json` is a list of rows. The reviewer fills in `human_score` (0–1) and
-`human_passed`; the `grader_*` and `output_excerpt` fields are read-only context
+`human_passed`; the `grader_*`, `task_*`, `expected_output`, and `output_excerpt` fields provide read-only context
 to grade against. `trial_id` ties each row back to its exact trial (so multiple
 runs of the same `task_id` stay distinct):
 
@@ -78,7 +81,11 @@ runs of the same `task_id` stay distinct):
     "notes": "",
     "grader_score": 0.52,
     "grader_passed": true,
-    "output_excerpt": "15"
+    "output_excerpt": "15",
+    "task_name": "Add two numbers",
+    "task_input": {"a": 7, "b": 8},
+    "expected_output": 15,
+    "grader_feedback": null
   }
 ]
 ```
@@ -124,14 +131,18 @@ Calibrated:           YES
 ```
 
 - **Pearson / Spearman** — does the grader's score track the human's? `< 0.7`
-  means the grader's ranking is unreliable.
+  means the grader's ranking is unreliable. When Pearson *r* is undefined (for example,
+  constant binary scores where standard deviation is zero), TraceLens falls back
+  to **pass/fail agreement** (or Cohen's kappa) as the deciding statistic and reports
+  which statistic decided in the table (e.g. `YES (via pass_fail_agreement)`). If
+  agreement cannot be evaluated, it reports `NOT EVALUABLE (constant scores)` with exit code 2.
 - **Pass/fail agreement & Cohen's kappa** — does the grader make the same
   pass/fail call? Kappa corrects for chance agreement.
 - **Grader bias** — positive means the grader is systematically generous;
   negative means it's harsh. A large bias with high correlation is fixable by
   adjusting the threshold; low correlation means the prompt needs work.
 
-The command **exits non-zero when Pearson r is below `--threshold`**, so you can
+The command **exits non-zero when the deciding correlation or agreement is below `--threshold`** (exit 1 for drift, exit 2 for malformed inputs or unevaluable scores), so you can
 run it in CI (e.g. a weekly scheduled job) and get alerted when a grader drifts.
 
 ### Re-grading instead of reusing recorded scores
@@ -144,12 +155,15 @@ human grades, point `reconcile` at the transcripts and re-grade on the fly:
 tracelens reconcile \
   --grader my.Grader \
   --samples tasks.json \
-  --transcripts transcripts.json \
+  --transcripts trials.json \
   --annotations review.json
 ```
 
-`--transcripts` expects a `{task_id: transcript}` JSON map. You can also pass a
-precomputed `--results {task_id: outcome}` map if you have one.
+`--transcripts` accepts a `TrialBatch` JSON artifact (from `--save-trials`) or a
+`{task_id: transcript}` JSON map. You can also pass precomputed results from
+`--results results.json` (either run output or a `{task_id: outcome}` map).
+Custom graders in the current directory or `--import-root` are loaded with
+zero-argument constructors like `tracelens run`.
 
 ## Programmatic API (beyond the CLI)
 
