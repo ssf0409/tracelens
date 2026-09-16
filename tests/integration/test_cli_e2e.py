@@ -203,6 +203,7 @@ def test_checkpoint_resume_skips_completed_trials(
         "--adapter", ADAPTER,
         "--graders", GRADER,
         "--checkpoint", str(checkpoint),
+        "--keep-checkpoint",
     )
 
     assert _run_cli(*argv) == 0
@@ -267,6 +268,7 @@ def test_init_scaffolds_a_runnable_eval_project(
         "eval/grader.py",
         "eval/README.md",
         ".github/workflows/eval.yml",
+        ".gitignore",
     }
     assert expected_files == {
         str(path.relative_to(project))

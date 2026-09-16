@@ -8,6 +8,21 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Artifact hygiene, `.gitignore` scaffolding, and checkpoint cleanup.**
+  `tracelens init` now scaffolds or appends `.gitignore` entries for
+  `eval/results/`, `eval/worksheets/`, and `*.bak*` so raw evaluation evidence
+  is not committed in-tree by default. Generated README and workflow templates
+  note that `trials.json` and checkpoints contain unscrubbed raw evidence.
+  Successful complete runs now remove the temporary checkpoint file on exit 0
+  unless `--keep-checkpoint` (or `run.keep_checkpoint` in config) is set. Runner
+  stderr logs now output bounded, type-only exception summaries to prevent leaking
+  sensitive payload/key data to CI logs, and stored error tracebacks relativize
+  absolute file paths to the workspace. `tracelens sample` gains `--excerpt-field`
+  to extract specific fields for review worksheets. Added a "Data in artifacts"
+  guide and security scope clarifications (#130).
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

@@ -128,3 +128,23 @@ def test_unknown_strategy_raises() -> None:
     batch = _batch([0.5])
     with pytest.raises(ValueError, match="strategy"):
         sample_for_review(batch, size=1, strategy="nonsense")
+
+
+def test_excerpt_field_extracts_specific_key() -> None:
+    batch = TrialBatch()
+    trial = Trial(task_id="t1", status=TrialStatus.COMPLETED)
+    trial.transcript = Transcript(
+        task_id="t1",
+        final_output={"answer": "hello world", "secret_key": "sk-secret-123"},
+    )
+    trial.add_outcome(
+        Outcome(trial_id=trial.trial_id, grader_id="g", passed=True, score=1.0)
+    )
+    batch.add_trial(trial)
+
+    sheet = sample_for_review(batch, size=1, excerpt_field="answer")
+    assert sheet.items[0].output_excerpt == "hello world"
+
+    # Non-existent field returns empty string
+    sheet_missing = sample_for_review(batch, size=1, excerpt_field="nonexistent")
+    assert sheet_missing.items[0].output_excerpt == ""

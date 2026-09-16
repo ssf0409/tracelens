@@ -334,6 +334,7 @@ run:
   timeout: 300                       # --timeout, in seconds
   progress: true                     # --progress / --no-progress
   checkpoint: eval/results/checkpoint.json   # --checkpoint
+  keep_checkpoint: false             # --keep-checkpoint / --no-keep-checkpoint
   max_infra_retries: 0               # --max-infra-retries
   infra_exceptions: [builtins.OSError]       # --infra-exceptions
   decision_spec: eval/decision-spec.json     # --decision-spec
@@ -400,6 +401,26 @@ stderr:
 [tracelens] wrote report: reports/results.md
 [tracelens] wrote trials: reports/trials.json
 ```
+
+---
+
+### Data in artifacts
+
+TraceLens separates aggregate metrics from raw evaluation evidence. Knowing which
+files contain unscrubbed agent data helps protect credentials, personally identifiable
+information (PII), and proprietary task inputs:
+
+| Artifact | Category | Contents | Data considerations |
+|----------|----------|----------|---------------------|
+| `results.json` | Aggregate | Task pass rates, metrics, gate decision, provenance hashes | Safe for public dashboards and job summaries; contains no task input or agent output text. |
+| `report.md` | Aggregate | Markdown summary tables, gate verdicts, regression flags | Designed for CI job summaries (e.g. `$GITHUB_STEP_SUMMARY`). No raw transcripts. |
+| `report.html` | Aggregate | Interactive HTML dashboard with charts and summary tables | Self-contained aggregate view. |
+| `trials.json` | Raw evidence | Complete `TrialBatch`: inputs, outputs, transcripts, tool calls, error messages | **Sensitive.** May contain raw agent inputs, API keys in outputs, and full error bodies. Added to `.gitignore` by `tracelens init`. |
+| `checkpoint.json` | Raw evidence | Resumable run state and completed trials | Same contents as `trials.json`. Deleted automatically on successful completion unless `--keep-checkpoint` is passed. |
+| `failures.json` / `failures.html` | Raw evidence | Excerpts of failing trial inputs, outputs, grader feedback, transcripts | Inspectable failure reports. May contain unscrubbed error messages or outputs. |
+| Review worksheets (`review.json`) | Raw evidence | Sampled trial outputs and excerpts for human review | Output excerpts may carry raw agent outputs. Use `sample --excerpt-field` to restrict excerpts to specific fields. |
+
+---
 
 ## Where to go next
 
