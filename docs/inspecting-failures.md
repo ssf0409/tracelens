@@ -24,10 +24,10 @@ Selected 3 trial(s) (kinds: agent failure, infra error, grader error)
 [1] starter-capital run 0  agent failure  status=completed  attempts=1  duration=1 ms
     why:      the agent ran and a grader failed it (a timeout counts)
     task:     Answer a simple geography question
-    input:    {"answer": "Paris", "question": "What is the capital of France?"}
-    expected: missing (the task declares no expected output)
+    input:    {"question": "What is the capital of France?"}
+    expected: {"answer": "Paris"}
     actual:   {"answer": "wrong"}
-    grader:   starter FAIL score=0.00 feedback: expected 'Paris', got 'wrong'
+    grader:   starter FAIL score=0.00 metrics=exact_match=0 feedback: expected 'Paris', got 'wrong'
     transcript: 1 step(s) (1 shown), 0 tokens, 1 llm call(s), 0 tool call(s)
       1. llm_call  content: missing
 ...

@@ -8,6 +8,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Starter failure explanations in generated scaffold.** `tracelens init` starter
+  tasks now store expected outputs canonically in `Task.expectation.expected_output`,
+  preventing reference answer leakage through `input_data`. The starter adapter provides
+  deterministic canned answers offline, and `StarterGrader` emits bounded, explanatory
+  feedback (evaluating rules, expected value, observed value, null outputs, and wrong
+  types) so inspection clearly explains failure reasons across text, JSON, and HTML. (#102)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

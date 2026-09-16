@@ -1166,7 +1166,8 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     adapter = project / "eval/adapter.py"
     trusted = adapter.read_text()
     broken = trusted.replace(
-        'return {"answer": input_data["answer"]}', 'return {"answer": "wrong"}'
+        'return {"answer": CANNED_ANSWERS.get(question, "unknown")}',
+        'return {"answer": "wrong"}',
     )
     assert broken != trusted
     adapter.write_text(broken)
@@ -1177,6 +1178,54 @@ def test_init_gate_walkthrough_blocks_an_intentional_regression(
     assert data["gate"]["blocking_regressions"] == 2
     assert "BLOCKED" in (project / "eval/results/report.md").read_text()
     assert "REGRESSION DETECTED" in capsys.readouterr().out
+
+    # Issue #102: failure inspection contains expected vs actual and feedback across formats
+    assert _run_main(
+        monkeypatch, "inspect", "eval/results/trials.json", "--failures", "--eval-set", "eval/tasks.json"
+    ) == 0
+    inspect_text = capsys.readouterr().out
+    assert 'input:    {"question": "What is the capital of France?"}' in inspect_text
+    assert 'expected: {"answer": "Paris"}' in inspect_text
+    assert 'actual:   {"answer": "wrong"}' in inspect_text
+    assert "feedback: expected 'Paris', got 'wrong'" in inspect_text
+
+    # JSON inspect output
+    json_out = project / "eval/results/failures.json"
+    assert _run_main(
+        monkeypatch,
+        "inspect",
+        "eval/results/trials.json",
+        "--failures",
+        "--eval-set",
+        "eval/tasks.json",
+        "--json",
+        str(json_out),
+    ) == 0
+    capsys.readouterr()
+    assert json_out.exists()
+    inspect_json = json.loads(json_out.read_text())
+    trial_data = next(t for t in inspect_json["trials"] if t["task_id"] == "starter-capital")
+    assert trial_data["expected"] == '{"answer": "Paris"}'
+    assert trial_data["actual"] == '{"answer": "wrong"}'
+    assert trial_data["outcomes"][0]["feedback"] == "expected 'Paris', got 'wrong'"
+
+    # HTML inspect output
+    html_out = project / "eval/results/failures.html"
+    assert _run_main(
+        monkeypatch,
+        "inspect",
+        "eval/results/trials.json",
+        "--failures",
+        "--eval-set",
+        "eval/tasks.json",
+        "--html",
+        str(html_out),
+    ) == 0
+    capsys.readouterr()
+    assert html_out.exists()
+    html_text = html_out.read_text()
+    assert "expected &#x27;Paris&#x27;, got &#x27;wrong&#x27;" in html_text or "expected 'Paris', got 'wrong'" in html_text
+    assert "{&quot;answer&quot;: &quot;Paris&quot;}" in html_text or '{"answer": "Paris"}' in html_text
 
     # ... and reverting the change passes again.
     adapter.write_text(trusted)
