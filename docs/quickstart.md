@@ -19,7 +19,7 @@ uv pip install tracelens
 # Or for development
 git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
-uv pip install -e ".[dev]"
+uv sync --extra dev --extra http
 ```
 
 ## 2. Define Tasks

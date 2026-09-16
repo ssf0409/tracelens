@@ -52,7 +52,7 @@ For the repository examples and local development tools:
 ```bash
 git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
-uv pip install -e ".[dev]"
+uv sync --extra dev --extra http
 ```
 
 See [Installation](https://ssf0409.github.io/tracelens/installation/) for extras

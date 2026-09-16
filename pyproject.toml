@@ -100,6 +100,9 @@ local_scheme = "no-local-version"
 [tool.hatch.build.targets.sdist]
 exclude = [
     "/CLAUDE.md",
+    "/Dockerfile",
+    "/docker-compose.yml",
+    "/.dockerignore",
 ]
 
 [tool.ruff]
