@@ -92,13 +92,14 @@ def per_trial_results(trials: Sequence[Trial]) -> list[dict[str, float]]:
     for trial in trials:
         if not trial.is_gradable:
             continue
-        results.append({
+        entry: dict[str, float] = {
             "pass_rate": 1.0 if trial.passed else 0.0,
-            "mean_score": (
-                trial.aggregate_score if trial.aggregate_score is not None else 0.0
-            ),
-        })
+        }
+        if trial.aggregate_score is not None:
+            entry["mean_score"] = float(trial.aggregate_score)
+        results.append(entry)
     return results
+
 
 
 def spec_from_trials(

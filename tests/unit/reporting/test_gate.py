@@ -233,6 +233,9 @@ class TestHelpers:
         ]
         results = per_trial_results(trials)
         assert [r["pass_rate"] for r in results] == [1.0, 0.0]  # pass, timeout-as-failure
+        # Gradable trial with outcome has mean_score; timeout (score-less) excludes mean_score
+        assert [r.get("mean_score") for r in results] == [1.0, None]
+
 
     def test_spec_from_trials_prefers_latest_and_reports_mix(self):
         old = _trial("t", True, run_index=0, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)))
@@ -352,3 +355,29 @@ class TestTaskContentIdentity:
         )
         assert GateResult.from_dict(json.loads(json.dumps(gate.to_dict()))) == gate
         assert GateResult.from_dict({"status": "passed"}).skipped_task_content_changed == 0
+
+    def test_gate_mean_score_excludes_scoreless_trials_without_imputing_zero(self, tmp_path):
+        # Baseline expects mean_score of 1.0 (with 0.05 std)
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("mean_score", 1.0, std=0.05, sample_size=10)
+        manager.set_baseline(baseline)
+        manager.save()
+
+
+
+        # 3 passed trials with score=1.0, 1 timeout trial (aggregate_score is None)
+        trials = [
+            _trial("t1", True, run_index=0),
+            _trial("t1", True, run_index=1),
+            _trial("t1", True, run_index=2),
+            _trial("t1", status=TrialStatus.TIMEOUT, run_index=3),
+        ]
+        # The timeout trial is gradable (contributes to pass_rate=0.75),
+        # but has no aggregate_score. It must not impute 0.0 to mean_score,
+        # so current mean_score should remain 1.0 (no regression).
+        gate = evaluate_gate(_batch(*trials), manager)
+        assert gate.status is GateStatus.PASSED
+        assert len(gate.tasks) == 1
+        assert gate.tasks[0].has_regression is False
+
