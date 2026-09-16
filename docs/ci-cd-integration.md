@@ -9,10 +9,7 @@ project supplies the adapter, graders, task data, baselines, and rollout policy.
 Add TraceLens to the project being evaluated:
 
 ```toml
-[project]
-dependencies = [
-    "tracelens>=0.3.0",
-]
+--8<-- "docs/snippets/dependency_pin.toml"
 ```
 
 If your project uses `uv`, CI installs it from the lockfile so the evaluated

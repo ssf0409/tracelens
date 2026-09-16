@@ -8,6 +8,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Align onboarding path, version constraints, and baseline locations.**
+  Replaced stale `tracelens>=0.3.0` version pins with a shared `>=0.5.0` snippet
+  across installation, CI/CD, releasing, and testing docs. Standardized repository
+  layout in `docs/installation.md` to match `tracelens init`, unified baseline paths
+  to `eval/baselines.json`, refined reproducibility wording to emphasize declared
+  attribution rather than causal identity, and provided a PyPI-first quickstart in
+  the README demo. (#135)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

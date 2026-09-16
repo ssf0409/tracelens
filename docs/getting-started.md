@@ -181,13 +181,13 @@ everything else:
    `transcript.final_output`. It doesn't care which tools the agent
    called or in what order — that's an implementation detail.
 2. **Reproducibility is a first-class config.** Every run carries a
-   `DecisionSpec` (model, prompt, tools, infra). Two runs with the
-   same fingerprint should produce statistically similar results;
-   when they don't, regression detection knows whether to blame the
-   agent or the infrastructure.
+   `DecisionSpec` (model, prompt, tools, infra). Stamping baselines
+   with a fingerprint provides declared evidence for attributing
+   an outcome change between runs.
 
 Everything else — async vs sync, single agent vs HTTP, code grader vs
 LLM judge — is a knob you can turn without rewriting your eval set.
 
-That's it. Run `python examples/hello_world.py`, render the JSON report,
-then open the sample Markdown report.
+That's it. From a repository clone, run `python examples/hello_world.py`,
+render the JSON report, then open the sample Markdown report. In your own project,
+run `tracelens init .` to generate a starter suite.

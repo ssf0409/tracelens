@@ -60,6 +60,17 @@ See [Installation](https://ssf0409.github.io/tracelens/installation/) for extras
 
 ## 5-Minute Demo
 
+From a PyPI install, scaffold and run a starter evaluation in your project:
+
+```bash
+tracelens init .
+tracelens run --config tracelens.yaml
+```
+
+`tracelens init` writes user-owned starter files under `eval/`, a `tracelens.yaml` holding the run settings, and a GitHub Actions workflow that runs the same command on every pull request. Flags on the command line override the file. It refuses to overwrite generated files unless you pass `--force`.
+
+Alternatively, from a repository clone, you can run the checked-in hello-world example:
+
 ```bash
 python examples/hello_world.py
 tracelens report --results examples/reports/hello_world_report.json --format markdown
@@ -77,15 +88,6 @@ sample md  : examples/reports/hello_world_report.md
 ```
 
 The checked-in [sample report](examples/reports/hello_world_report.md) shows the concrete pieces a real eval needs: tasks, trials, pass@k, pass^k, graders, baseline comparison, regression result, and CI summary.
-
-To start inside your own project:
-
-```bash
-tracelens init .
-tracelens run --config tracelens.yaml
-```
-
-`tracelens init` writes user-owned starter files under `eval/`, a `tracelens.yaml` holding the run settings, and a GitHub Actions workflow that runs the same command on every pull request. Flags on the command line override the file. It refuses to overwrite generated files unless you pass `--force`.
 
 ## What an eval looks like
 
