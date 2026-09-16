@@ -8,6 +8,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **HTTP adapter network failures classified as infra errors.**
+  `HTTPAPIAdapter._request_with_retry` now wraps exhausted `httpx.TransportError`
+  network exceptions (connection errors, transport timeouts, pool timeouts) in
+  `InfraError` rather than raising raw httpx exceptions that fail to subclass
+  `ConnectionError`. Downstream runs classify outages as `INFRA_ERROR` instead
+  of `FAILED`, triggering `--max-infra-retries` and preventing false-alarm 0%
+  pass rate regressions while HTTP 4xx/5xx responses remain agent failures (#122).
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

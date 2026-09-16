@@ -8,8 +8,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from tracelens.core.task import Task
+from tracelens.core.task import EvalSet, Task
 from tracelens.core.transcript import StepType
+from tracelens.core.trial import InfraError, TrialStatus
 from tracelens.execution.http_adapter import (
     AuthConfig,
     AuthScheme,
@@ -17,6 +18,7 @@ from tracelens.execution.http_adapter import (
     HTTPAPIAdapter,
     RetryConfig,
 )
+from tracelens.execution.runner import EvaluationRunner, RunnerConfig
 
 
 @pytest.fixture
@@ -297,4 +299,75 @@ else:
 
         assert call_count == 3
         assert transcript.final_output == {"result": "recovered"}
+        await adapter.close()
+
+    async def test_exhausted_network_failure_raises_infra_error(
+        self, config: HTTPAdapterConfig, task: Task
+    ):
+        """TransportError wraps in InfraError after retries are exhausted."""
+        adapter = HTTPAPIAdapter(config)
+        with patch.object(httpx.AsyncClient, "request", side_effect=httpx.ConnectError("closed port")):
+            with pytest.raises(InfraError, match="HTTP request failed"):
+                await adapter.run(task)
+        await adapter.close()
+
+    async def test_http_status_error_500_raises_http_status_error(
+        self, config: HTTPAdapterConfig, task: Task
+    ):
+        """HTTP 500 error remains HTTPStatusError (not wrapped in InfraError)."""
+        adapter = HTTPAPIAdapter(config)
+        err_response = _mock_response(status_code=500, json_data={"error": "server error"})
+        with patch.object(httpx.AsyncClient, "request", return_value=err_response):
+            with pytest.raises(httpx.HTTPStatusError):
+                await adapter.run(task)
+        await adapter.close()
+
+    async def test_runner_classifies_network_failure_as_infra_error_and_retries(
+        self, task: Task
+    ):
+        """EvaluationRunner with HTTPAPIAdapter marks closed port as INFRA_ERROR and retries."""
+        config = HTTPAdapterConfig(
+            base_url="http://127.0.0.1:9",
+            endpoint="/run",
+            retry=RetryConfig(max_retries=1, base_delay=0.001, max_delay=0.01),
+        )
+        adapter = HTTPAPIAdapter(config)
+        eval_set = EvalSet(name="test", tasks=[task])
+        runner = EvaluationRunner(
+            adapter=adapter,
+            graders=[],
+            config=RunnerConfig(num_runs=1, max_infra_retries=1, infra_retry_backoff_seconds=0.001),
+        )
+        batch = await runner.run(eval_set)
+        assert len(batch.trials) == 1
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.INFRA_ERROR
+        assert trial.attempts == 2
+        assert batch.infra_error_count == 1
+        assert batch.gradable_count == 0
+        await adapter.close()
+
+    async def test_runner_classifies_500_response_as_failed(
+        self, task: Task
+    ):
+        """EvaluationRunner with HTTPAPIAdapter marks 500 response as FAILED."""
+        config = HTTPAdapterConfig(
+            base_url="https://api.example.com",
+            endpoint="/run",
+            retry=RetryConfig(max_retries=1, base_delay=0.001, max_delay=0.01),
+        )
+        adapter = HTTPAPIAdapter(config)
+        eval_set = EvalSet(name="test", tasks=[task])
+        err_response = _mock_response(status_code=500, json_data={"error": "agent failure"})
+        with patch.object(httpx.AsyncClient, "request", return_value=err_response):
+            runner = EvaluationRunner(
+                adapter=adapter,
+                graders=[],
+                config=RunnerConfig(num_runs=1),
+            )
+            batch = await runner.run(eval_set)
+        assert len(batch.trials) == 1
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.FAILED
+        assert batch.infra_error_count == 0
         await adapter.close()

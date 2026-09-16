@@ -237,14 +237,14 @@ A spike in either means the eval broke, not the agent — watch them.
 
 What counts as an infra error is set by `RunnerConfig.infra_exception_types`
 (default `DEFAULT_INFRA_EXCEPTION_TYPES` — `InfraError`, `MemoryError`,
-`ConnectionError` — both importable from `tracelens`; the CLI flag is
-`--infra-exceptions`). httpx transport errors are not `ConnectionError`
-subclasses, so for an HTTP agent either extend the set (e.g.
-`infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (httpx.TransportError,)`)
-or raise `InfraError` from a subclassed adapter when a failure is
-environmental. A `TimeoutError` raised inside the adapter also classifies
-through this set (`FAILED` by default); only the runner's own budget timeout
-becomes `TIMEOUT`.
+`ConnectionError` — importable from `tracelens`; the CLI flag is
+`--infra-exceptions`). `HTTPAPIAdapter` automatically wraps exhausted
+`httpx.TransportError` network failures into `InfraError` (while HTTP status
+codes like 4xx/5xx remain agent failures). For custom HTTP adapters, either
+extend the set (e.g. `infra_exception_types=DEFAULT_INFRA_EXCEPTION_TYPES + (httpx.TransportError,)`)
+or raise `InfraError` explicitly when a failure is environmental. A
+`TimeoutError` raised inside the adapter also classifies through this set
+(`FAILED` by default); only the runner's own budget timeout becomes `TIMEOUT`.
 
 To render reports, hand the batch to `ReportGenerator`:
 

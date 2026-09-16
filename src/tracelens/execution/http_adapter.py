@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
+from tracelens.core.trial import InfraError
 from tracelens.execution.agent_adapter import AgentAdapter
 
 if TYPE_CHECKING:
@@ -191,8 +192,7 @@ class HTTPAPIAdapter(AgentAdapter):
 
             except httpx.HTTPStatusError:
                 raise
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
-                    httpx.PoolTimeout, httpx.ConnectTimeout) as exc:
+            except httpx.TransportError as exc:
                 last_error = exc
                 transcript.add_step(TranscriptStep(
                     step_type=StepType.ERROR,
@@ -205,9 +205,13 @@ class HTTPAPIAdapter(AgentAdapter):
                     )
                     await asyncio.sleep(delay)
                     continue
-                raise
+                raise InfraError(f"HTTP request failed after {attempt + 1} attempt(s): {exc}") from exc
 
-        raise last_error or RuntimeError("All retry attempts exhausted")
+        if last_error is not None:
+            if isinstance(last_error, httpx.TransportError):
+                raise InfraError(f"HTTP request failed: {last_error}") from last_error
+            raise last_error
+        raise RuntimeError("All retry attempts exhausted")
 
     async def run(self, task: Task) -> Transcript:
         """Invoke the HTTP agent and return a transcript."""
