@@ -8,6 +8,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Runner checkpoint resume covers `num_runs`, regrades grader crashes, and logs to stderr.**
+  Checkpoints now record `num_runs` in their run identity, and resuming against a
+  checkpoint with a mismatched `num_runs` is refused with an actionable `CheckpointError`
+  instead of mixing run counts and corrupting provenance. Checkpoint resume now keeps
+  trials that suffered grader crashes and re-grades them against their preserved
+  transcripts without re-invoking the agent, restoring trials to gradable status when the
+  grader is fixed. On resume, the runner now emits
+  `[tracelens] resumed N completed trial(s), re-running M` to `stderr` while keeping `stdout`
+  reserved for results summaries. (#120)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

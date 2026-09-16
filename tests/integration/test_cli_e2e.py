@@ -194,7 +194,7 @@ def test_baseline_check_passes_without_regression(
 
 
 def test_checkpoint_resume_skips_completed_trials(
-    tasks_file: Path, tmp_path: Path
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     checkpoint = tmp_path / "checkpoint.json"
     argv = (
@@ -207,10 +207,13 @@ def test_checkpoint_resume_skips_completed_trials(
 
     assert _run_cli(*argv) == 0
     assert EchoAdapter.run_count == 2
+    capsys.readouterr()
 
     # Re-run with the same checkpoint: everything already done.
     assert _run_cli(*argv) == 0
     assert EchoAdapter.run_count == 2
+    out, err = capsys.readouterr()
+    assert "[tracelens] resumed 2 completed trial(s), re-running 0" in err
 
 
 def test_corrupt_checkpoint_fails_cleanly(

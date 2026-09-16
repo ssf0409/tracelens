@@ -196,9 +196,11 @@ batch = await EvaluationRunner(adapter, [composite], config).run(eval_set)
 
 `run` is async — call it from `asyncio.run(...)`. For long suites, `RunnerConfig`
 also takes a progress callback and a `checkpoint_path` so a rerun resumes
-(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials but
-re-runs infra-errored ones, and refuses (with `CheckpointError`) a checkpoint
-written by a different eval set, adapter, graders, or `DecisionSpec` —
+(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials,
+re-grades trials that suffered grader crashes using their preserved transcripts
+without re-invoking the agent, re-runs infra-errored trials, and refuses (with
+`CheckpointError`) a checkpoint written by a different eval set, adapter,
+graders, `DecisionSpec`, or `num_runs` —
 identity is class-path based, so pass a `DecisionSpec` to distinguish two
 configs of the same adapter class, and use stable explicit `task_id`s
 (auto-generated ids change every run and can never resume). On flaky

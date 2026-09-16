@@ -73,6 +73,7 @@ def test_run_records_provenance_and_checkpoint_identity_agrees(tmp_path: Path) -
         "adapter": prov.candidate.adapter.class_path,
         "graders": [g.class_path for g in prov.measurement.graders],
         "decision_spec_fingerprint": spec.fingerprint,
+        "num_runs": 2,
     }
 
 

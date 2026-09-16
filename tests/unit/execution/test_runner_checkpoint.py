@@ -418,3 +418,99 @@ def test_resume_reruns_skipped_trials(tmp_path: Path) -> None:
 
     assert adapter.run_calls == ["t1"]  # re-ran, not skipped
     assert all(t.status != TrialStatus.SKIPPED for t in batch.trials)
+
+
+def test_mismatched_num_runs_refuses_resume(tmp_path: Path) -> None:
+    """Resuming with a different num_runs corrupts trial multiplicity; refuse."""
+    ckpt = tmp_path / "c.json"
+    eval_set = EvalSet(name="s", tasks=[_task("t1")])
+
+    runner1 = EvaluationRunner(
+        _CountingAdapter(),
+        [_GraderA()],
+        RunnerConfig(checkpoint_path=str(ckpt), num_runs=1),
+    )
+    asyncio.run(runner1.run(eval_set))
+
+    runner2 = EvaluationRunner(
+        _CountingAdapter(),
+        [_GraderA()],
+        RunnerConfig(checkpoint_path=str(ckpt), num_runs=2),
+    )
+    with pytest.raises(CheckpointError, match="num_runs"):
+        asyncio.run(runner2.run(eval_set))
+
+
+class _FlakyGrader(CodeGrader):
+    def __init__(self, should_crash: bool = True) -> None:
+        super().__init__("flaky_grader")
+        self.should_crash = should_crash
+        self.grade_calls: list[str] = []
+
+    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
+        self.grade_calls.append(task.task_id)
+        if self.should_crash:
+            raise RuntimeError("grader crash")
+        return {"flaky": 1.0}
+
+    def determine_pass(
+        self, metrics: dict[str, float], task: Task
+    ) -> tuple[bool, float]:
+        return True, 1.0
+
+
+def test_resume_regrades_grader_crashed_trials_without_reinvoking_agent(
+    tmp_path: Path,
+) -> None:
+    """Grader-crashed trials with transcripts are re-graded without re-running agent."""
+    ckpt = tmp_path / "c.json"
+    eval_set = EvalSet(name="s", tasks=[_task("t1"), _task("t2"), _task("t3")])
+
+    adapter = _CountingAdapter()
+    flaky = _FlakyGrader(should_crash=True)
+    runner1 = EvaluationRunner(
+        adapter,
+        [flaky],
+        RunnerConfig(checkpoint_path=str(ckpt), num_runs=1),
+    )
+    batch1 = asyncio.run(runner1.run(eval_set))
+    assert adapter.run_calls == ["t1", "t2", "t3"]
+    assert batch1.total_count == 3
+    assert batch1.grader_error_count == 3
+    assert batch1.gradable_count == 0
+
+    # Resume with fixed grader: agent is NOT called, grader IS called, gradable=3
+    adapter2 = _CountingAdapter()
+    fixed = _FlakyGrader(should_crash=False)
+    runner2 = EvaluationRunner(
+        adapter2,
+        [fixed],
+        RunnerConfig(checkpoint_path=str(ckpt), num_runs=1),
+    )
+    batch2 = asyncio.run(runner2.run(eval_set))
+    assert adapter2.run_calls == []  # agent was NOT re-invoked
+    assert fixed.grade_calls == ["t1", "t2", "t3"]
+    assert batch2.total_count == 3
+    assert batch2.grader_error_count == 0
+    assert batch2.gradable_count == 3
+
+
+def test_resume_prints_to_stderr_and_not_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Resuming prints [tracelens] resumed N completed trial(s), re-running M to stderr and nothing to stdout."""
+    ckpt = tmp_path / "c.json"
+    eval_set = EvalSet(name="s", tasks=[_task("t1"), _task("t2")])
+
+    runner1 = _runner(_CountingAdapter(), ckpt)
+    asyncio.run(runner1.run(eval_set))
+    capsys.readouterr()
+
+    # Second run resumes
+    runner2 = _runner(_CountingAdapter(), ckpt)
+    asyncio.run(runner2.run(eval_set))
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "[tracelens] resumed 2 completed trial(s), re-running 0\n" in err
+
+

@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -177,8 +178,9 @@ class EvaluationRunner:
             # alone can't tell two SimpleAdapter/HTTPAPIAdapter configs
             # apart, so include the fingerprint whenever a spec is given.
             "decision_spec_fingerprint": provenance.candidate.decision_spec_fingerprint,
+            "num_runs": self.config.num_runs,
         }
-        completed_keys = self._load_resume_state(batch)
+        completed_keys = await self._load_resume_state(batch, eval_set)
         semaphore = asyncio.Semaphore(self.config.max_concurrency)
 
         # Build work items: (task, run_index), skipping trials already
@@ -213,7 +215,9 @@ class EvaluationRunner:
         self._save_checkpoint(batch)
         return batch
 
-    def _load_resume_state(self, batch: TrialBatch) -> set[tuple[str, int]]:
+    async def _load_resume_state(
+        self, batch: TrialBatch, eval_set: EvalSet
+    ) -> set[tuple[str, int]]:
         """Load completed trials from an existing checkpoint, if any.
 
         Returns the (task_id, run_index) keys to skip. Incomplete trials
@@ -280,6 +284,7 @@ class EvaluationRunner:
             self._validate_checkpoint_identity(identity, path)
 
         infra_reruns = 0
+        regrade_trials: list[Trial] = []
         for trial in loaded.trials:
             if not trial.is_complete:
                 continue
@@ -288,8 +293,38 @@ class EvaluationRunner:
             if trial.status in (TrialStatus.INFRA_ERROR, TrialStatus.SKIPPED):
                 infra_reruns += 1
                 continue
+            # If the trial suffered a grader error but has a preserved
+            # transcript, keep the execution result and re-grade it
+            # without re-invoking the agent.
+            if trial.has_grader_error:
+                if trial.transcript is not None:
+                    regrade_trials.append(trial)
+                    continue
+                else:
+                    infra_reruns += 1
+                    continue
             batch.add_trial(trial)
             completed.add((trial.task_id, trial.run_index))
+
+        # Re-grade trials that suffered a grader error in a previous run.
+        if regrade_trials:
+            task_map = {task.task_id: task for task in eval_set.tasks}
+            for trial in regrade_trials:
+                task = task_map.get(trial.task_id)
+                if task is None:
+                    # Should not happen if eval_set_hash matched
+                    infra_reruns += 1
+                    continue
+                # Strip previous grader-error outcomes before re-evaluating
+                trial.outcomes = [o for o in trial.outcomes if not o.grader_error]
+                await self._grade_trial(trial, task)
+                batch.add_trial(trial)
+                completed.add((trial.task_id, trial.run_index))
+
+        print(
+            f"[tracelens] resumed {len(completed)} completed trial(s), re-running {infra_reruns}",
+            file=sys.stderr,
+        )
         logger.info(
             "Resumed %d completed trials from checkpoint %s",
             len(completed),
@@ -330,6 +365,10 @@ class EvaluationRunner:
             current["graders"]
         ):
             mismatches.append("graders")
+        if "num_runs" in identity and identity.get("num_runs") != current["num_runs"]:
+            mismatches.append(
+                f"num_runs ({identity.get('num_runs')!r} vs {current['num_runs']!r})"
+            )
         if mismatches:
             raise CheckpointError(
                 f"Checkpoint {path} was written by a different run — "
