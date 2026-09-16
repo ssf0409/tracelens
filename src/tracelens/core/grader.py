@@ -419,6 +419,10 @@ class CompositeGrader(Grader):
 
     Also supports legacy GraderRole (MUST_PASS maps to GATE behavior).
 
+    If no sub-grader has a blocking policy (GATE or MUST_PASS), the composite
+    falls back to requiring all sub-graders to pass, ensuring a composite of
+    default TRACK/WARN graders cannot silently pass when every sub-grader fails.
+
     The score is always a weighted average of all graders regardless of policy.
     """
 
@@ -428,6 +432,8 @@ class CompositeGrader(Grader):
         graders: list[tuple[Grader, float]],  # (grader, weight)
         config: GraderConfig | None = None,
     ):
+        if not graders:
+            raise ValueError(f"CompositeGrader '{grader_id}' requires at least one sub-grader")
         super().__init__(grader_id, config)
         self.graders = graders
         self._normalize_weights()
@@ -493,6 +499,7 @@ class CompositeGrader(Grader):
 
         blocking_results: list[tuple[Grader, Outcome]] = []
         warn_results: list[tuple[Grader, Outcome]] = []
+        all_results: list[tuple[Grader, Outcome]] = []
 
         any_grader_error = False
 
@@ -520,6 +527,8 @@ class CompositeGrader(Grader):
                     grader_error=True,
                 )
 
+            all_results.append((grader, outcome))
+
             # Prefix metrics with grader ID
             for metric, value in outcome.metrics.items():
                 all_metrics[f"{grader.grader_id}.{metric}"] = value
@@ -539,17 +548,33 @@ class CompositeGrader(Grader):
                 warn_results.append((grader, outcome))
 
         # GATE/MUST_PASS failures block
-        all_blocking_passed = all(
-            outcome.passed for _, outcome in blocking_results
-        )
-        failed_blocking = [
-            grader.grader_id
-            for grader, outcome in blocking_results
-            if not outcome.passed
-        ]
-        if failed_blocking:
-            all_metrics["_failed_must_pass"] = len(failed_blocking)
-            feedbacks.insert(0, f"MUST-PASS FAILURE: {', '.join(failed_blocking)}")
+        has_blocking = len(blocking_results) > 0
+        if has_blocking:
+            all_blocking_passed = all(
+                outcome.passed for _, outcome in blocking_results
+            )
+            failed_blocking = [
+                grader.grader_id
+                for grader, outcome in blocking_results
+                if not outcome.passed
+            ]
+            if failed_blocking:
+                all_metrics["_failed_must_pass"] = len(failed_blocking)
+                feedbacks.insert(0, f"MUST-PASS FAILURE: {', '.join(failed_blocking)}")
+            overall_passed = all_blocking_passed
+        else:
+            # Fallback when no sub-grader has a blocking policy (GATE/MUST_PASS):
+            # require all sub-graders to pass so default TRACK/WARN graders cannot
+            # silently pass on failure.
+            all_sub_passed = all(outcome.passed for _, outcome in all_results)
+            failed_sub = [
+                grader.grader_id
+                for grader, outcome in all_results
+                if not outcome.passed
+            ]
+            if failed_sub:
+                feedbacks.insert(0, f"FAILURE (no gate configured, fallback to all): {', '.join(failed_sub)}")
+            overall_passed = all_sub_passed
 
         # WARN failures recorded but don't block
         failed_warn = [
@@ -560,11 +585,9 @@ class CompositeGrader(Grader):
         if failed_warn:
             all_metrics["_failed_warn"] = len(failed_warn)
             feedbacks.insert(
-                1 if failed_blocking else 0,  # After the single blocking-failure line
+                1 if (has_blocking and failed_blocking) or (not has_blocking and failed_sub) else 0,
                 f"WARNING: {', '.join(failed_warn)}",
             )
-
-        overall_passed = all_blocking_passed
 
         return self.create_outcome(
             trial_id=transcript.task_id,

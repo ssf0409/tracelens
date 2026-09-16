@@ -107,6 +107,10 @@ to the score (set via `GraderConfig`'s `EvalPolicy`):
 | Safety / format validation | `GATE` | Any violation fails the trial |
 | Quality / style scoring | `TRACK` (or `WARN`) | Contributes to the weighted score |
 
+If no sub-grader has a `GATE` (or legacy `MUST_PASS`) policy, `CompositeGrader`
+falls back to requiring all sub-graders to pass, ensuring that a composite of
+default `TRACK`/`WARN` graders does not silently pass when all sub-graders fail.
+
 Use `GATE` sparingly — it creates binary signals. See the
 [Grader Library](grader-library.md) for the built-in graders and their default
 policies, and [Evaluating a Real Agent §4](real-agent.md) for the gate-plus-judge

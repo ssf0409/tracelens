@@ -5,6 +5,7 @@ import pytest
 from tracelens.core.grader import (
     CodeGrader,
     CompositeGrader,
+    EvalPolicy,
     GraderConfig,
     GraderRole,
 )
@@ -286,3 +287,55 @@ class TestGraderConfigRole:
         """Test explicit role setting."""
         config = GraderConfig(role=GraderRole.MUST_PASS)
         assert config.role == GraderRole.MUST_PASS
+
+
+class TestCompositeGraderValidationAndFallback:
+    """Tests for CompositeGrader construction validation and non-gated fallback."""
+
+    def test_empty_graders_raises_value_error(self):
+        with pytest.raises(ValueError, match="requires at least one sub-grader"):
+            CompositeGrader("empty", graders=[])
+
+    @pytest.mark.asyncio
+    async def test_composite_without_blocking_graders_fails_if_any_sub_grader_fails(
+        self, sample_task, sample_transcript
+    ):
+        """When no sub-grader is GATE or MUST_PASS, all sub-graders must pass."""
+        g1 = SimpleScoreGrader("a", score=0.0, passed=False, config=GraderConfig(policy=EvalPolicy.TRACK))
+        g2 = SimpleScoreGrader("b", score=0.0, passed=False, config=GraderConfig(policy=EvalPolicy.TRACK))
+
+        composite = CompositeGrader("comp", graders=[(g1, 1.0), (g2, 1.0)])
+        outcome = await composite.grade(sample_transcript, sample_task)
+
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert "FAILURE (no gate configured, fallback to all): a, b" in outcome.feedback
+
+    @pytest.mark.asyncio
+    async def test_composite_without_blocking_graders_passes_if_all_pass(
+        self, sample_task, sample_transcript
+    ):
+        """When no sub-grader is GATE/MUST_PASS, passes if all sub-graders pass."""
+        g1 = SimpleScoreGrader("a", score=1.0, passed=True, config=GraderConfig(policy=EvalPolicy.TRACK))
+        g2 = SimpleScoreGrader("b", score=1.0, passed=True, config=GraderConfig(policy=EvalPolicy.TRACK))
+
+        composite = CompositeGrader("comp", graders=[(g1, 1.0), (g2, 1.0)])
+        outcome = await composite.grade(sample_transcript, sample_task)
+
+        assert outcome.passed is True
+        assert outcome.score == 1.0
+
+    @pytest.mark.asyncio
+    async def test_composite_with_warn_only_fails_if_warn_fails(
+        self, sample_task, sample_transcript
+    ):
+        """When WARN graders fail and no GATE is present, fallback causes failure."""
+        g1 = SimpleScoreGrader("w", score=0.0, passed=False, config=GraderConfig(policy=EvalPolicy.WARN))
+        g2 = SimpleScoreGrader("t", score=1.0, passed=True, config=GraderConfig(policy=EvalPolicy.TRACK))
+
+        composite = CompositeGrader("comp", graders=[(g1, 1.0), (g2, 1.0)])
+        outcome = await composite.grade(sample_transcript, sample_task)
+
+        assert outcome.passed is False
+        assert "FAILURE (no gate configured, fallback to all): w" in outcome.feedback
+        assert "WARNING: w" in outcome.feedback

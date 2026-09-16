@@ -8,6 +8,10 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`CompositeGrader` fallback when no sub-grader is a gate.** When a composite grader contains no sub-graders configured with `GATE` or `MUST_PASS` policy, `grade()` now falls back to requiring all sub-graders to pass rather than vacously passing, and raises a `ValueError` if constructed with an empty `graders` list. (#125)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
