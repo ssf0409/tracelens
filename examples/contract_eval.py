@@ -76,8 +76,16 @@ async def main() -> None:
         Task(name="learning plan", input_data={"goal": "Learn Rust in 30 days"}),
     ])
 
+    def extract_usage(result: dict) -> tuple[int, int]:
+        # Realistic token usage estimation for demonstration
+        tokens_in = len(result.get("result", "").split()) * 2
+        tokens_out = len(result.get("disclaimer", "").split()) * 2
+        return (tokens_in, tokens_out)
+
     batch = await EvaluationRunner(
-        SimpleAdapter(planner_agent), [composite], RunnerConfig(num_runs=2),
+        SimpleAdapter(planner_agent, usage_fn=extract_usage),
+        [composite],
+        RunnerConfig(num_runs=2),
     ).run(eval_set)
 
     gen = ReportGenerator()

@@ -8,6 +8,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Budget graders fail on absent evidence.** `LatencyGrader` and `TokenBudgetGrader`
+  previously scored 1.0 (pass) when timing or token usage was absent from transcripts.
+  They now mark `evidence_present=0.0`, score 0.0, and fail with informative feedback
+  when required timing or token evidence was not recorded by the adapter. `SimpleAdapter`
+  now supports an optional `usage_fn` to extract token usage, and `AgentAdapter` provides
+  `record_llm_call` and `record_tool_call` helpers. (#124)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

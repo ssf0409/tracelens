@@ -217,6 +217,14 @@ class Transcript(BaseModel):
         return sum(s.tokens_out or 0 for s in self.steps)
 
     @property
+    def has_token_data(self) -> bool:
+        """Whether token usage was recorded on any step or streaming event."""
+        return (
+            any(s.tokens_in is not None or s.tokens_out is not None for s in self.steps)
+            or any(e.token_count is not None for e in self.streaming_events)
+        )
+
+    @property
     def has_errors(self) -> bool:
         """Check if any errors occurred during execution."""
         return len(self.errors) > 0 or any(s.is_error for s in self.steps)
