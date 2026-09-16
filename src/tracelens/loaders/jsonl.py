@@ -27,6 +27,7 @@ class JSONLTaskLoader(TaskLoader):
 
     def load(self, source: str | Path) -> list[Task]:
         tasks: list[Task] = []
+        seen: set[str] = set()
         for path in source_files(source, ".jsonl"):
             with open(path, encoding="utf-8") as file:
                 for line_number, line in enumerate(file, start=1):
@@ -42,15 +43,17 @@ class JSONLTaskLoader(TaskLoader):
                             f"got {type(record).__name__}"
                         )
                     try:
-                        tasks.append(
-                            map_record(
-                                record,
-                                input_field=self.input_field,
-                                metadata_fields=self.metadata_fields,
-                            )
+                        task = map_record(
+                            record,
+                            input_field=self.input_field,
+                            metadata_fields=self.metadata_fields,
                         )
                     except ValueError as error:
                         raise ValueError(f"{path}:{line_number}: {error}") from error
+                    if task.task_id in seen:
+                        raise ValueError(f"{path}:{line_number}: duplicate task id: {task.task_id!r}")
+                    seen.add(task.task_id)
+                    tasks.append(task)
         return tasks
 
     def save(self, tasks: list[Task], destination: str | Path) -> None:

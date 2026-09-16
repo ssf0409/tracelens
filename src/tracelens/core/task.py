@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tracelens._paths import prepare_destination_path
 from tracelens.core._time import utc_now
@@ -123,17 +123,30 @@ class JSONTaskLoader(TaskLoader):
 
             # Handle both formats: {"tasks": [...]} or single task
             if isinstance(data, dict) and "tasks" in data:
-                return [Task(**t) for t in data["tasks"]]
+                tasks = [Task(**t) for t in data["tasks"]]
             elif isinstance(data, dict):
-                return [Task(**data)]
+                tasks = [Task(**data)]
             elif isinstance(data, list):
-                return [Task(**t) for t in data]
-            raise ValueError(f"Invalid JSON format in {path}")
+                tasks = [Task(**t) for t in data]
+            else:
+                raise ValueError(f"Invalid JSON format in {path}")
+
+            seen: set[str] = set()
+            for task in tasks:
+                if task.task_id in seen:
+                    raise ValueError(f"{path}: duplicate task id: {task.task_id!r}")
+                seen.add(task.task_id)
+            return tasks
 
         elif path.is_dir():
             tasks = []
+            seen = set()
             for file in sorted(path.glob("**/*.json")):
-                tasks.extend(self.load(file))
+                for task in self.load(file):
+                    if task.task_id in seen:
+                        raise ValueError(f"{file}: duplicate task id: {task.task_id!r}")
+                    seen.add(task.task_id)
+                    tasks.append(task)
             return tasks
 
         raise ValueError(f"Invalid source: {source}")
@@ -182,6 +195,16 @@ class EvalSet(BaseModel):
 
     # Tasks in this set
     tasks: list[Task] = Field(default_factory=list)
+
+    @field_validator("tasks")
+    @classmethod
+    def _validate_unique_tasks(cls, tasks: list[Task]) -> list[Task]:
+        seen: set[str] = set()
+        for task in tasks:
+            if task.task_id in seen:
+                raise ValueError(f"duplicate task id: {task.task_id!r}")
+            seen.add(task.task_id)
+        return tasks
 
     # Default graders to use
     default_grader_ids: list[str] = Field(default_factory=list)
@@ -232,6 +255,8 @@ class EvalSet(BaseModel):
 
     def add_task(self, task: Task) -> None:
         """Add a task to the set."""
+        if any(t.task_id == task.task_id for t in self.tasks):
+            raise ValueError(f"duplicate task id: {task.task_id!r}")
         self.tasks.append(task)
         self.metadata.updated_at = utc_now()
 

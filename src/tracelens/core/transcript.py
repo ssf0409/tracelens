@@ -10,17 +10,44 @@ A Transcript is a complete record of an agent's execution, including:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tracelens.core._time import utc_now
 
 if TYPE_CHECKING:
     from tracelens.core.decision_spec import DecisionSpec
+
+
+def coerce_json_safe(val: Any) -> Any:
+    """Ensure arbitrary adapter output values are JSON-serialisable.
+
+    When an adapter returns raw bytes or arbitrary Python objects, saving
+    checkpoints and trials artifacts must not fail with UnicodeDecodeError or
+    PydanticSerializationError. Values that cannot be encoded directly are safely
+    represented as strings so results, trials, and checkpoints agree.
+    """
+    if val is None or isinstance(val, (bool, int, float, str)):
+        return val
+    if isinstance(val, bytes):
+        try:
+            return val.decode("utf-8")
+        except UnicodeDecodeError:
+            return repr(val)
+    if isinstance(val, dict):
+        return {str(k): coerce_json_safe(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple, set)):
+        return [coerce_json_safe(v) for v in val]
+    try:
+        json.dumps(val)
+        return val
+    except (TypeError, OverflowError, ValueError):
+        return repr(val)
 
 
 class StepType(StrEnum):
@@ -75,6 +102,11 @@ class ToolCall(BaseModel):
     error: str | None = None
     duration_ms: float | None = None
 
+    @field_validator("arguments", "result", mode="before")
+    @classmethod
+    def _validate_tool_call_json_safe(cls, v: Any) -> Any:
+        return coerce_json_safe(v)
+
 
 class TranscriptStep(BaseModel):
     """A single step in agent execution.
@@ -89,6 +121,12 @@ class TranscriptStep(BaseModel):
 
     # Content depends on step type
     content: Any = None
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _validate_content_json_safe(cls, v: Any) -> Any:
+        return coerce_json_safe(v)
+
     tool_call: ToolCall | None = None
 
     # LLM-specific fields
@@ -133,6 +171,16 @@ class Transcript(BaseModel):
     # Summary outputs
     final_output: Any = None
     intermediate_outputs: list[Any] = Field(default_factory=list)
+
+    @field_validator("final_output", mode="before")
+    @classmethod
+    def _validate_final_output(cls, v: Any) -> Any:
+        return coerce_json_safe(v)
+
+    @field_validator("intermediate_outputs", mode="before")
+    @classmethod
+    def _validate_intermediate_outputs(cls, v: Any) -> Any:
+        return coerce_json_safe(v)
 
     # Aggregated tool calls for easy access
     tool_calls: list[ToolCall] = Field(default_factory=list)

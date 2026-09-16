@@ -8,6 +8,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Preflight validation and robust serialization prevent post-run loss.**
+  Duplicate task IDs across tasks or files are caught and rejected up front
+  with exit 2 naming the duplicate ID before any agent runs. Non-JSON-serialisable
+  adapter outputs (raw bytes or arbitrary Python objects) are safely coerced at
+  record time so checkpoints and `--save-trials` artifacts never fail with
+  `UnicodeDecodeError` or `PydanticSerializationError` and inspect cleanly.
+  Malformed baselines files and unwritable checkpoint paths fail immediately
+  during CLI preflight with exit 2, and post-run artifact writing isolates each
+  file so successful artifacts are preserved when another write fails. (#119)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

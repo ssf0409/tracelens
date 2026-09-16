@@ -115,6 +115,12 @@ instance takes it too (`adapter.provenance_version = "agent-2.3.0"`). It is
 attribution evidence, not proof that the code is identical: see
 [Run provenance](reproducibility.md#run-provenance).
 
+**JSON Serialisability.** `transcript.final_output`, `intermediate_outputs`, and step
+content should be JSON-serialisable. If an adapter returns raw bytes or arbitrary Python
+objects, TraceLens safely coerces them at record time (e.g. decoding valid UTF-8 strings
+or preserving a readable string representation) so saving checkpoints and `--save-trials`
+never fails and artifacts remain safely inspectable via `tracelens inspect`.
+
 → A custom HTTP adapter end to end: [Evaluating a Real Agent](real-agent.md).
 
 ---

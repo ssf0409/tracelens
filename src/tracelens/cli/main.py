@@ -11,6 +11,8 @@ import asyncio
 import json
 import logging
 import sys
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -459,7 +461,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 2
         try:
             baseline_manager = BaselineManager(args.baselines_file)
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
             print(
                 f"Error: could not load baselines file "
                 f"{args.baselines_file}: {exc}",
@@ -532,6 +534,25 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             return 2
 
+    # Validate --checkpoint path before running (usage error -> exit 2)
+    if args.checkpoint:
+        ckpt_path = Path(args.checkpoint)
+        try:
+            if ckpt_path.is_dir():
+                return usage_error(
+                    f"checkpoint path is a directory, expected a file path: {args.checkpoint}"
+                )
+            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+            test_probe = ckpt_path.parent / f".tracelens_ckpt_probe_{uuid.uuid4().hex}"
+            test_probe.touch()
+            test_probe.unlink()
+        except OSError as exc:
+            return usage_error(
+                f"could not write to checkpoint path {args.checkpoint}: {exc}",
+                exc=exc,
+                debug=debug,
+            )
+
     # Load eval set (usage error -> exit 2, before any agent call)
     try:
         tasks = load_tasks(
@@ -558,7 +579,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             + ", ".join(task.task_id for task in tasks),
             file=sys.stderr,
         )
-    eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
+    try:
+        eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
+    except (ValueError, ValidationError) as exc:
+        return usage_error(str(exc), exc=exc, debug=debug)
 
     # Load adapter and graders (usage error -> exit 2, before any agent call)
     import_hint = (
@@ -638,27 +662,36 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Write outputs (always, even when the gate blocks: the artifacts are
     # the evidence). A write failure is a clear error, never a traceback.
+    # Individual files are isolated so that if one fails, earlier written files
+    # are preserved and surfaced.
     written: list[tuple[str, str]] = []
-    try:
-        if args.output:
-            _write_output(args.output, json.dumps(report.to_dict(), indent=2, default=str))
-            written.append(("results", args.output))
-        if args.report:
-            _write_output(args.report, gen.render_markdown(report))
-            written.append(("report", args.report))
-        if args.html_report:
-            _write_output(args.html_report, gen.render_html(report))
-            written.append(("html report", args.html_report))
-        if args.save_trials:
-            _write_output(args.save_trials, json.dumps(batch.to_dict(), indent=2))
-            written.append(("trials", args.save_trials))
-    except OSError as exc:
-        return usage_error(f"could not write output file: {exc}", exc=exc, debug=debug)
+    write_errors: list[str] = []
+
+    outputs_to_write: list[tuple[str, str, Callable[[], str]]] = []
+    if args.output:
+        outputs_to_write.append(("results", args.output, lambda: json.dumps(report.to_dict(), indent=2, default=str)))
+    if args.report:
+        outputs_to_write.append(("report", args.report, lambda: gen.render_markdown(report)))
+    if args.html_report:
+        outputs_to_write.append(("html report", args.html_report, lambda: gen.render_html(report)))
+    if args.save_trials:
+        outputs_to_write.append(("trials", args.save_trials, lambda: json.dumps(batch.to_dict(), indent=2)))
+
+    for label, path, producer in outputs_to_write:
+        try:
+            _write_output(path, producer())
+            written.append((label, path))
+        except OSError as exc:
+            write_errors.append(f"could not write {label} to {path}: {exc}")
+
     # Say where the artifacts went (stderr: stdout stays the summary only).
     for label, path in written:
         print(f"[tracelens] wrote {label}: {path}", file=sys.stderr)
     if args.checkpoint:
         print(f"[tracelens] checkpoint: {args.checkpoint}", file=sys.stderr)
+
+    if write_errors:
+        return usage_error(f"could not write output file: {'; '.join(write_errors)}", debug=debug)
 
     # CI summary to stdout, including the gate lines when a gate ran
     print(gen.render_ci_summary(report))

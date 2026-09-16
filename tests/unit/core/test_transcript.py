@@ -190,3 +190,29 @@ class TestTranscript:
         assert summary["llm_calls"] == 1
         assert summary["tool_calls"] == 1
         assert summary["has_errors"] is False
+
+    def test_transcript_coerces_non_serializable_outputs(self):
+        """Bytes and non-JSON-serialisable objects are coerced safely."""
+        import json
+
+        raw_bytes = b"\x80\x01\xff"
+        obj = object()
+        step = TranscriptStep(step_type=StepType.AGENT_OUTPUT, content=raw_bytes)
+        tc = ToolCall(tool_name="tool1", arguments={"bad": b"\xfe"}, result=obj)
+        transcript = Transcript(
+            task_id="t1",
+            final_output=raw_bytes,
+            intermediate_outputs=[obj, b"valid utf-8"],
+            steps=[step],
+            tool_calls=[tc],
+        )
+
+        assert transcript.final_output == repr(raw_bytes)
+        assert transcript.intermediate_outputs[0] == repr(obj)
+        assert transcript.intermediate_outputs[1] == "valid utf-8"
+        assert transcript.steps[0].content == repr(raw_bytes)
+        assert transcript.tool_calls[0].arguments["bad"] == repr(b"\xfe")
+        assert transcript.tool_calls[0].result == repr(obj)
+
+        data = transcript.to_dict()
+        assert json.dumps(data)

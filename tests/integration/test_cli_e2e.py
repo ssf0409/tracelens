@@ -1605,3 +1605,140 @@ def test_report_format_ci_reprints_the_run_summary(
     assert "Baseline check:" in gated_stdout and "REGRESSION DETECTED" in gated_stdout
     assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
     assert capsys.readouterr().out == gated_stdout
+
+
+# --- Issue #119: Post-run failures lose evidence and exit 1 ------------------
+
+
+class NonSerializableAdapter(AgentAdapter):
+    """Adapter emitting raw bytes and arbitrary python objects."""
+
+    async def run(self, task: Task) -> Transcript:
+        transcript = Transcript(
+            task_id=task.task_id,
+            final_output=b"\x80\x01\xff",
+            intermediate_outputs=[object()],
+        )
+        transcript.add_step(
+            TranscriptStep(
+                step_type=StepType.AGENT_OUTPUT,
+                content=b"\xfe\xed",
+            )
+        )
+        return transcript
+
+
+def test_duplicate_task_id_fails_fast_with_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tasks = tmp_path / "dup_tasks.json"
+    tasks.write_text(json.dumps({
+        "tasks": [
+            {"task_id": "dup-id", "name": "Task 1", "input_data": {"value": 0.9}},
+            {"task_id": "dup-id", "name": "Task 2", "input_data": {"value": 0.8}},
+        ]
+    }))
+    ret = _run_cli(
+        "run", "--eval-set", str(tasks), "--adapter", ADAPTER, "--graders", GRADER,
+    )
+    assert ret == 2
+    err = capsys.readouterr().err
+    assert "duplicate task id: 'dup-id'" in err
+    assert EchoAdapter.run_count == 0
+
+
+def test_non_serializable_adapter_output_saves_and_inspects(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    adapter = "tests.integration.test_cli_e2e.NonSerializableAdapter"
+    results_path = tmp_path / "results.json"
+    trials_path = tmp_path / "trials.json"
+    ckpt_path = tmp_path / "checkpoint.json"
+
+    ret = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", adapter,
+        "--graders", GRADER,
+        "--output", str(results_path),
+        "--save-trials", str(trials_path),
+        "--checkpoint", str(ckpt_path),
+    )
+    assert ret == 0
+    assert results_path.exists()
+    assert trials_path.exists()
+    assert ckpt_path.exists()
+
+    # Must be safely parseable as JSON
+    results = json.loads(results_path.read_text())
+    trials = json.loads(trials_path.read_text())
+    ckpt = json.loads(ckpt_path.read_text())
+    assert results is not None
+    assert trials is not None
+    assert ckpt is not None
+
+    # Verify tracelens inspect renders without error
+    from tracelens.cli.main import cmd_inspect
+    inspect_args = build_parser().parse_args(["inspect", str(trials_path)])
+    assert cmd_inspect(inspect_args) == 0
+    inspect_stdout = capsys.readouterr().out
+    assert "b'\\x80\\x01\\xff'" in inspect_stdout
+
+
+def test_list_shaped_baselines_file_preflight_exits_2(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad_baselines = tmp_path / "baselines.json"
+    bad_baselines.write_text("[]\n")
+
+    ret = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(bad_baselines),
+    )
+    assert ret == 2
+    err = capsys.readouterr().err
+    assert "could not load baselines file" in err
+    assert EchoAdapter.run_count == 0
+
+
+def test_unwritable_checkpoint_path_preflight_exits_2(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad_checkpoint = "/proc/version/ck.json"
+
+    ret = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--checkpoint", bad_checkpoint,
+    )
+    assert ret == 2
+    err = capsys.readouterr().err
+    assert "could not write to checkpoint path" in err
+    assert EchoAdapter.run_count == 0
+
+
+def test_partial_output_write_failure_preserves_successful_artifacts(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    results_path = tmp_path / "results.json"
+    bad_report_path = "/proc/version/report.md"
+
+    ret = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--output", str(results_path),
+        "--report", bad_report_path,
+    )
+    assert ret == 2
+    err = capsys.readouterr().err
+    assert f"[tracelens] wrote results: {results_path}" in err
+    assert f"could not write report to {bad_report_path}:" in err
+    assert results_path.exists()

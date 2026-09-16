@@ -429,6 +429,11 @@ class BaselineManager:
             with open(self.baselines_path) as f:
                 data = json.load(f)
 
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f"baselines file must contain a JSON object mapping task IDs to baselines, got {type(data).__name__}"
+                )
+
             for task_id, baseline_data in data.items():
                 self._baselines[task_id] = self._parse_baseline(baseline_data)
 

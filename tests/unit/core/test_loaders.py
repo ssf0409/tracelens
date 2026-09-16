@@ -1013,3 +1013,22 @@ class TestLoadTasksDispatch:
         weird.write_text("tasks: []\n")
         with pytest.raises(EvalSetLoadError, match="unsupported eval-set file type '.yaml'"):
             load_tasks(weird)
+
+    def test_duplicate_task_ids_rejected_in_jsonl_and_csv(self, tmp_path: Path) -> None:
+        from tracelens.loaders import EvalSetLoadError, load_tasks
+
+        jsonl_path = tmp_path / "dup.jsonl"
+        _write_jsonl(jsonl_path, [
+            {"task_id": "dup-1", "input": "first"},
+            {"task_id": "dup-1", "input": "second"},
+        ])
+        with pytest.raises(EvalSetLoadError, match="duplicate task id: 'dup-1'"):
+            load_tasks(jsonl_path)
+
+        csv_path = tmp_path / "dup.csv"
+        _write_csv(csv_path, [
+            {"task_id": "dup-2", "input": "first"},
+            {"task_id": "dup-2", "input": "second"},
+        ], ["task_id", "input"])
+        with pytest.raises(EvalSetLoadError, match="duplicate task id: 'dup-2'"):
+            load_tasks(csv_path)

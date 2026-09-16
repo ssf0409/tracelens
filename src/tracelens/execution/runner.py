@@ -154,6 +154,12 @@ class EvaluationRunner:
 
     async def run(self, eval_set: EvalSet) -> TrialBatch:
         """Run all tasks × runs and grade results."""
+        seen_task_ids: set[str] = set()
+        for task in eval_set.tasks:
+            if task.task_id in seen_task_ids:
+                raise ValueError(f"duplicate task id: {task.task_id!r}")
+            seen_task_ids.add(task.task_id)
+
         batch = TrialBatch(started_at=utc_now())
         # Record what is about to be measured (task content, graders, runner
         # settings) and which candidate is under test, before any trial
