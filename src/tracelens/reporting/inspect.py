@@ -12,6 +12,7 @@ what was left out, so the view never misreports what it omitted.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from enum import StrEnum
 from html import escape
@@ -77,9 +78,17 @@ def classify(trial: Trial) -> TrialKind:
 # --- bounded rendering of arbitrary values -------------------------------------
 
 
+_CONTROL_CHAR_RE = re.compile(
+    r"(\x1b\[[0-?]*[ -/]*[@-~])|[\x00-\x08\x0b-\x1f\x7f-\x9f]"
+)
+
+
 def _text(value: Any) -> str:
     if isinstance(value, str):
-        return value
+        return _CONTROL_CHAR_RE.sub(
+            lambda m: m.group(0).encode("unicode_escape").decode("ascii"),
+            value,
+        )
     return json.dumps(value, default=str, ensure_ascii=False, sort_keys=True)
 
 
