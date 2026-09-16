@@ -8,6 +8,55 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Changed
+
+- **One run, one significance level.** `evaluate_gate` Holm-adjusts each
+  metric's per-task p-values across the checked tasks by default
+  (`--multiplicity holm`; `run.baseline.multiplicity` in `tracelens.yaml`),
+  so an unchanged suite blocks by chance on some task at most 5 % of the
+  time however many tasks are flaky; `--multiplicity none` holds every task
+  to 5 % on its own. A suite-level criterion (the mean of the per-task
+  differences with the contract's task bootstrap and sign-flip test) blocks
+  on a broad regression that no single task can show. A check none of whose
+  tasks could have blocked at their sample sizes is `UNEVALUABLE` (exit 2)
+  with the trials per task it would need, and tasks that cannot block on
+  their own are named in a warning. The gate JSON records `alpha`,
+  `multiplicity`, `family_size`, and `suite`; each task records `detectable`
+  and `trials_needed`. Blocking now requires a significant test as well as
+  the severity threshold, so a regression that used to block on its size
+  alone (a hand-written baseline with no `sample_size` against one or two
+  trials) is now reported as undetectable instead; run at least three trials
+  a side, five recommended, and store baselines from ten or more. (#111)
+- The Markdown and HTML gate tables gain an **Evidence** column (the test's
+  p-value, adjusted p-value, and the trials that would decide an
+  underpowered drop), the Baseline Gate section states the significance
+  policy, and the CI summary lists observed drops that did not block. (#111)
+- `tracelens init` scaffolds `num_runs: 5` instead of 1 so the generated
+  gate can decide anything, and the generated README says what five runs can
+  show. (#111)
+
+### Fixed
+
+- **The baseline gate decides on evidence that follows the statistical
+  contract.** The per-task test behind `tracelens run --baseline-check` had
+  four defects: its fallback for a zero-variance baseline divided the delta
+  by the sample SD instead of the standard error, so a drop from 1.0 to 0.4
+  read p ≈ 0.22 over 5, 10, or 100 trials alike; a drop that was not
+  significant vanished from stdout, JSON, Markdown, and HTML, so an
+  underpowered check looked like a clean pass; the baseline's `sample_size`
+  was never used; and a run blocked whenever any task did, with no control
+  over how many tasks shared the 5 % false-alarm budget. Now 0/1 metrics get
+  Boschloo's exact test on the two counts (baseline `sample_size` included),
+  continuous metrics get Welch's, pooled, or exact-permutation tests from the
+  stored summary, p-values are one-sided in the observed direction and never
+  fabricated, and every change above the reporting floor is reported with
+  its evidence: `test`, `p_value`, `p_value_adjusted`, the two sample sizes,
+  `underpowered`, `trials_needed`, and `undetectable`. A drop that is not
+  significant is printed (`observed drop, not blocking`) with the trials that
+  would decide it, and never blocks. The contract page states the decision
+  procedure and its exact false-alarm and power tables
+  (`scripts/gate_error_rates.py` regenerates them). (#111)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

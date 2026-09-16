@@ -284,7 +284,9 @@ are skipped with a warning when other tasks can be checked; add
 `--require-baselines` to fail instead. Use `--progress` / `--checkpoint
 path.json` / `--max-infra-retries N` for long runs. See
 [CI/CD Integration](ci-cd-integration.md) for the noise-aware flags
-(`--decision-spec`, `--noise-band`, `--infra-exceptions`).
+(`--decision-spec`, `--noise-band`, `--infra-exceptions`) and for what the
+gate can detect at a given number of runs (`--multiplicity holm|none`
+chooses how many tasks share the significance level).
 `tracelens report --results results.json --format markdown` re-renders a saved
 run; `--format ci` prints the same one-line summary `run` printed, gate line
 included, for job summaries and scripts (it re-renders the recorded decision
@@ -348,6 +350,7 @@ run:
     fail_on_regression: moderate     # --fail-on-regression
     require_baselines: false         # --require-baselines / --no-require-baselines
     noise_band: 0.03                 # --noise-band
+    multiplicity: holm               # --multiplicity
 ```
 
 Every key is optional, but some layer must provide `eval_set`, `adapter`,

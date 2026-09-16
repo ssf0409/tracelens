@@ -632,7 +632,9 @@ class TestGateReporting:
         assert "**Status**: BLOCKED (exit code 1)" in md
         assert "block at `moderate` or worse" in md
         assert "1 checked, 1 skipped (no baseline)" in md
-        assert "| t1 | pass_rate | 1.0000 | 0.0000 | -100.0% | severe | blocking |" in md
+        assert "| Task | Metric | Baseline | Current | Change | Severity | Evidence | Notes |" in md
+        assert "| t1 | pass_rate | 1.0000 | 0.0000 | -100.0% | severe | p=0.0009, significant | blocking |" in md
+        assert "**Significance**: alpha=0.05, Holm-adjusted across 1 checked task(s)" in md
         assert "Skipped tasks: t2 (no baseline stored for this task)" in md
 
         ci = gen.render_ci_summary(report)
@@ -664,14 +666,44 @@ class TestGateReporting:
         rows = [line for line in md.splitlines() if line.startswith("|")]
         gate_rows = [
             row for row in rows
-            if len(_md_row_cells(row)) == 7
+            if len(_md_row_cells(row)) == 8  # Task .. Severity, Evidence, Notes
             and _md_row_cells(row)[0] == "pipe\\|id&lt;script-like content&gt;"
         ]
         assert len(gate_rows) == 1
         cells = _md_row_cells(gate_rows[0])
         assert cells[1] == "pass_rate"
-        assert cells[6] == "blocking"
+        assert cells[6].startswith("p=") and cells[6].endswith(", significant")
+        assert cells[7] == "blocking"
 
+    def test_notes_follow_the_gate_threshold_per_regression(self, tmp_path):
+        # One task, two significant drops: pass_rate 1.0 -> 0.0 (severe) and
+        # mean_score 1.0 -> 0.9 (moderate). At threshold severe the task
+        # blocks on the first alone; the second is significant but below
+        # the threshold, and its note must say so.
+        from tracelens.baselines.comparison import RegressionSeverity
+        from tracelens.baselines.manager import BaselineManager, TaskBaseline
+        from tracelens.reporting.gate import evaluate_gate
+        from tracelens.reporting.generator import _gate_rows
+
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 1.0, std=0.05, sample_size=10)
+        baseline.add_metric("mean_score", 1.0, std=0.01, sample_size=100)
+        manager.set_baseline(baseline)
+        manager.save()
+        batch = _make_batch({"t1": [(False, 0.9)] * 5})
+
+        gate = evaluate_gate(batch, manager, threshold=RegressionSeverity.SEVERE)
+        assert gate.status.value == "blocked" and gate.tasks[0].blocking
+        notes = {row[1]: (row[5], row[7]) for row in _gate_rows(gate)}
+        assert notes == {
+            "pass_rate": ("severe", "blocking"),
+            "mean_score": ("moderate", "significant; below the blocking threshold"),
+        }
+        default = evaluate_gate(batch, manager)
+        assert {row[1]: row[7] for row in _gate_rows(default)} == {
+            "pass_rate": "blocking", "mean_score": "blocking",
+        }
     def test_passed_and_not_requested_gates(self, tmp_path):
         gen, report = self._gated_report(tmp_path, passing=True)
         assert report.gate is not None and report.gate.status.value == "passed"
