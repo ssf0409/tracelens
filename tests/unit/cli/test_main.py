@@ -49,6 +49,8 @@ class TestBuildParser:
         assert resolved.output is None
         assert resolved.report is None
         assert resolved.max_infra_retries == 0
+        assert resolved.fail_on_infra_errors is False
+        assert resolved.max_infra_error_rate is None
 
     def test_run_with_all_options(self):
         """Run command accepts all optional args."""
@@ -67,6 +69,8 @@ class TestBuildParser:
             "--output", "results.json",
             "--report", "report.md",
             "--max-infra-retries", "2",
+            "--fail-on-infra-errors",
+            "--max-infra-error-rate", "0.25",
         ])
         assert args.num_runs == 5
         assert args.max_concurrency == 10
@@ -77,6 +81,8 @@ class TestBuildParser:
         assert args.output == "results.json"
         assert args.report == "report.md"
         assert args.max_infra_retries == 2
+        assert args.fail_on_infra_errors is True
+        assert args.max_infra_error_rate == 0.25
 
     def test_report_required_args(self):
         """Report command requires results file."""

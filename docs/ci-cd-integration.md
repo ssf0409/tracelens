@@ -194,9 +194,9 @@ every output: the exit code, the summary on stdout, and a `gate` object in the
 
 | Status | Exit code | Meaning | What to do |
 |--------|-----------|---------|------------|
-| `not_requested` | 0 | The run had no `--baseline-check`. | Nothing; no gate was evaluated. |
+| `not_requested` | 0 | The run had no `--baseline-check`. | Nothing; no gate was evaluated. Note: without `--fail-on-infra-errors`, an ungated run exits 0 even if trials encountered infrastructure failures. |
 | `passed` | 0 | At least one task was compared and nothing blocked. | Merge. |
-| `blocked` | 1 | A regression at or above `--fail-on-regression`, or `--require-baselines` with a task that has no baseline. | Read the regression table, decide whether the change is acceptable, then fix the agent or promote the baseline. |
+| `blocked` | 1 | A regression at or above `--fail-on-regression`, `--require-baselines` with a task that has no baseline, or `--fail-on-infra-errors` / `max_infra_error_rate` triggered by infrastructure failures. | Read the regression table or infra error output, decide whether the change or environment is acceptable, then fix the agent, infrastructure, or promote the baseline. |
 | `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials, no comparable metric, or content that changed since its baseline was stored. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons (re-store the baseline of an edited task), then rerun. |
 
 A misconfigured gate (missing `--baselines-file`, an unreadable baselines
@@ -303,6 +303,13 @@ key; `tracelens report` renders it without inventing one.
   failures — downstream policy, conservative by default.
 - Use GitHub job summaries or artifacts for reports. `tracelens report`
   supports `markdown`, `json`, and `html` output formats.
+- Add `--fail-on-infra-errors` or set `run.fail_on_infra_errors: true` in
+  `tracelens.yaml` to fail (exit 1) when infrastructure errors prevent
+  evaluation (e.g. 100% of trials end in infra errors, leaving 0 gradable
+  trials). Use `--max-infra-error-rate <rate>` (or `run.max_infra_error_rate: <rate>`)
+  to cap the tolerable infra error rate at an explicit threshold between 0.0 and 1.0.
+  Without these options, ungated runs exit 0 by contract even when trials fail
+  from harness infrastructure issues.
 - On flaky CI infrastructure, add `--max-infra-retries 2`: trials that end in
   `INFRA_ERROR` (network drops, OOM kills) are re-attempted with exponential
   backoff before counting against `infra_error_rate`. Agent failures and

@@ -107,6 +107,7 @@ class TestConfigTemplate:
             "adapter": "eval.adapter.StarterAdapter",
             "graders": ["eval.grader.StarterGrader"],
             "num_runs": 1,
+            "fail_on_infra_errors": True,
             "output": str(base / "eval/results/results.json"),
             "report": str(base / "eval/results/report.md"),
             "html_report": str(base / "eval/results/report.html"),
