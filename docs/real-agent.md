@@ -121,11 +121,18 @@ The adapter records each HTTP attempt as a tool-call step on the transcript,
 which you will read in section 6.
 
 > If your agent is *not* an HTTP service, subclass `AgentAdapter` directly and
-> implement `async def run(self, task) -> Transcript`, or wrap a plain async
-> function with `SimpleAdapter(fn)` as
+> implement `async def run(self, task) -> Transcript`, wrap a synchronous
+> callable with `SyncAdapter(fn)`, or wrap an async function with
+> `SimpleAdapter(fn)` as
 > [`examples/run_eval.py`](https://github.com/ssf0409/tracelens/blob/main/examples/run_eval.py)
-> does. The runner only depends on the `AgentAdapter` interface, so everything
-> downstream is identical.
+> does.
+>
+> **Asyncio Contract & Blocking Operations**: Because TraceLens drives trials on
+> an `asyncio` event loop, adapters and hooks (`setup()`, `teardown()`, `run()`)
+> must not block the loop thread with synchronous operations (like `time.sleep()`,
+> synchronous HTTP requests, or CPU-bound work). If an adapter blocks the loop,
+> runner timeouts and cancellation cannot trigger cooperatively. Use `SyncAdapter`
+> or `asyncio.to_thread(...)` to offload blocking execution onto a thread worker.
 
 ---
 

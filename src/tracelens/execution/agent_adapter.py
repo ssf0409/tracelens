@@ -4,6 +4,8 @@ An AgentAdapter wraps an agent so the evaluation runner can invoke it
 on tasks and collect transcripts.
 """
 
+import asyncio
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -21,6 +23,17 @@ class AgentAdapter(ABC):
 
     Optionally override `setup()` and `teardown()` for lifecycle management.
     The runner guarantees teardown is called even if run() fails.
+
+    Asyncio Contract & Blocking Operations:
+        TraceLens runs on an asyncio event loop. Adapter hooks (``setup()``,
+        ``run()``, ``teardown()``) must not execute blocking synchronous calls
+        (e.g., ``time.sleep()``, synchronous HTTP clients, heavy CPU computation)
+        directly on the event loop thread, as this prevents cooperative timeouts
+        (``asyncio.wait_for``) and task cancellation from executing promptly.
+
+        If your agent or hooks perform synchronous blocking operations, offload
+        them to a worker thread via ``asyncio.to_thread``, or use ``SyncAdapter`` /
+        pass the sync callable to ``SimpleAdapter``.
 
     Example:
         class MyAdapter(AgentAdapter):
@@ -59,18 +72,22 @@ class AgentAdapter(ABC):
     def record_error(self, transcript: Transcript, error: Exception) -> None:
         """Helper to record an exception in a transcript."""
         transcript.errors.append(str(error))
-        transcript.add_step(TranscriptStep(
-            step_type=StepType.ERROR,
-            error=str(error),
-        ))
+        transcript.add_step(
+            TranscriptStep(
+                step_type=StepType.ERROR,
+                error=str(error),
+            )
+        )
         transcript.completed_at = utc_now()
 
 
 class SimpleAdapter(AgentAdapter):
-    """Wraps any async callable as an AgentAdapter.
+    """Wraps an async or sync callable as an AgentAdapter.
 
     Useful for testing and simple single-shot agents that take
-    input_data and return a result.
+    input_data and return a result. Synchronous callables are
+    automatically offloaded to a worker thread using ``asyncio.to_thread``
+    so they do not block the event loop and allow runner timeouts to trigger.
 
     Example:
         async def my_fn(input_data: dict) -> dict:
@@ -79,19 +96,65 @@ class SimpleAdapter(AgentAdapter):
         adapter = SimpleAdapter(my_fn)
     """
 
-    def __init__(self, fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> None:
+    def __init__(
+        self,
+        fn: Callable[[dict[str, Any]], Awaitable[Any] | Any],
+    ) -> None:
         self._fn = fn
+        self._is_async = inspect.iscoroutinefunction(fn)
 
     async def run(self, task: Task) -> Transcript:
         """Invoke the wrapped function and build a transcript."""
         transcript = self.start_transcript(task)
         try:
-            result = await self._fn(task.input_data)
+            if self._is_async:
+                result = await self._fn(task.input_data)
+            else:
+                result = await asyncio.to_thread(self._fn, task.input_data)
             transcript.final_output = result
-            transcript.add_step(TranscriptStep(
-                step_type=StepType.AGENT_OUTPUT,
-                content=result,
-            ))
+            transcript.add_step(
+                TranscriptStep(
+                    step_type=StepType.AGENT_OUTPUT,
+                    content=result,
+                )
+            )
+        except Exception as exc:
+            self.record_error(transcript, exc)
+            raise
+        finally:
+            transcript.completed_at = utc_now()
+        return transcript
+
+
+class SyncAdapter(AgentAdapter):
+    """Wraps a synchronous callable as an AgentAdapter offloaded to a thread worker.
+
+    Ensures that synchronous agents (or agents using synchronous libraries like
+    `time.sleep()`, synchronous `requests`, etc.) do not block the asyncio event
+    loop, allowing the runner's per-trial timeouts to trigger cooperatively.
+
+    Example:
+        def my_sync_agent(input_data: dict) -> dict:
+            return {"answer": "42"}
+
+        adapter = SyncAdapter(my_sync_agent)
+    """
+
+    def __init__(self, fn: Callable[[dict[str, Any]], Any]) -> None:
+        self._fn = fn
+
+    async def run(self, task: Task) -> Transcript:
+        """Invoke the synchronous callable in a thread worker and build a transcript."""
+        transcript = self.start_transcript(task)
+        try:
+            result = await asyncio.to_thread(self._fn, task.input_data)
+            transcript.final_output = result
+            transcript.add_step(
+                TranscriptStep(
+                    step_type=StepType.AGENT_OUTPUT,
+                    content=result,
+                )
+            )
         except Exception as exc:
             self.record_error(transcript, exc)
             raise

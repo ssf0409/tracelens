@@ -6,7 +6,11 @@ import pytest
 
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, Transcript
-from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
+from tracelens.execution.agent_adapter import (
+    AgentAdapter,
+    SimpleAdapter,
+    SyncAdapter,
+)
 
 
 class TestSimpleAdapter:
@@ -18,6 +22,7 @@ class TestSimpleAdapter:
 
     async def test_successful_run(self, task: Task):
         """SimpleAdapter returns a transcript with the function's output."""
+
         async def fn(input_data: dict) -> dict:
             return {"answer": input_data["goal"]}
 
@@ -32,6 +37,7 @@ class TestSimpleAdapter:
 
     async def test_records_agent_output_step(self, task: Task):
         """SimpleAdapter adds an AGENT_OUTPUT step."""
+
         async def fn(input_data: dict) -> str:
             return "result"
 
@@ -44,6 +50,7 @@ class TestSimpleAdapter:
 
     async def test_error_recording(self, task: Task):
         """SimpleAdapter records errors and re-raises."""
+
         async def fn(input_data: dict) -> dict:
             raise ValueError("boom")
 
@@ -53,6 +60,7 @@ class TestSimpleAdapter:
 
     async def test_start_transcript_helper(self, task: Task):
         """start_transcript creates a Transcript with correct task_id and timing."""
+
         async def fn(input_data: dict) -> str:
             return "ok"
 
@@ -64,6 +72,7 @@ class TestSimpleAdapter:
 
     async def test_record_error_helper(self, task: Task):
         """record_error adds error info to the transcript."""
+
         async def fn(input_data: dict) -> str:
             return "ok"
 
@@ -114,6 +123,7 @@ class TestAgentAdapterLifecycleHooks:
 
     async def test_default_hooks_are_noop(self, task: Task):
         """Default setup/teardown do nothing and don't raise."""
+
         async def fn(data: dict) -> str:
             return "ok"
 
@@ -151,3 +161,40 @@ class TestAgentAdapterABC:
         """AgentAdapter is abstract and cannot be instantiated."""
         with pytest.raises(TypeError):
             AgentAdapter()
+
+
+class TestSyncAdapter:
+    """Tests for SyncAdapter wrapping synchronous callables."""
+
+    @pytest.fixture
+    def task(self) -> Task:
+        return Task(task_id="t_sync", name="Sync Task", input_data={"val": 42})
+
+    async def test_sync_function_execution(self, task: Task):
+        def sync_fn(data: dict) -> dict:
+            return {"answer": data["val"] * 2}
+
+        adapter = SyncAdapter(sync_fn)
+        transcript = await adapter.run(task)
+
+        assert transcript.task_id == "t_sync"
+        assert transcript.final_output == {"answer": 84}
+        assert not transcript.has_errors
+        assert len(transcript.steps) == 1
+        assert transcript.steps[0].content == {"answer": 84}
+
+    async def test_sync_adapter_error_handling(self, task: Task):
+        def bad_fn(data: dict) -> dict:
+            raise ValueError("sync failure")
+
+        adapter = SyncAdapter(bad_fn)
+        with pytest.raises(ValueError, match="sync failure"):
+            await adapter.run(task)
+
+    async def test_simple_adapter_with_sync_callable(self, task: Task):
+        def sync_fn(data: dict) -> str:
+            return f"sync-{data['val']}"
+
+        adapter = SimpleAdapter(sync_fn)
+        transcript = await adapter.run(task)
+        assert transcript.final_output == "sync-42"
