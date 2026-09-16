@@ -8,6 +8,20 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scaffold gate defaults and single-trial dispersion.** `tracelens init` no
+  longer stores an invented `std=0.05` for one-trial baselines in `eval/README.md`
+  (step 4.1), and `tracelens.yaml` now documents single-trial detection limits
+  with guidance to raise `num_runs` (e.g. 5) when evaluating non-deterministic
+  agents or LLM graders. The regression detector treats single observations
+  against zero-dispersion/one-trial baselines as `insufficient_data` (`p_value=None`)
+  instead of fabricating `p=0.0`, and the baseline gate emits a one-line warning
+  when sample size per task (`n < 3`) is too small to reliably detect regressions
+  at the configured threshold. The scaffolded `.github/workflows/eval.yml`
+  workflow triggers on push to `main` as well as pull requests, and supports
+  projects without `uv.lock` via `pyproject.toml`. (#118)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

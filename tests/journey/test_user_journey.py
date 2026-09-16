@@ -98,6 +98,8 @@ def test_documented_user_journey(tmp_path: Path) -> None:
                      "eval/README.md", ".github/workflows/eval.yml"):
         assert (project / relative).is_file(), relative
     assert (project / "pyproject.toml").read_text().startswith("[project]")
+    eval_workflow = (project / ".github/workflows/eval.yml").read_text()
+    assert "push:\n    branches: [main]" in eval_workflow
     tracelens("init", ".", cwd=project, expect=2)
 
     # 2. The one documented command: outputs land where the config says.
@@ -138,6 +140,11 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     gate = load(results)["gate"]
     assert gate["status"] == "blocked" and gate["exit_code"] == 1
     assert gate["blocking_regressions"] == 2
+    # Issue #118: one-trial baselines have no dispersion; regression carries insufficient_data and no p-value
+    for task_gate in gate["tasks"]:
+        for reg in task_gate["regressions"]:
+            assert reg["insufficient_data"] is True
+            assert reg["p_value"] is None
     assert "BLOCKED" in report.read_text()
 
     # 6. inspect explains the failure from the trials file.

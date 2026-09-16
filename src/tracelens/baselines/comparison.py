@@ -353,8 +353,12 @@ class RegressionDetector:
                 p_value = _two_sided_z_p(delta, current_std)
             else:
                 p_value = None
-        elif baseline_std > 0:
-            # Single sample, use z-test with baseline std
+        elif baseline_std > 0 and len(current_values) >= 2:
+            # Multi-sample current against known baseline std
+            current_std = float(np.std(current_values, ddof=1)) if len(current_values) > 1 else 0.0
+            p_value = _two_sided_z_p(delta, baseline_std / float(np.sqrt(len(current_values))))
+        elif baseline_std > 0 and len(current_values) == 1:
+            # Single sample, use z-test with baseline std only if baseline has real dispersion
             p_value = _two_sided_z_p(delta, baseline_std)
         else:
             p_value = None

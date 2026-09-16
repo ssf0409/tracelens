@@ -85,6 +85,12 @@ manager.create_canary_baseline(
 manager.save()
 ```
 
+The `metric_stds` values reflect the observed standard deviation across trials,
+which `RegressionDetector` uses to calculate significance (z-test / t-test).
+If recording a baseline from a single trial (n=1), leave `metric_stds` empty
+(or 0.0): single observations have no dispersion and yield `insufficient_data`
+without generating false statistical certainty.
+
 All `BaselineManager` write APIs also accept `decision_spec=`. For canaries,
 `fingerprint` is optional when a spec is given — it is derived from
 `decision_spec.fingerprint` — and the stored spec is what enables noise-aware

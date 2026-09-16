@@ -334,6 +334,11 @@ baseline = TaskBaseline(
         required_confidence=0.95,
     ),
 )
+# std represents the observed sample standard deviation across trials and
+# decides statistical significance in regression testing. For single-trial
+# runs (n=1), no dispersion exists: store without std (std=0.0) so the gate
+# evaluates delta thresholds and reports insufficient_data rather than a
+# fabricated p-value.
 baseline.add_metric(
     metric_name="pass_rate",
     value=0.92,

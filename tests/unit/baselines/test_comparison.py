@@ -249,6 +249,23 @@ class TestRegressionDetector:
         assert reg.p_value is not None
         assert reg.insufficient_data is False
 
+    def test_single_observation_against_one_trial_baseline_is_insufficient_data(self):
+        """Issue #118: a single observation against a single baseline trial has no dispersion.
+        It must report insufficient_data with p_value=None, not a fabricated p=0.0."""
+        detector = RegressionDetector()
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", value=1.0, std=0.0, sample_size=1)
+
+        current_results = [{"pass_rate": 0.0}]
+        report = detector.compare(baseline, current_results)
+
+        assert report.has_regression is True
+        reg = report.regressions[0]
+        assert reg.p_value is None
+        assert reg.insufficient_data is True
+        assert reg.severity == RegressionSeverity.SEVERE
+        assert report.should_block_ci(RegressionSeverity.MODERATE) is True
+
 
 # --- Noise-aware regression detection (Track 2 / Anthropic infra-noise) ---
 

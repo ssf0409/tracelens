@@ -427,6 +427,15 @@ def evaluate_gate(
         t for t in tasks if t.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
     ]
     blocking = [t for t in checked if t.blocking]
+
+    small_sample_tasks = [t for t in checked if t.compared_trials < 3]
+    if small_sample_tasks:
+        max_n = max(t.compared_trials for t in small_sample_tasks)
+        warnings.append(
+            f"sample size (n={max_n}) is too small to reliably detect drops at threshold "
+            f"'{threshold.value}'; raise num_runs (e.g. 5) for statistical significance"
+        )
+
     if unhashed_baselines:
         warnings.append(
             f"{len(unhashed_baselines)} baseline(s) carry no task_hash, so a change to "

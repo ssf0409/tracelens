@@ -248,10 +248,23 @@ class TestHelpers:
 
 def test_gate_without_task_argument_uses_all_tasks(tmp_path):
     gate = evaluate_gate(
-        _batch(*_runs("t1", [True])), _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
+        _batch(*_runs("t1", [True, True, True])), _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
     )
     assert gate.status in (GateStatus.PASSED, GateStatus.BLOCKED)
     assert pytest.approx(gate.noise_band) == 0.03
+
+
+class TestSampleWarnings:
+    def test_warns_at_n_1_and_n_2_for_threshold(self, tmp_path):
+        manager = _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
+        gate_n1 = evaluate_gate(_batch(*_runs("t1", [True])), manager)
+        assert any("sample size (n=1) is too small" in w for w in gate_n1.warnings)
+
+        gate_n2 = evaluate_gate(_batch(*_runs("t1", [True, True])), manager)
+        assert any("sample size (n=2) is too small" in w for w in gate_n2.warnings)
+
+        gate_n3 = evaluate_gate(_batch(*_runs("t1", [True, True, True])), manager)
+        assert not any("is too small to reliably detect drops" in w for w in gate_n3.warnings)
 
 
 class TestTaskContentIdentity:
@@ -303,7 +316,7 @@ class TestTaskContentIdentity:
 
     def test_matching_content_is_compared_normally(self, tmp_path):
         gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True])),
+            _batch(*_runs("t1", [True, True, True])),
             self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
             task_hashes={"t1": "a" * 64},
         )
@@ -311,7 +324,7 @@ class TestTaskContentIdentity:
 
     def test_unhashed_baseline_is_compared_with_a_warning(self, tmp_path):
         gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True])),
+            _batch(*_runs("t1", [True, True, True])),
             _manager(tmp_path, {"t1": {"pass_rate": 1.0}}),
             task_hashes={"t1": "a" * 64},
         )
@@ -323,7 +336,7 @@ class TestTaskContentIdentity:
 
     def test_without_current_hashes_nothing_changes(self, tmp_path):
         gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True])),
+            _batch(*_runs("t1", [True, True, True])),
             self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
         )
         assert gate.status is GateStatus.PASSED and gate.warnings == []
