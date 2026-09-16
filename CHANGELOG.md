@@ -8,6 +8,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Task timeout and decision spec fingerprint stability.**
+  - `EvaluationRunner` now honours `Task.timeout_seconds` when smaller than the runner-level `timeout_seconds` budget. (#136)
+  - `DecisionSpec.fingerprint` serializes consistently across JSON save/load round trips (normalizing structured types like datetime and Enum before hashing) and verifies stored fingerprints on reload to detect tampering. (#136)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
