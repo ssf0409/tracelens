@@ -114,10 +114,40 @@ checkout.
 3. **Don't mock at system boundaries.** Tests that pretend the HTTP adapter works without actually exercising it create false confidence.
 4. **Update public API exports deliberately.** Adding something to `src/tracelens/__init__.py` is a stability promise. If you're unsure whether a symbol belongs in the public surface, leave it at the submodule path.
 5. **Document "why" in the PR body.** Commit messages should explain the user-visible behavior change; PR bodies should explain the motivation (what problem does this solve? what alternatives were considered?).
-6. **If you modify regression / baseline logic, add a backwards-compat note** to `CHANGELOG.md`. Baselines are a stability boundary.
+6. **Keep the changelog current** ([Changelog](#changelog)): every user-visible change adds an entry under `[Unreleased]` in the same PR, never inside a released section. If you modify regression / baseline logic, the entry carries a backwards-compat note; baselines are a stability boundary.
 7. **Prefer recipes before core abstractions.** If only one downstream project
    needs the behavior, start with docs or examples. Promote it into core only
    after the shape is proven.
+
+## Changelog
+
+`CHANGELOG.md` is the source of the release notes and of the version number
+(releases happen on merge; see [Releasing](#releasing-maintainers-only)), so
+it changes in the same pull request as the code:
+
+1. **Every user-visible change gets an entry under `## [Unreleased]`**, under
+   the heading that says what it is: `### Added`, `### Changed`,
+   `### Deprecated`, `### Removed`, `### Fixed`, or `### Security`. Write it
+   for users (what changed and why it matters), reference the issue or pull
+   request, and flag breaking changes in the entry itself. Internal changes
+   (CI, tests, refactors with no visible effect) need no entry.
+2. **Never write into a released section.** A dated section
+   (`## [0.6.0] - 2026-09-15`) is frozen: its notes are published and its
+   version is tagged. A release moves everything under `[Unreleased]` into a
+   new dated section, so once a release lands on `main`, merging or rebasing
+   an older pull request can leave its entries inside that section, where
+   they describe a version that never contained them and would never ship.
+   When you update a pull request after a release, check that your entries
+   are still under `[Unreleased]` and move them if a merge put them
+   elsewhere.
+3. **CI checks the placement.** On every pull request the `lint` job runs
+   `scripts/check_changelog.py` against the base branch and fails when a
+   released section gained entries. Run it yourself before pushing:
+
+   ```bash
+   git fetch origin main
+   python scripts/check_changelog.py --base origin/main
+   ```
 
 ## Commit style
 
@@ -144,17 +174,25 @@ These guide reviews; deviations should be justified in the PR description:
 
 ## Releasing (maintainers only)
 
-Releases are tag-driven and the tag is created for you:
+Releases are tag-driven and happen on merge:
 
-1. Keep `CHANGELOG.md` current: every user-visible change lands under
-   `[Unreleased]` in the same pull request as the code.
-2. Run the "Release prepare" workflow with the version. It moves
-   `[Unreleased]` into a dated section and opens a `release: vX.Y.Z` pull
-   request with the rendered notes.
-3. Review and merge that pull request (any merge method). The "Release tag"
-   workflow tags the commit that lands on `main` and the release workflow
-   publishes to PyPI and creates the GitHub Release from the changelog
-   section.
+1. Keep `CHANGELOG.md` current ([Changelog](#changelog)): every user-visible
+   change lands under `[Unreleased]` in the same pull request as the code,
+   under the heading that says what it is (`### Added`, `### Changed`,
+   `### Fixed`, ...). The headings decide the version: Added, Changed,
+   Removed, or Deprecated entries make a minor release, fixes alone a patch
+   release. A pull request updated after a release keeps its entries under
+   `[Unreleased]`; CI refuses entries added to a released section.
+2. Merge. Once CI is green on `main`, the "Release on merge" workflow moves
+   `[Unreleased]` into a dated section, commits `release: vX.Y.Z`, tags it,
+   and the release workflow publishes to PyPI and creates the GitHub Release
+   from that section. To hold the changes for a later release, put
+   `[release: skip]` in the merge title; to choose the version, put
+   `[release: patch]`, `[release: minor]`, `[release: major]`, or
+   `[release: X.Y.Z]` there.
+3. For a pre-release or a version the rules would not pick, run the
+   "Release prepare" workflow with the version instead: it opens a
+   `release: vX.Y.Z` pull request, and merging it tags the merge commit.
 
 The full checklist, the verification commands, the manual fallback, and what
 to do when a step fails are in [docs/releasing.md](docs/releasing.md).

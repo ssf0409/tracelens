@@ -1,10 +1,12 @@
 # Releasing TraceLens
 
 TraceLens uses tag-driven releases. The package version comes from the git
-tag, and CI publishes only from a release tag: the release pipeline creates
-one when a release pull request is merged, or a maintainer pushes one by hand.
+tag, and CI publishes only from a release tag. The pipeline creates the tag:
+the "Release on merge" workflow after CI passes on `main`, the "Release tag"
+workflow when a release pull request is merged, or a maintainer pushes one by
+hand.
 
-This avoids CI-generated version commits, release loops, and PyPI's immutable
+This avoids hand-edited version numbers, release loops, and PyPI's immutable
 version constraint.
 
 ## Release Model
@@ -13,13 +15,21 @@ version constraint.
   package build validation.
 - A tag named `vX.Y.Z` builds package version `X.Y.Z`.
 - Pushing that tag triggers `.github/workflows/release.yml`.
-- The "Release prepare" workflow turns the changelog's `[Unreleased]` section
-  into a dated section and opens a release pull request; merging it tags the
-  merge commit (the "Release tag" workflow).
+- After CI passes on a push to `main`, the "Release on merge" workflow
+  releases whatever the changelog has queued under `[Unreleased]`: it picks
+  the version, moves the entries into a dated section, commits
+  `release: vX.Y.Z` to `main`, tags it, and starts the release workflow
+  ([Automatic Releases](#automatic-releases)).
+- For a version you name (a pre-release, or a jump the rules would not
+  make), the "Release prepare" workflow turns `[Unreleased]` into a dated
+  section and opens a release pull request; merging it tags the merge commit
+  (the "Release tag" workflow).
 - The release workflow builds the package, verifies the tag matches the built
   version, renders the release notes from the changelog's dated section,
-  publishes to PyPI using trusted publishing, and then creates the GitHub
-  Release for the tag with those notes and the built files attached.
+  publishes to PyPI using trusted publishing through the `release`
+  environment (a reviewer required there gates every path), and then creates
+  the GitHub Release for the tag with those notes and the built files
+  attached.
 - Nothing is published unless the build, the version check, and the notes
   succeed first, and no GitHub Release is created unless publication
   succeeded. Tags whose version is not a final `X.Y.Z` (`rc`, `a`, `b`,
@@ -29,8 +39,8 @@ version constraint.
 
 TraceLens already has a PyPI project and trusted publishing configured. Re-run
 this section only if the repository, workflow name, or PyPI ownership changes,
-or when the "Release prepare" workflow reports that it may not open pull
-requests.
+when the "Release prepare" workflow reports that it may not open pull
+requests, or when "Release on merge" reports that `main` rejected its push.
 
 1. Confirm the package metadata:
 
@@ -53,11 +63,79 @@ requests.
    approve pull requests". Without it the workflow pushes the release branch,
    fails to open the pull request, removes the branch again, and says so.
 
+5. Let the "Release on merge" workflow push to `main`. Without branch
+   protection nothing is needed. If `main` requires pull requests, allow
+   GitHub Actions to bypass that rule; otherwise the workflow cannot land its
+   release commit and falls back to opening the release pull request through
+   "Release prepare", which you then merge.
+
 No PyPI API token is required when trusted publishing is configured correctly.
 
-## Cut A Release
+## Automatic Releases
 
-The default path is two clicks and one review.
+Every merge to `main` that leaves entries under `[Unreleased]` in
+`CHANGELOG.md` becomes a release once CI is green on that commit. The
+"Release on merge" workflow (`.github/workflows/release-auto.yml`) runs when
+the `CI` workflow completes for a push to `main`, and:
+
+1. **Skips** a red or cancelled CI run; a release commit itself
+   (`release: vX.Y.Z`, or the merge of a `release/vX.Y.Z` pull request:
+   the "Release tag" workflow owns those); a commit whose title carries
+   `[release: skip]`; an empty `[Unreleased]` section; and a latest tag that
+   is a pre-release (`v1.0.0rc1`: finish it with "Release prepare"). The job
+   summary says which.
+2. **Picks the version** (`scripts/next_version.py`) from the latest
+   `vX.Y.Z` tag and the commit title:
+   - `[release: X.Y.Z]` names the version outright;
+   - `[release: major]`, `[release: minor]`, or `[release: patch]` names the
+     bump;
+   - otherwise entries under `### Added`, `### Changed`, `### Removed`, or
+     `### Deprecated` make a minor release, and entries only under
+     `### Fixed` (or `### Security`) a patch release. While `0.x`, breaking
+     changes are minor bumps; use `[release: major]` when it is time for
+     `1.0.0`.
+
+   Only the first line of the merge commit message is read (the pull
+   request title for a squash merge), so a pull request description can
+   discuss the markers freely.
+3. **Releases**: `scripts/prepare_release.py` moves the entries into
+   `## [X.Y.Z] - <today>`, the notes are rendered to check the section, the
+   result is committed to `main` as `release: vX.Y.Z`, tagged `vX.Y.Z`, and
+   the release workflow is started with `publish=true` (PyPI through the
+   `release` environment, then the GitHub Release). The commit and the tag
+   are pushed with the workflow token, which raises no events: CI does not
+   run again and nothing loops.
+
+Preview the decision for the commit you are about to merge:
+
+```bash
+git log -1 --format=%B > /tmp/msg.txt        # or write the intended title
+python scripts/next_version.py --message-file /tmp/msg.txt
+```
+
+A release freezes the section it creates. A pull request updated after a
+release must keep its entries under `[Unreleased]` (a merge or rebase can
+leave them inside the section that was just released); CI's changelog check
+(`scripts/check_changelog.py`, run by the `lint` job on every pull request)
+refuses entries added to a released section. The contributor side is in
+[CONTRIBUTING.md](https://github.com/ssf0409/tracelens/blob/main/CONTRIBUTING.md#changelog).
+
+To batch several pull requests into one release, put `[release: skip]` in
+every merge title but the last. To stop automatic releases altogether,
+disable the "Release on merge" workflow under Actions; the other two paths
+keep working.
+
+If `main` moves on before the workflow can push (two merges in quick
+succession), the run for the older commit stops and the CI run of the newer
+commit releases everything queued by then. If `main` rejects the push
+(branch protection against GitHub Actions), the workflow starts "Release
+prepare" with the same version, which opens the release pull request for you
+to merge, and says so in its job summary.
+
+## Cut A Release By Hand
+
+For a pre-release, a version the rules above would not pick, or when the
+automatic path is off, the manual path is two clicks and one review.
 
 1. **Run the "Release prepare" workflow** (Actions → Release prepare → Run
    workflow) with the version, for example `0.5.0`, and an optional
@@ -106,10 +184,10 @@ The default path is two clicks and one review.
    /tmp/tracelens-release-smoke/bin/tracelens --help
    ```
 
-Nothing releases on an ordinary merge to `main`: only the merge of a
-`release/vX.Y.Z` pull request is tagged (the workflow also checks that the
-changelog has the dated section and that the tag is new), and only a tag is
-ever published.
+Whichever path creates it, the tag is new, the changelog has the dated
+section for its version, and only a tag is ever published: the "Release tag"
+workflow tags only the merge of a `release/vX.Y.Z` pull request, and
+"Release on merge" only its own `release: vX.Y.Z` commit.
 
 ### Manual fallback
 
@@ -152,6 +230,24 @@ If the workflows are unavailable, the tag-driven path still works on its own:
   already points at the release commit and only dispatches again. Or run the
   release workflow by hand on the tag with `publish=true`; both are safe to
   repeat.
+- **"Release on merge" did not release a merge you expected it to.** Its job
+  summary says why: CI was red or cancelled, `[Unreleased]` was empty, the
+  title said `[release: skip]`, the latest tag is a pre-release, or `main`
+  moved on before it could push (the next green commit releases everything
+  queued). Fix the cause and merge again, or use "Release prepare".
+- **The `release: vX.Y.Z` commit is on `main` but the tag or the publish run
+  is missing.** Re-run the "Release on merge" job: it recognises its own
+  release commit on top of the tested commit, keeps a tag that already
+  points there, and dispatches the release again. Or push the tag by hand
+  (`git tag -a vX.Y.Z -m "release: vX.Y.Z" <sha> && git push origin vX.Y.Z`),
+  which triggers the release workflow directly.
+- **"Release on merge" fails with "CHANGELOG.md already has a section for
+  X.Y.Z but there is no tag vX.Y.Z".** A release commit landed without its
+  tag. Re-run the "Release tag" job for that commit (or "Release on merge",
+  or tag by hand as above); the next merge then releases normally.
+- **"Release on merge" opened a release pull request instead of releasing.**
+  `main` rejected its push. Merge that pull request to publish, and see step
+  5 of [One-Time Setup](#one-time-setup) to make the next release automatic.
 
 ## Dependency Guidance
 

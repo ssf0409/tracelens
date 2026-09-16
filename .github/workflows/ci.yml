@@ -128,6 +128,16 @@ jobs:
         run: pip install "ruff>=0.1"
       - name: ruff check
         run: ruff check src/ tests/ scripts/
+      # Changelog entries belong under [Unreleased]; a released section is
+      # frozen. A merge after a release can leave a pull request's entries
+      # inside the section that was just released, so compare with the base.
+      - name: changelog entries go under [Unreleased]
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          python scripts/check_changelog.py --base "origin/$BASE_REF"
 
   # ------------------------------------------------------------------
   # typecheck: strict mypy check for the public typed package promise.
