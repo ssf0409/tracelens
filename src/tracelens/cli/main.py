@@ -697,7 +697,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         )
     try:
         report = ReportData.from_dict(data)
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         return usage_error(
             f"{args.results} is not a TraceLens results file ({exc})",
             hint="Pass the JSON written by 'tracelens run --output'.",

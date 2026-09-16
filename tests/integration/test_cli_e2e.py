@@ -1605,3 +1605,61 @@ def test_report_format_ci_reprints_the_run_summary(
     assert "Baseline check:" in gated_stdout and "REGRESSION DETECTED" in gated_stdout
     assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
     assert capsys.readouterr().out == gated_stdout
+
+
+def test_eval_set_misspelled_task_key_fails_fast_with_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #129: misspelled task keys fail before any agent call with exit 2."""
+    bad_tasks = tmp_path / "bad_tasks.json"
+    bad_tasks.write_text(json.dumps({
+        "tasks": [
+            {
+                "task_id": "t1",
+                "name": "bad task",
+                "input_data": {"val": 1},
+                "expectd_output": "misspelled",
+            }
+        ]
+    }))
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(bad_tasks),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+    )
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "expectd_output" in err
+    assert EchoAdapter.run_count == 0
+
+
+def test_eval_set_misspelled_expectation_key_fails_fast_with_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #129: misspelled expectation keys fail before any agent call with exit 2."""
+    bad_tasks = tmp_path / "bad_tasks_expectation.json"
+    bad_tasks.write_text(json.dumps({
+        "tasks": [
+            {
+                "task_id": "t1",
+                "name": "bad task",
+                "input_data": {"val": 1},
+                "expectation": {
+                    "expectd_output": "typo",
+                },
+            }
+        ]
+    }))
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(bad_tasks),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+    )
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "expectd_output" in err
+    assert EchoAdapter.run_count == 0

@@ -3,12 +3,20 @@
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
+from tracelens.core.outcome import Outcome
+from tracelens.core.provenance import RunProvenance
 from tracelens.core.task import (
     EvalSet,
+    EvalSetMetadata,
     JSONTaskLoader,
     Task,
     TaskExpectation,
 )
+from tracelens.core.transcript import Transcript
+from tracelens.core.trial import Trial
 
 
 class TestTask:
@@ -254,3 +262,75 @@ class TestEvalSet:
         assert result.name == "Test Suite"
         assert result.default_num_runs == 5
         assert result.default_grader_ids == ["g1"]
+
+
+class TestStrictInputModels:
+    """Issue #129: Input models must forbid unknown keys to fail fast on typos."""
+
+    def test_task_forbids_unknown_keys(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Task(name="t", input_data={}, task_idd="bad_key")
+        assert "task_idd" in str(exc_info.value)
+
+        with pytest.raises(ValidationError) as exc_info:
+            Task(name="t", input_data={}, expectd_output="something")
+        assert "expectd_output" in str(exc_info.value)
+
+    def test_task_expectation_forbids_unknown_keys(self):
+        with pytest.raises(ValidationError) as exc_info:
+            TaskExpectation(expectd_output="misspelled")
+        assert "expectd_output" in str(exc_info.value)
+
+    def test_eval_set_forbids_unknown_keys(self):
+        with pytest.raises(ValidationError) as exc_info:
+            EvalSet(name="set", unknown_config=True)
+        assert "unknown_config" in str(exc_info.value)
+
+    def test_eval_set_metadata_forbids_unknown_keys(self):
+        with pytest.raises(ValidationError) as exc_info:
+            EvalSetMetadata(unknown_meta="val")
+        assert "unknown_meta" in str(exc_info.value)
+
+
+class TestArtifactModelsForwardCompatibility:
+    """Issue #129: Artifact models must stay forward-compatible and log dropped keys."""
+
+    def test_trial_logs_dropped_keys(self, caplog):
+        with caplog.at_level("WARNING"):
+            trial = Trial(task_id="t1", statuss="completed", future_field=42)
+        assert trial.task_id == "t1"
+        assert "ignoring unknown fields in Trial: future_field, statuss" in caplog.text
+
+    def test_transcript_logs_dropped_keys(self, caplog):
+        with caplog.at_level("WARNING"):
+            transcript = Transcript(task_id="t1", extra_transcript_data="abc")
+        assert transcript.task_id == "t1"
+        assert "ignoring unknown fields in Transcript: extra_transcript_data" in caplog.text
+
+    def test_outcome_logs_dropped_keys(self, caplog):
+        with caplog.at_level("WARNING"):
+            outcome = Outcome(trial_id="tr1", grader_id="g1", passed=True, score=1.0, extra_outcome=True)
+        assert outcome.passed is True
+        assert "ignoring unknown fields in Outcome: extra_outcome" in caplog.text
+
+    def test_provenance_logs_dropped_keys(self, caplog):
+        with caplog.at_level("WARNING"):
+            prov = RunProvenance.model_validate({
+                "schema_version": 1,
+                "run_id": "run-1",
+                "measurement": {
+                    "eval_set_hash": "abc",
+                    "runner": {
+                        "num_runs": 1,
+                        "max_concurrency": 1,
+                        "timeout_seconds": 10.0,
+                        "max_infra_retries": 0,
+                    },
+                },
+                "candidate": {
+                    "adapter": {"class_path": "my.Adapter"},
+                },
+                "future_prov_key": "xyz",
+            })
+        assert prov.run_id == "run-1"
+        assert "ignoring unknown fields in RunProvenance: future_prov_key" in caplog.text

@@ -86,6 +86,57 @@ class TestReportData:
         d = report.to_dict()
         assert "regression" not in d
 
+    def test_from_dict_ignores_unknown_task_summary_keys_with_warning(self, caplog):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [
+                {
+                    "task_id": "t1",
+                    "num_trials": 1,
+                    "pass_rate": 1.0,
+                    "mean_score": 1.0,
+                    "std_score": 0.0,
+                    "unknown_future_field": "some_value",
+                    "another_extra_key": 123,
+                }
+            ],
+        }
+        with caplog.at_level("WARNING"):
+            restored = ReportData.from_dict(d)
+        assert len(restored.task_summaries) == 1
+        assert restored.task_summaries[0].task_id == "t1"
+        assert "ignoring unknown fields in task_summaries entry: another_extra_key, unknown_future_field" in caplog.text
+
+    def test_from_dict_rejects_non_dict_task_summaries(self):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": ["not_a_dict"],
+        }
+        with pytest.raises(ValueError, match="each entry in task_summaries must be a JSON object"):
+            ReportData.from_dict(d)
+
+    def test_from_dict_rejects_non_dict_metric_availability_root(self):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [],
+            "metric_availability": "not_a_dict",
+        }
+        with pytest.raises(ValueError, match="metric_availability must be a JSON object"):
+            ReportData.from_dict(d)
+
+    def test_from_dict_rejects_non_dict_metric_availability_entry(self):
+        d = {
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": [],
+            "metric_availability": {"pass@1": "not_a_dict"},
+        }
+        with pytest.raises(ValueError, match="entry for 'pass@1' in metric_availability must be a JSON object"):
+            ReportData.from_dict(d)
+
 
 class TestReportGenerator:
     def test_build_report_basic(self):

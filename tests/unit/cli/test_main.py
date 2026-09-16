@@ -7,7 +7,7 @@ import pytest
 
 from tracelens.cli.calibrate import cmd_calibrate
 from tracelens.cli.config import ConfigError, resolve_run_settings
-from tracelens.cli.main import build_parser
+from tracelens.cli.main import build_parser, cmd_report
 
 
 class TestBuildParser:
@@ -229,3 +229,63 @@ class TestCmdCalibrateIntegration:
             "--annotations", str(ann_path),
         ])
         assert cmd_calibrate(args) == 2
+
+
+class TestCmdReport:
+    """Issue #129: cmd_report handles invalid or foreign results files with exit code 2."""
+
+    def test_report_missing_file_returns_2(self):
+        args = build_parser().parse_args(["report", "--results", "nonexistent_file.json"])
+        assert cmd_report(args) == 2
+
+    def test_report_invalid_json_returns_2(self, tmp_path: Path):
+        bad_json = tmp_path / "bad.json"
+        bad_json.write_text("{not json")
+        args = build_parser().parse_args(["report", "--results", str(bad_json)])
+        assert cmd_report(args) == 2
+
+    def test_report_foreign_results_file_returns_2(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+        foreign = tmp_path / "foreign.json"
+        foreign.write_text(json.dumps({"some_other": "data"}))
+        args = build_parser().parse_args(["report", "--results", str(foreign)])
+        exit_code = cmd_report(args)
+        assert exit_code == 2
+        err = capsys.readouterr().err
+        assert "is not a TraceLens results file" in err
+        assert "Pass the JSON written by 'tracelens run --output'" in err
+
+    def test_report_malformed_task_summaries_returns_2(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+        malformed = tmp_path / "malformed.json"
+        malformed.write_text(json.dumps({
+            "total_trials": 1,
+            "total_tasks": 1,
+            "task_summaries": ["not_a_dict"],
+        }))
+        args = build_parser().parse_args(["report", "--results", str(malformed)])
+        exit_code = cmd_report(args)
+        assert exit_code == 2
+        err = capsys.readouterr().err
+        assert "is not a TraceLens results file" in err
+
+    def test_report_extra_task_summary_keys_succeeds_exit_0(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+        results = tmp_path / "results_with_extra.json"
+        results.write_text(json.dumps({
+            "total_trials": 1,
+            "total_tasks": 1,
+            "overall_pass_rate": 1.0,
+            "task_summaries": [
+                {
+                    "task_id": "t1",
+                    "num_trials": 1,
+                    "pass_rate": 1.0,
+                    "mean_score": 1.0,
+                    "std_score": 0.0,
+                    "future_unknown_field": "test",
+                }
+            ],
+        }))
+        args = build_parser().parse_args(["report", "--results", str(results), "--format", "ci"])
+        exit_code = cmd_report(args)
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        assert "TraceLens:" in out

@@ -8,6 +8,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Exit code contract on `report` and strict input models.** `ReportData.from_dict`
+  now robustly filters known `TaskSummary` fields, warns when unknown fields are
+  present (preserving forward compatibility for older report readers on newer files),
+  and validates `metric_availability`. `cmd_report` catches `TypeError` alongside
+  `ValueError` to return exit code 2 on invalid or foreign results files rather than
+  raising an unhandled traceback. Input models (`Task`, `TaskExpectation`, `EvalSet`,
+  `EvalSetMetadata`) now use `extra='forbid'` to fail fast on misspelled keys with exit
+  code 2 before execution, while artifact models (`Trial`, `Transcript`, `Outcome`,
+  `RunProvenance`) log warnings for dropped keys. (#129)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
