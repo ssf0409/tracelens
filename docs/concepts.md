@@ -57,7 +57,7 @@ for you.
 | **Trial** | One Task run once and graded — a Transcript + its Outcome. | `Trial`, `TrialStatus` |
 | **TrialBatch** | All Trials for a run, with aggregate statistics and error rates. | `TrialBatch` |
 | **Runner** | Drives the whole pipeline: parallelism, repeats, timeouts, checkpointing. | `EvaluationRunner`, `RunnerConfig` |
-| **DecisionSpec** | A reproducibility fingerprint of the exact agent config (model, prompt, tools, infra). | `DecisionSpec` |
+| **DecisionSpec** | Declared agent and execution configuration (model, prompt, tools, infra) and its fingerprint, enabling attributable comparisons. | `DecisionSpec` |
 | **Baseline** | A stored known-good result a candidate run is compared against to detect regressions. | `BaselineManager`, `RegressionDetector` |
 
 ## Two distinctions that matter

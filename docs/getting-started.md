@@ -181,10 +181,10 @@ everything else:
    `transcript.final_output`. It doesn't care which tools the agent
    called or in what order — that's an implementation detail.
 2. **Reproducibility is a first-class config.** Every run carries a
-   `DecisionSpec` (model, prompt, tools, infra). Two runs with the
-   same fingerprint should produce statistically similar results;
-   when they don't, regression detection knows whether to blame the
-   agent or the infrastructure.
+   `DecisionSpec` (model, prompt, tools, infra). Stamping runs with a
+   fingerprint supports attributing outcome changes to declared differences
+   between versions, distinguishing intentional agent changes from infra or
+   environment changes.
 
 Everything else — async vs sync, single agent vs HTTP, code grader vs
 LLM judge — is a knob you can turn without rewriting your eval set.

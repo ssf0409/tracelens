@@ -8,6 +8,17 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Roadmap refreshed and delivery status centralized in issue tracker.**
+  Updated `ROADMAP.md` to distinguish shipped 0.5.0 capabilities (run comparison,
+  persisted gate reporting across formats) from open analysis items (descriptive
+  slicing in #90, exploratory slice comparisons in #108, trace imports in #104),
+  marked Phase 0 as completed in 0.5.0, clarified two-downstream-projects discipline
+  for core abstractions and analysis, linked the delivery tracker (#55) and open
+  issues queue in the contributor on-ramp, and aligned reproducibility/attribution
+  framing in `docs/getting-started.md` and `docs/concepts.md`. (#107)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
