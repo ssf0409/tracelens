@@ -11,8 +11,10 @@ from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 from tracelens.reporting.inspect import (
     FAILURE_KINDS,
     InspectionReport,
+    SharePolicy,
     TrialKind,
     build_inspection,
+    build_share_export,
     classify,
     excerpt,
     render_html,
@@ -232,3 +234,111 @@ class TestBuildAndRender:
         data = json.loads(report.model_dump_json())
         assert InspectionReport.model_validate(data) == report
         assert data["totals"]["agent_failure"] == 2 and data["trials"][0]["kind"] == "agent_failure"
+
+
+class TestShareExport:
+    def test_default_export_omits_all_sensitive_and_identity_fields(self):
+        secret_sentinels = [
+            "sk-ant-api03-SECRET_KEY_SENTINEL",
+            "ghp_TOKEN_SENTINEL",
+            "user@internal.corp",
+            "/home/user/private/repo/secret.py",
+        ]
+        task = Task(
+            task_id="sensitive-task-id-1234",
+            name="task-with-secret-name",
+            input_data={"secret_email": secret_sentinels[2], "nested": {"key": secret_sentinels[0]}},
+            expectation=TaskExpectation(expected_output=f"secret answer {secret_sentinels[1]}"),
+        )
+        trial = _trial(
+            task.task_id,
+            error_message=f"Traceback error at {secret_sentinels[3]}: failed",
+            outcomes=[("grader-1", False, 0.0)],
+            feedback=f"Feedback leaking {secret_sentinels[0]}",
+            transcript=_transcript(task.task_id, steps=2, final_output={"res": secret_sentinels[1]}),
+        )
+        batch = _batch(trial)
+        export = build_share_export(batch, source="export.html", tasks=[task])
+
+        # Test serialized outputs
+        json_bytes = export.model_dump_json()
+        html_bytes = render_html(export)
+        text_bytes = render_text(export)
+
+        for sentinel in secret_sentinels:
+            assert sentinel not in json_bytes
+            assert sentinel not in html_bytes
+            assert sentinel not in text_bytes
+
+        # Check raw IDs and names are not leaked
+        assert "sensitive-task-id-1234" not in json_bytes
+        assert "sensitive-task-id-1234" not in html_bytes
+        assert "sensitive-task-id-1234" not in text_bytes
+        assert "task-with-secret-name" not in json_bytes
+        assert "task-with-secret-name" not in html_bytes
+
+        # Check opaque references
+        assert export.trials[0].task_id == "task_1"
+        assert export.trials[0].trial_id == "trial_1"
+        assert export.share_metadata is not None
+        assert export.share_metadata.fields_omitted_count > 0
+        assert "Data Minimization Notice" in html_bytes
+        assert "Data Minimization Notice" in text_bytes or "data_minimization_notice" in json_bytes
+
+    def test_explicit_inclusion_with_configured_redaction(self):
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        other_text = "clean text"
+        task = Task(
+            task_id="t1",
+            name="task 1",
+            input_data={"key": f"input with {secret} and {other_text}"},
+            expectation=TaskExpectation(expected_output=f"expected with {secret}"),
+        )
+        trial = _trial(
+            "t1",
+            error_message=f"error with {secret}",
+            outcomes=[("g", False, 0.0)],
+            feedback=f"feedback with {secret}",
+            transcript=_transcript("t1", steps=1, final_output=f"output with {secret}"),
+        )
+        batch = _batch(trial)
+
+        policy = SharePolicy(
+            include_input=True,
+            include_output=True,
+            include_feedback=True,
+            include_transcript=True,
+            include_errors=True,
+            redact_patterns=[r"AKIA[0-9A-Z]{16}"],
+        )
+        export = build_share_export(batch, source="export", policy=policy, tasks=[task])
+
+        json_dump = export.model_dump_json()
+        html_dump = render_html(export)
+
+        # Secret is completely replaced with [redacted]
+        assert secret not in json_dump
+        assert secret not in html_dump
+        assert "[redacted]" in json_dump
+        assert "[redacted]" in html_dump
+        assert other_text in json_dump
+        assert other_text in html_dump
+        assert export.share_metadata.values_redacted_count >= 5
+
+    def test_invalid_regex_raises_value_error(self):
+        batch = _batch(FAILED)
+        policy = SharePolicy(redact_patterns=["[unclosed"])
+        try:
+            build_share_export(batch, source="export", policy=policy)
+            assert False, "Should have raised ValueError"
+        except ValueError as exc:
+            assert "Invalid redaction regular expression" in str(exc)
+
+    def test_source_batch_unmutated(self):
+        trial = _trial("t1", outcomes=[("g", False, 0.0)], feedback="secret")
+        batch = _batch(trial)
+        orig_feedback = trial.outcomes[0].feedback
+        orig_task_id = trial.task_id
+        _ = build_share_export(batch, source="export")
+        assert trial.outcomes[0].feedback == orig_feedback
+        assert trial.task_id == orig_task_id

@@ -308,7 +308,8 @@ from its trials file: each failing trial's kind (agent failure, infra error,
 or grader crash, never conflated), expected versus actual (with
 `--eval-set`), grader feedback, and transcript steps, bounded with explicit
 omission counts (`--full` lifts the bounds; `--html` writes an offline
-drilldown). Fix and rerun only the affected tasks with
+drilldown; `--share-export` writes a minimized and redacted artifact safe
+for public review). Fix and rerun only the affected tasks with
 `tracelens run ... --task-id ID` (`run.task_ids` in a config file). See
 [Debugging a Failed Evaluation](inspecting-failures.md).
 

@@ -67,6 +67,33 @@ was cut.
 `inspect` exits 0 whenever the file could be read, failures or not: it
 reports, the baseline gate decides. Input errors exit 2.
 
+### Sharing inspection artifacts safely: preview, review, export
+
+Inspection outputs often embed task inputs, outputs, grader feedback, error messages,
+and tool calls that may contain secrets or internal infrastructure details. Local
+bounds (`--max-chars`) limit positional length but are content-agnostic.
+
+For public sharing (e.g. attaching to GitHub issues or external reports), use explicit
+share exports:
+
+```bash
+tracelens inspect eval/results/trials.json --failures --share-export eval/results/share.html
+```
+
+- **Data minimization by default**: Share exports include aggregate totals and
+  allowlisted grader verdicts/metrics, while omitting free-text inputs, outputs, tool
+  arguments/results, feedback, error traces, and paths. Trial and task identifiers are
+  replaced with export-local opaque references (`task_1`, `trial_1`).
+- **Targeted evidence with redaction**: Include specific evidence when needed with
+  `--share-include {input,output,feedback,transcript,errors}` and configure regex redactions
+  using `--share-redact PATTERN`. Redaction applies to complete values *before* truncation or
+  rendering.
+- **Minimization vs. anonymization**: TraceLens never claims automated redaction provides
+  a mathematical guarantee of anonymization. Always review the generated artifact before
+  distributing it.
+- **Safety guarantee**: Share exports never mutate or overwrite source trials, grader outcomes,
+  or checkpoint state.
+
 ## 4. Fix, then rerun just that task
 
 ```bash

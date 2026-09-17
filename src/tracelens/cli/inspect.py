@@ -30,8 +30,10 @@ from tracelens.reporting.inspect import (
     DEFAULT_MAX_STEPS,
     FAILURE_KINDS,
     KIND_FLAGS,
+    SharePolicy,
     TrialKind,
     build_inspection,
+    build_share_export,
     render_html,
     render_text,
 )
@@ -104,6 +106,31 @@ def add_inspect_parser(subparsers: argparse._SubParsersAction) -> None:  # type:
     parser.add_argument(
         "--json", default=None, metavar="PATH",
         help="Also write the inspection as JSON (the same fields the text shows)",
+    )
+    parser.add_argument(
+        "--share-export", default=None, metavar="PATH", dest="share_export",
+        help=(
+            "Write a minimized and redacted share export artifact to PATH. "
+            "Excludes free-text fields and replaces identifiers with opaque references."
+        ),
+    )
+    parser.add_argument(
+        "--share-format", choices=["html", "json", "both"], default="html", dest="share_format",
+        help="Format for --share-export: html (default), json, or both",
+    )
+    parser.add_argument(
+        "--share-include", nargs="+",
+        choices=["input", "output", "feedback", "transcript", "errors"],
+        default=[], dest="share_include",
+        help="Deliberately include selected evidence fields in the share export",
+    )
+    parser.add_argument(
+        "--share-redact", nargs="+", default=[], dest="share_redact", metavar="PATTERN",
+        help="Regex pattern(s) to redact from included share export fields (applied before truncation)",
+    )
+    parser.add_argument(
+        "--share-keep-run-id", action="store_true", dest="share_keep_run_id",
+        help="Retain the provenance run_id in the share export metadata (omitted by default)",
     )
 
 
@@ -185,4 +212,64 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         failed = _write(args.json, report.model_dump_json(indent=2), "inspection json", debug=debug)
         if failed is not None:
             return failed
+
+    if args.share_export:
+        source_path = Path(args.trials).resolve()
+        export_target = Path(args.share_export).resolve()
+        if source_path == export_target:
+            return usage_error(
+                f"--share-export path collides with source trials file: {args.share_export}",
+                hint="Share export writes a separate presentation artifact and never overwrites source trials.",
+            )
+
+        includes = set(args.share_include or [])
+        policy = SharePolicy(
+            include_input="input" in includes,
+            include_output="output" in includes,
+            include_feedback="feedback" in includes,
+            include_transcript="transcript" in includes,
+            include_errors="errors" in includes,
+            keep_run_id=args.share_keep_run_id,
+            redact_patterns=list(args.share_redact or []),
+        )
+        try:
+            share_report = build_share_export(
+                batch,
+                source=str(export_target),
+                policy=policy,
+                kinds=kinds,
+                task_ids=args.task_ids,
+                grader_ids=args.grader_ids,
+                tasks=tasks,
+                max_steps=args.max_steps,
+                max_chars=args.max_chars,
+                full=args.full,
+                limit=args.limit,
+            )
+        except ValueError as exc:
+            return usage_error(f"invalid share export configuration: {exc}")
+
+        # Determine destinations based on share_format
+        if args.share_format == "both":
+            html_target = str(export_target.with_suffix(".html"))
+            json_target = str(export_target.with_suffix(".json"))
+            if source_path in (Path(html_target).resolve(), Path(json_target).resolve()):
+                return usage_error(
+                    f"--share-export path collides with source trials file: {args.share_export}"
+                )
+            failed = _write(html_target, render_html(share_report), "share export html", debug=debug)
+            if failed is not None:
+                return failed
+            failed = _write(json_target, share_report.model_dump_json(indent=2), "share export json", debug=debug)
+            if failed is not None:
+                return failed
+        elif args.share_format == "json":
+            failed = _write(str(export_target), share_report.model_dump_json(indent=2), "share export json", debug=debug)
+            if failed is not None:
+                return failed
+        else:  # html default
+            failed = _write(str(export_target), render_html(share_report), "share export html", debug=debug)
+            if failed is not None:
+                return failed
+
     return 0

@@ -163,3 +163,47 @@ def test_real_process_prints_the_report_only(artifacts):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.startswith("Inspected ") and "t-crash" in result.stdout
     assert result.stderr == ""
+
+
+def test_share_export_cli_default_and_collision(artifacts, capsys):
+    trials_path = artifacts["trials"]
+    # 1. Collision check with source trials file
+    assert _run(str(trials_path), "--share-export", str(trials_path)) == 2
+    err = capsys.readouterr().err
+    assert "collides with source trials file" in err
+
+    # 2. Collision check with --share-format both
+    stem_without_suffix = artifacts["root"] / "out" / "collision"
+    trials_as_json = stem_without_suffix.with_suffix(".json")
+    trials_as_json.write_text(trials_path.read_text())
+    assert _run(str(trials_as_json), "--share-export", str(stem_without_suffix), "--share-format", "both") == 2
+    assert "collides with source trials file" in capsys.readouterr().err
+
+    # 3. Successful share export (HTML default)
+    export_html = artifacts["root"] / "out" / "share.html"
+    assert _run(str(trials_path), "--share-export", str(export_html)) == 0
+    captured = capsys.readouterr()
+    assert f"[tracelens] wrote share export html: {export_html}" in captured.err
+    html_content = export_html.read_text()
+    assert "<!DOCTYPE html>" in html_content
+    assert "Data Minimization Notice" in html_content
+    # Task id 't-fail' is replaced with opaque 'task_1' etc.
+    assert "t-fail" not in html_content
+    assert "t-crash" not in html_content
+
+    # 4. Successful share export (JSON and redaction pattern)
+    export_json = artifacts["root"] / "out" / "share.json"
+    assert _run(
+        str(trials_path),
+        "--share-export", str(export_json),
+        "--share-format", "json",
+        "--share-include", "input", "output", "errors",
+        "--share-redact", r"connection\s+refused",
+    ) == 0
+    assert f"[tracelens] wrote share export json: {export_json}" in capsys.readouterr().err
+    data = json.loads(export_json.read_text())
+    assert data["share_metadata"]["values_redacted_count"] >= 1
+    # connection refused should be redacted to [redacted]
+    raw_text = export_json.read_text()
+    assert "connection refused" not in raw_text
+    assert "[redacted]" in raw_text

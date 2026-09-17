@@ -12,6 +12,7 @@ what was left out, so the view never misreports what it omitted.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from enum import StrEnum
 from html import escape
@@ -25,6 +26,8 @@ from tracelens.core.transcript import StepType, Transcript, TranscriptStep
 from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 
 MISSING = "missing"
+REDACTED = "[redacted]"
+OMITTED = "[omitted]"
 DEFAULT_MAX_STEPS = 20
 DEFAULT_MAX_CHARS = 400
 
@@ -188,6 +191,43 @@ class TrialView(BaseModel):
         return text
 
 
+class SharePolicy(BaseModel):
+    """Configuration for data minimization and redaction during share export."""
+
+    include_input: bool = False
+    include_output: bool = False
+    include_feedback: bool = False
+    include_transcript: bool = False
+    include_errors: bool = False
+    keep_run_id: bool = False
+    redact_patterns: list[str] = Field(default_factory=list)
+
+    def is_minimized_default(self) -> bool:
+        return not (
+            self.include_input
+            or self.include_output
+            or self.include_feedback
+            or self.include_transcript
+            or self.include_errors
+            or self.keep_run_id
+        )
+
+
+class ShareExportMetadata(BaseModel):
+    """Metadata recorded in share exports to document redaction and minimization."""
+
+    policy: SharePolicy
+    fields_omitted_count: int = 0
+    values_redacted_count: int = 0
+    source_run_id: str | None = None
+    data_minimization_notice: str = (
+        "This artifact was generated with explicit data minimization. "
+        "Sensitive free-text inputs, outputs, transcripts, errors, and IDs are omitted "
+        "or redacted by policy. Data minimization reduces disclosure risks but does not "
+        "guarantee statistical or total anonymization; review before public distribution."
+    )
+
+
 class InspectionReport(BaseModel):
     """Everything the text and HTML views render; ``--json`` writes it as is."""
 
@@ -204,6 +244,7 @@ class InspectionReport(BaseModel):
     max_chars: int | None = DEFAULT_MAX_CHARS
     full: bool = False
     trials: list[TrialView] = Field(default_factory=list)
+    share_metadata: ShareExportMetadata | None = None
 
 
 # --- building the views ----------------------------------------------------------
@@ -404,6 +445,311 @@ def build_inspection(
     )
 
 
+def _redact_value(
+    value: Any,
+    patterns: Sequence[re.Pattern[str]],
+    counter: list[int],
+) -> Any:
+    """Apply regex redaction patterns to a string or recursively in JSON-like structures."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        result = value
+        for pat in patterns:
+            subbed, n = pat.subn(REDACTED, result)
+            if n > 0:
+                counter[0] += n
+                result = subbed
+        return result
+    if isinstance(value, dict):
+        return {k: _redact_value(v, patterns, counter) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v, patterns, counter) for v in value]
+    return value
+
+
+def build_share_export(
+    batch: TrialBatch,
+    *,
+    source: str,
+    policy: SharePolicy | None = None,
+    kinds: Iterable[TrialKind] | None = FAILURE_KINDS,
+    task_ids: Sequence[str] | None = None,
+    grader_ids: Sequence[str] | None = None,
+    tasks: Sequence[Task] | None = None,
+    max_steps: int | None = DEFAULT_MAX_STEPS,
+    max_chars: int | None = DEFAULT_MAX_CHARS,
+    full: bool = False,
+    limit: int | None = None,
+) -> InspectionReport:
+    """Build a minimized and redacted inspection artifact for sharing.
+
+    By default, all free-text fields (inputs, outputs, tool arguments/results,
+    feedback/errors, local paths, and user-supplied identity fields) are omitted.
+    Opaque IDs (e.g. ``task_1``, ``trial_1``) replace source identifiers so links
+    between views do not leak raw keys or paths.
+    Selected fields permitted by ``policy`` are redacted with any configured regex
+    patterns *before* truncation or rendering.
+    """
+    if policy is None:
+        policy = SharePolicy()
+
+    if full:
+        max_steps = None
+        max_chars = None
+
+    compiled_patterns: list[re.Pattern[str]] = []
+    for pat_str in policy.redact_patterns:
+        try:
+            compiled_patterns.append(re.compile(pat_str))
+        except re.error as exc:
+            raise ValueError(f"Invalid redaction regular expression '{pat_str}': {exc}") from exc
+
+    omitted_count = 0
+    redacted_counter = [0]
+
+    totals = {kind: 0 for kind in TrialKind}
+    for trial in batch.trials:
+        totals[classify(trial)] += 1
+
+    selected = select_trials(batch, kinds=kinds, task_ids=task_ids, grader_ids=grader_ids)
+    shown = selected if limit is None else selected[:limit]
+    by_id = {task.task_id: task for task in tasks} if tasks is not None else {}
+
+    # Assign export-local opaque references based on canonical ordering
+    task_id_map: dict[str, str] = {}
+    trial_id_map: dict[str, str] = {}
+    for trial in shown:
+        if trial.task_id not in task_id_map:
+            task_id_map[trial.task_id] = f"task_{len(task_id_map) + 1}"
+        if trial.trial_id not in trial_id_map:
+            trial_id_map[trial.trial_id] = f"trial_{len(trial_id_map) + 1}"
+
+    trial_views: list[TrialView] = []
+    for trial in shown:
+        opaque_task_id = task_id_map[trial.task_id]
+        opaque_trial_id = trial_id_map[trial.trial_id]
+
+        # 1. Expected output
+        task = by_id.get(trial.task_id)
+        if policy.include_output and task is not None and task.expectation is not None and (
+            task.expectation.expected_output is not None
+        ):
+            redacted_exp = _redact_value(task.expectation.expected_output, compiled_patterns, redacted_counter)
+            expected, _ = excerpt(redacted_exp, max_chars)
+        elif not policy.include_output:
+            omitted_count += 1
+            expected = OMITTED
+        elif task is not None:
+            expected = "missing (the task declares no expected output)"
+        elif tasks is not None:
+            expected = "missing (task not in the supplied eval set)"
+        else:
+            expected = "not supplied (pass --eval-set to show it)"
+
+        # 2. Actual output
+        transcript = trial.transcript
+        if policy.include_output:
+            raw_act = transcript.final_output if transcript is not None else None
+            redacted_act = _redact_value(raw_act, compiled_patterns, redacted_counter)
+            actual, _ = excerpt(redacted_act, max_chars)
+        else:
+            omitted_count += 1
+            actual = OMITTED
+
+        # 3. Task input
+        if policy.include_input and task is not None:
+            raw_inp = task.input_data
+            redacted_inp = _redact_value(raw_inp, compiled_patterns, redacted_counter)
+            task_input = excerpt(redacted_inp, max_chars)[0]
+        elif not policy.include_input:
+            omitted_count += 1
+            task_input = None
+        else:
+            task_input = None
+
+        # 4. Error message
+        if policy.include_errors and trial.error_message:
+            redacted_err = _redact_value(trial.error_message, compiled_patterns, redacted_counter)
+            error_message = excerpt(redacted_err, max_chars)[0]
+        elif trial.error_message:
+            omitted_count += 1
+            error_message = "[error message omitted by policy]"
+        else:
+            error_message = None
+
+        # 5. Grader outcomes
+        outcome_views: list[OutcomeView] = []
+        for outcome in trial.outcomes:
+            if policy.include_feedback:
+                redacted_fb = _redact_value(outcome.feedback, compiled_patterns, redacted_counter)
+                feedback, cut = excerpt(redacted_fb, max_chars)
+            else:
+                omitted_count += 1
+                feedback = OMITTED
+                cut = False
+            outcome_views.append(OutcomeView(
+                grader_id=outcome.grader_id,
+                passed=outcome.passed,
+                score=outcome.score,
+                grader_error=outcome.grader_error,
+                grade_level=outcome.grade_level.value if outcome.grade_level else None,
+                feedback=feedback,
+                feedback_truncated=cut,
+                metrics=dict(outcome.metrics),
+            ))
+
+        # 6. Transcript
+        transcript_view: TranscriptView | None = None
+        if transcript is not None:
+            if policy.include_transcript:
+                steps = transcript.steps
+                shown_steps = steps if max_steps is None else steps[:max_steps]
+                step_views: list[StepView] = []
+                for index, step in enumerate(shown_steps, start=1):
+                    # Redact step content/tool calls before summarizing
+                    if step.tool_call is not None:
+                        call = step.tool_call
+                        red_args = _redact_value(call.arguments, compiled_patterns, redacted_counter)
+                        red_res = _redact_value(call.result, compiled_patterns, redacted_counter)
+                        args_str, cut_args = excerpt(red_args, max_chars)
+                        res_str, cut_res = excerpt(red_res, max_chars)
+                        text = f"tool {call.tool_name}({args_str}) -> {res_str}"
+                        err_str = None
+                        if call.error:
+                            if policy.include_errors:
+                                red_call_err = _redact_value(call.error, compiled_patterns, redacted_counter)
+                                err_str = str(red_call_err)
+                                text += f" [tool error: {err_str}]"
+                            else:
+                                omitted_count += 1
+                                text += " [tool error: omitted]"
+                        step_views.append(StepView(
+                            index=index,
+                            step_type=step.step_type.value,
+                            summary=text,
+                            truncated=cut_args or cut_res,
+                            error=err_str,
+                            tokens_in=step.tokens_in,
+                            tokens_out=step.tokens_out,
+                        ))
+                    else:
+                        red_content = _redact_value(step.content, compiled_patterns, redacted_counter)
+                        content_str, cut = excerpt(red_content, max_chars)
+                        prefix = f"model={step.model} " if step.model else ""
+                        err_str = None
+                        if step.error:
+                            if policy.include_errors:
+                                err_str = str(_redact_value(step.error, compiled_patterns, redacted_counter))
+                            else:
+                                omitted_count += 1
+                                err_str = "[error omitted]"
+                        step_views.append(StepView(
+                            index=index,
+                            step_type=step.step_type.value,
+                            summary=f"{prefix}content: {content_str}",
+                            truncated=cut,
+                            error=err_str,
+                            tokens_in=step.tokens_in,
+                            tokens_out=step.tokens_out,
+                        ))
+                if policy.include_errors:
+                    errs = [
+                        excerpt(_redact_value(e, compiled_patterns, redacted_counter), max_chars)[0]
+                        for e in transcript.errors
+                    ]
+                else:
+                    omitted_count += len(transcript.errors)
+                    errs = [OMITTED] if transcript.errors else []
+                transcript_view = TranscriptView(
+                    steps_total=len(steps),
+                    steps_shown=len(shown_steps),
+                    steps_omitted=len(steps) - len(shown_steps),
+                    steps=step_views,
+                    errors=errs,
+                    final_output=actual,
+                    final_output_truncated=False,
+                    duration_ms=transcript.duration_ms,
+                    input_tokens=transcript.input_tokens,
+                    output_tokens=transcript.output_tokens,
+                    llm_calls=transcript.llm_calls_count,
+                    tool_calls=sum(1 for s in steps if s.step_type is StepType.TOOL_CALL),
+                    agent_name=transcript.agent_name,
+                )
+            else:
+                omitted_count += 1
+                transcript_view = TranscriptView(
+                    steps_total=len(transcript.steps),
+                    steps_shown=0,
+                    steps_omitted=len(transcript.steps),
+                    steps=[],
+                    errors=[],
+                    final_output=OMITTED,
+                    final_output_truncated=False,
+                    duration_ms=transcript.duration_ms,
+                    input_tokens=transcript.input_tokens,
+                    output_tokens=transcript.output_tokens,
+                    llm_calls=transcript.llm_calls_count,
+                    tool_calls=sum(1 for s in transcript.steps if s.step_type is StepType.TOOL_CALL),
+                    agent_name=transcript.agent_name,
+                )
+
+        trial_views.append(TrialView(
+            task_id=opaque_task_id,
+            task_name=None,  # Do not leak custom task names
+            run_index=trial.run_index,
+            trial_id=opaque_trial_id,
+            status=trial.status.value,
+            kind=classify(trial),
+            attempts=trial.attempts,
+            duration_ms=trial.duration_ms,
+            error_message=error_message,
+            task_input=task_input,
+            expected=expected,
+            actual=actual,
+            outcomes=outcome_views,
+            transcript=transcript_view,
+        ))
+
+    parts = []
+    if kinds is None:
+        parts.append("all trials")
+    else:
+        parts.append("kinds: " + ", ".join(KIND_LABELS[k] for k in kinds))
+    if task_ids:
+        parts.append(f"task filter ({len(task_ids)} requested)")
+    if grader_ids:
+        parts.append("failed by grader: " + ", ".join(grader_ids))
+
+    source_ref = "export"
+    run_id_val = None
+    if policy.keep_run_id and batch.provenance is not None:
+        run_id_val = batch.provenance.run_id
+
+    meta = ShareExportMetadata(
+        policy=policy,
+        fields_omitted_count=omitted_count,
+        values_redacted_count=redacted_counter[0],
+        source_run_id=run_id_val,
+    )
+
+    return InspectionReport(
+        source=source_ref,
+        run_id=run_id_val,
+        total_trials=batch.total_count,
+        totals=totals,
+        selection="; ".join(parts),
+        selected=len(selected),
+        shown=len(shown),
+        eval_set_supplied=tasks is not None,
+        max_steps=max_steps,
+        max_chars=max_chars,
+        full=full,
+        trials=trial_views,
+        share_metadata=meta,
+    )
+
+
 # --- text rendering ---------------------------------------------------------------
 
 
@@ -458,6 +804,13 @@ def render_text(report: InspectionReport) -> str:
                 lines.append(f"      transcript error: {error}")
     lines.append("")
     lines.append(_bounds_note(report))
+    if report.share_metadata is not None:
+        lines.append("")
+        lines.append(f"Share export: {report.share_metadata.data_minimization_notice}")
+        lines.append(
+            f"Fields omitted: {report.share_metadata.fields_omitted_count}, "
+            f"values redacted: {report.share_metadata.values_redacted_count}"
+        )
     return "\n".join(lines)
 
 
@@ -534,6 +887,16 @@ def render_html(report: InspectionReport) -> str:
         "" if report.eval_set_supplied
         else "<p class=\"muted\">Expected outputs: not supplied (pass --eval-set to show them).</p>"
     )
+    share_notice = ""
+    if report.share_metadata is not None:
+        meta = report.share_metadata
+        share_notice = (
+            f"<div style=\"background:#fef3c7;border:1px solid #f59e0b;padding:10px 14px;"
+            f"border-radius:8px;margin:12px 0;font-size:0.85em;color:#92400e;\">"
+            f"<strong>Data Minimization Notice:</strong> {escape(meta.data_minimization_notice)}"
+            f"<br><span>Omitted fields: {meta.fields_omitted_count} &middot; Redacted values: {meta.values_redacted_count}</span>"
+            f"</div>"
+        )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -568,6 +931,7 @@ def render_html(report: InspectionReport) -> str:
 <body>
 <h1>TraceLens Inspection</h1>
 <p class="muted">{escape(report.source)} &middot; {report.total_trials} trial(s) &middot; run {escape(report.run_id or MISSING)} &middot; TraceLens v{escape(report.tracelens_version)}</p>
+{share_notice}
 <div class="counts">{counts}</div>
 <p>Selected {report.selected} trial(s) ({escape(report.selection)}){escape(showing)}.</p>
 {expected_note}

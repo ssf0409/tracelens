@@ -8,6 +8,17 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **Explicit minimized and redacted share exports in `tracelens inspect`.**
+  `--share-export PATH` produces a separate inspection artifact (HTML, JSON,
+  or both via `--share-format`) stripped of raw free-text inputs, outputs,
+  tool calls, error tracebacks, and internal task/trial identities. Identities
+  are replaced with export-local opaque references (`task_1`, `trial_1`).
+  Selected evidence can be explicitly retained using `--share-include`
+  and redacted before rendering with `--share-redact PATTERN`. Refuses
+  collision with source trials to prevent accidental mutation. (#106)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
