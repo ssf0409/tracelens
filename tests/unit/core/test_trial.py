@@ -188,6 +188,14 @@ class TestTrial:
         assert ci_dict["run"] == "1/5"
         assert ci_dict["passed"] is True
 
+    def test_trial_to_ci_dict_zero_score(self):
+        """Issue #139: Trial.to_ci_dict reports a legitimate score of 0.0 as 0.0, not None."""
+        trial = Trial(task_id="zero-task", run_index=0, total_runs=1)
+        trial.add_outcome(Outcome(trial_id=trial.trial_id, grader_id="g1", passed=False, score=0.0))
+        assert trial.aggregate_score == 0.0
+        ci_dict = trial.to_ci_dict()
+        assert ci_dict["score"] == 0.0
+
 
 class TestTrialBatch:
     """Tests for TrialBatch model."""

@@ -8,6 +8,11 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Trial.to_ci_dict` preserves `0.0` aggregate scores.** Scores of 0.0 are no longer coerced to `None` in compact CI output dicts. (#139)
+- **Removed unused `baseline_manager` parameter.** Cleaned up dead `baseline_manager` parameter on `ReportGenerator.build_report`. (#139)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
