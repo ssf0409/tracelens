@@ -78,6 +78,21 @@ class JsonSchemaGrader(CodeGrader):
         score = metrics["schema_valid"]
         return passed, score
 
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("schema_valid") == 1.0:
+            return None
+        data = transcript.final_output
+        validator = jsonschema.Draft7Validator(self.schema)
+        errors = [err.message for err in validator.iter_errors(data)]
+        if errors:
+            return "; ".join(errors)
+        return "JSON schema validation failed"
+
 
 # ===========================================================================
 # StructuredOutputGrader
@@ -146,6 +161,28 @@ class StructuredOutputGrader(CodeGrader):
         score = metrics["parse_valid"]
         return passed, score
 
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("parse_valid") == 1.0:
+            return None
+        data = transcript.final_output
+        if not isinstance(data, dict):
+            return f"output is not a dict (got {type(data).__name__})"
+        try:
+            loaded = load_class(self.model_path)
+            if isinstance(loaded, type) and issubclass(loaded, BaseModel):
+                loaded.model_validate(data)
+        except PydanticValidationError as exc:
+            err_msgs = [f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors()]
+            return "; ".join(err_msgs) if err_msgs else "pydantic validation failed"
+        except Exception as exc:
+            return str(exc)
+        return "structured output validation failed"
+
 
 # ===========================================================================
 # ContainsGrader
@@ -203,6 +240,24 @@ class ContainsGrader(CodeGrader):
         score = metrics["required_found"] if no_forbidden else 0.0
         return passed, score
 
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("required_found") == 1.0 and metrics.get("forbidden_found") == 0.0:
+            return None
+        text = str(transcript.final_output)
+        missing_req = [r for r in self.required if r not in text]
+        found_forbid = [f for f in self.forbidden if f in text]
+        parts = []
+        if missing_req:
+            parts.append(f"missing required: {missing_req}")
+        if found_forbid:
+            parts.append(f"found forbidden: {found_forbid}")
+        return "; ".join(parts) if parts else None
+
 
 # ===========================================================================
 # RegexMatchGrader
@@ -253,6 +308,20 @@ class RegexMatchGrader(CodeGrader):
         passed = metrics["patterns_matched"] == 1.0
         score = metrics["patterns_matched"]
         return passed, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("patterns_matched") == 1.0:
+            return None
+        text = str(transcript.final_output)
+        unmatched = [p for p in self.patterns if not re.search(p, text)]
+        if unmatched:
+            return f"patterns failed to match: {unmatched}"
+        return None
 
 
 # ===========================================================================
@@ -362,3 +431,47 @@ class ConstraintGrader(CodeGrader):
         passed = metrics["constraints_met"] == 1.0 and metrics["violations"] == 0.0
         score = metrics["constraints_met"]
         return passed, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("constraints_met") == 1.0 and metrics.get("violations") == 0.0:
+            return None
+        data = transcript.final_output
+        text = str(data)
+        reasons = []
+        for i, constraint in enumerate(self.constraints):
+            ctype = constraint.get("type")
+            if ctype == "must_include":
+                val = constraint.get("value", "")
+                if val not in text:
+                    reasons.append(f"constraint[{i}] (must_include {val!r}) violated")
+            elif ctype == "must_not_include":
+                val = constraint.get("value", "")
+                if val in text:
+                    reasons.append(f"constraint[{i}] (must_not_include {val!r}) violated")
+            elif ctype == "numeric_range":
+                field = constraint.get("field", "")
+                lo = constraint.get("min", float("-inf"))
+                hi = constraint.get("max", float("inf"))
+                if not (isinstance(data, dict) and field in data):
+                    reasons.append(f"constraint[{i}] (numeric_range {field}): field missing")
+                else:
+                    val = data[field]
+                    if not (isinstance(val, (int, float)) and lo <= val <= hi):
+                        reasons.append(f"constraint[{i}] (numeric_range {field}): value {val!r} not in [{lo}, {hi}]")
+            elif ctype == "enum":
+                field = constraint.get("field", "")
+                allowed = constraint.get("values", [])
+                if not (isinstance(data, dict) and field in data):
+                    reasons.append(f"constraint[{i}] (enum {field}): field missing")
+                else:
+                    val = data[field]
+                    if val not in allowed:
+                        reasons.append(f"constraint[{i}] (enum {field}): value {val!r} not in {allowed}")
+            else:
+                reasons.append(f"constraint[{i}]: unknown type '{ctype}'")
+        return "; ".join(reasons) if reasons else "constraint violations occurred"

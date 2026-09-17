@@ -55,6 +55,17 @@ class LatencyGrader(CodeGrader):
         score = max(0.0, 1.0 - duration / self.max_ms)
         return passed, score
 
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        duration = metrics.get("duration_ms", 0.0)
+        if duration > self.max_ms:
+            return f"duration {duration:.1f}ms exceeds max budget {self.max_ms:.1f}ms"
+        return None
+
 
 class TokenBudgetGrader(CodeGrader):
     """Check that agent execution stays within a token budget.
@@ -99,6 +110,17 @@ class TokenBudgetGrader(CodeGrader):
         passed = total <= self.max_tokens
         score = max(0.0, 1.0 - total / self.max_tokens)
         return passed, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        total = metrics.get("total_tokens", 0.0)
+        if total > self.max_tokens:
+            return f"total tokens {total:g} exceeds max budget {self.max_tokens}"
+        return None
 
 
 class ToolCallGrader(CodeGrader):
@@ -178,6 +200,30 @@ class ToolCallGrader(CodeGrader):
         passed = all_required and no_unauthorized and no_forbidden
         score = 1.0 if passed else 0.0
         return passed, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        called_names = {tc.tool_name for tc in transcript.tool_calls}
+        issues = []
+        if self.required_tools:
+            missing = [t for t in self.required_tools if t not in called_names]
+            if missing:
+                issues.append(f"missing required tool calls: {missing}")
+        if self.allowed_tools is not None:
+            allowed_set = set(self.allowed_tools)
+            unauth = sorted({tc.tool_name for tc in transcript.tool_calls if tc.tool_name not in allowed_set})
+            if unauth:
+                issues.append(f"unauthorized tool calls: {unauth}")
+        if self.forbidden_tools:
+            forbidden_set = set(self.forbidden_tools)
+            forbid = sorted({tc.tool_name for tc in transcript.tool_calls if tc.tool_name in forbidden_set})
+            if forbid:
+                issues.append(f"forbidden tool calls: {forbid}")
+        return "; ".join(issues) if issues else None
 
 
 class TraceConsistencyGrader(CodeGrader):
@@ -263,3 +309,26 @@ class TraceConsistencyGrader(CodeGrader):
         passed = error_rate < 0.5 and phantom == 0
         score = max(0.0, 1.0 - error_rate)
         return passed, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        error_rate = metrics.get("tool_error_rate", 0.0)
+        phantom = int(metrics.get("phantom_calls", 0.0))
+        unused = int(metrics.get("unused_tool_results", 0.0))
+        issues = []
+        if error_rate >= 0.5:
+            issues.append(f"tool error rate {error_rate:.1%} >= 50%")
+        if phantom > 0:
+            if self.expected_tools is not None:
+                expected_set = set(self.expected_tools)
+                phantom_tools = sorted({tc.tool_name for tc in transcript.tool_calls if tc.tool_name not in expected_set})
+                issues.append(f"phantom tool calls: {phantom_tools}")
+            else:
+                issues.append(f"{phantom} phantom tool calls")
+        if unused > 0:
+            issues.append(f"{unused} unused tool result(s)")
+        return "; ".join(issues) if issues else None

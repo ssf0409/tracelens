@@ -156,6 +156,36 @@ class EventChainVerifier(CodeGrader):
 
         return passed, score
 
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        passed, _ = self.determine_pass(metrics, task)
+        if passed:
+            return None
+        expected = self.chain_config.expected_events
+        found_ids: list[str] = []
+        found_positions: dict[str, int] = {}
+        for step_idx, step in enumerate(transcript.steps):
+            for expectation in expected:
+                if expectation.event_id in found_ids:
+                    continue
+                if self._step_matches(step, expectation):
+                    found_ids.append(expectation.event_id)
+                    found_positions[expectation.event_id] = step_idx
+                    break
+        missing_ids = [e.event_id for e in expected if e.event_id not in found_ids]
+        ordering_ok = self._check_ordering(expected, found_ids, found_positions)
+
+        issues = []
+        if missing_ids:
+            issues.append(f"missing events: {missing_ids}")
+        if not ordering_ok:
+            issues.append(f"ordering violation in mode {self.chain_config.ordering}")
+        return "; ".join(issues) if issues else "event chain verification failed"
+
     def _step_matches(self, step: TranscriptStep, expectation: EventExpectation) -> bool:
         """Check if a transcript step matches an event expectation."""
         match expectation.match_type:

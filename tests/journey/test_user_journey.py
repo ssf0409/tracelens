@@ -150,6 +150,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert 'actual:   {"answer": "wrong"}' in inspect.stdout
     assert "task:     Answer a simple geography question" in inspect.stdout
     assert "starter FAIL score=0.00" in inspect.stdout
+    assert "feedback: expected 'Paris', got 'wrong'" in inspect.stdout
     assert (project / "eval/results/failures.html").read_text().count("agent failure") >= 2
 
     # 7. compare calls the broken run a regression against the trusted one.

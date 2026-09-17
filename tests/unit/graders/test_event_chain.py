@@ -106,6 +106,7 @@ class TestEventChainMissing:
         assert outcome.passed is False
         assert outcome.metrics["events_found"] == 1.0
         assert outcome.metrics["events_missing"] == 1.0
+        assert outcome.feedback == "missing events: ['analyze']"
 
     async def test_partial_scoring(self, task: Task):
         """With require_all=False, partial matches produce proportional scores."""
@@ -150,6 +151,7 @@ class TestEventChainOrdering:
         assert outcome.passed is False
         # Score penalty: ratio (1.0) × 0.5 for ordering violation
         assert outcome.score == pytest.approx(0.5)
+        assert outcome.feedback == "ordering violation in mode strict"
 
     async def test_partial_ordering_with_after(self, task: Task):
         config = EventChainConfig(

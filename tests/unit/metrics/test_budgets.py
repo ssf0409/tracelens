@@ -106,6 +106,10 @@ class TestLatencyGrader:
         assert passed is False
         assert score == 0.0
 
+        explanation = grader.explain(metrics, transcript, task)
+        assert explanation is not None
+        assert "exceeds max budget 1000.0ms" in explanation
+
     def test_exact_budget_passes(self, task: Task) -> None:
         grader = LatencyGrader("latency", max_ms=1000.0)
         transcript = _make_transcript(duration_ms=1000.0)
@@ -189,6 +193,10 @@ class TestTokenBudgetGrader:
         assert passed is False
         assert score == 0.0
 
+        explanation = grader.explain(metrics, transcript, task)
+        assert explanation is not None
+        assert "total tokens 700 exceeds max budget 500" in explanation
+
     def test_zero_tokens_passes(self, task: Task) -> None:
         grader = TokenBudgetGrader("tokens", max_tokens=1000)
         transcript = _make_transcript()
@@ -265,6 +273,7 @@ class TestToolCallGrader:
 
         passed, _ = grader.determine_pass(metrics, task)
         assert passed is False
+        assert grader.explain(metrics, transcript, task) == "unauthorized tool calls: ['delete']"
 
     def test_forbidden_tools_enforced(self, task: Task) -> None:
         grader = ToolCallGrader("tools", forbidden_tools=["delete", "drop"])
@@ -279,6 +288,7 @@ class TestToolCallGrader:
 
         passed, _ = grader.determine_pass(metrics, task)
         assert passed is False
+        assert grader.explain(metrics, transcript, task) == "forbidden tool calls: ['delete']"
 
     def test_all_constraints_satisfied(self, task: Task) -> None:
         grader = ToolCallGrader(
@@ -398,6 +408,7 @@ class TestTraceConsistencyGrader:
 
         passed, _ = grader.determine_pass(metrics, task)
         assert passed is False
+        assert grader.explain(metrics, transcript, task) == "phantom tool calls: ['unexpected_tool']"
 
     def test_unused_tool_results_counted(self, task: Task) -> None:
         """Tool calls with results but no subsequent AGENT_OUTPUT step."""

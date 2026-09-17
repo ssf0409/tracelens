@@ -93,6 +93,22 @@ class StarterGrader(CodeGrader):
     ) -> tuple[bool, float]:
         score = metrics["exact_match"]
         return score == 1.0, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("exact_match") == 1.0:
+            return None
+        expected = str(task.metadata.get("expected_answer", "")).strip()
+        actual = (
+            str(transcript.final_output.get("answer", "")).strip()
+            if isinstance(transcript.final_output, dict)
+            else str(transcript.final_output).strip()
+        )
+        return f"expected {expected!r}, got {actual!r}"
 '''
 
 

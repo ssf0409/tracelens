@@ -256,16 +256,30 @@ class CodeGrader(Grader):
         """
         pass
 
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        """Optional hook to provide human-readable failure or diagnostic feedback.
+
+        Override this in subclasses to explain failures when inspect is run.
+        """
+        return None
+
     async def grade(self, transcript: Transcript, task: Task) -> Outcome:
         """Grade by computing metrics and determining pass/fail."""
         metrics = self.compute_metrics(transcript, task)
         passed, score = self.determine_pass(metrics, task)
+        feedback = self.explain(metrics, transcript, task)
 
         return self.create_outcome(
             trial_id=transcript.task_id,  # Will be updated by runner
             passed=passed,
             score=score,
             metrics=metrics,
+            feedback=feedback,
         )
 
 

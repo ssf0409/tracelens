@@ -286,3 +286,36 @@ class TestGraderConfigRole:
         """Test explicit role setting."""
         config = GraderConfig(role=GraderRole.MUST_PASS)
         assert config.role == GraderRole.MUST_PASS
+
+
+class CustomExplainGrader(CodeGrader):
+    """Test grader with explain hook overridden."""
+
+    def compute_metrics(self, transcript, task):
+        return {"accuracy": 0.0}
+
+    def determine_pass(self, metrics, task):
+        return False, 0.0
+
+    def explain(self, metrics, transcript, task):
+        return "failed accuracy threshold"
+
+
+class TestCodeGraderExplain:
+    """Tests for CodeGrader explain() hook."""
+
+    @pytest.mark.asyncio
+    async def test_default_explain_returns_none(self):
+        grader = SimpleScoreGrader("test", score=0.5, passed=False)
+        task = Task(name="t", input_data={})
+        transcript = Transcript(task_id="t")
+        outcome = await grader.grade(transcript, task)
+        assert outcome.feedback is None
+
+    @pytest.mark.asyncio
+    async def test_custom_explain_populates_feedback(self):
+        grader = CustomExplainGrader("custom")
+        task = Task(name="t", input_data={})
+        transcript = Transcript(task_id="t")
+        outcome = await grader.grade(transcript, task)
+        assert outcome.feedback == "failed accuracy threshold"

@@ -8,6 +8,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **Built-in graders emit failure feedback through `CodeGrader.explain()`.**
+  Added an optional `explain(self, metrics, transcript, task) -> str | None`
+  hook to `CodeGrader`, which is called during `grade()` to populate `feedback`
+  in `Outcome`. Implemented `explain()` across all built-in graders
+  (`JsonSchemaGrader`, `StructuredOutputGrader`, `ContainsGrader`,
+  `RegexMatchGrader`, `ConstraintGrader`, `LatencyGrader`, `TokenBudgetGrader`,
+  `ToolCallGrader`, `TraceConsistencyGrader`, `EventChainVerifier`) and the
+  starter grader template in `tracelens init`, ensuring `tracelens inspect`
+  displays diagnostic feedback instead of `missing`. (#127)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
