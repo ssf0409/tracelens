@@ -53,6 +53,21 @@ Out of scope:
 - Issues in example code under `examples/` or `benchmarks/` that are
   illustrative rather than production surface area.
 
+## Artifact Data Hygiene
+
+TraceLens generates both aggregate summaries and raw evidence files:
+
+- **Aggregate outputs** (`results.json`, `report.md`, `report.html`) contain
+  metric summaries and gate decisions without raw transcripts.
+- **Raw evidence outputs** (`trials.json`, checkpoints, inspection files, and worksheets)
+  capture complete execution transcripts, error messages, and tool outputs.
+  Because agent executions and exception messages may reflect secrets or personal data,
+  raw artifacts must be handled appropriately:
+  - `tracelens init` configures `.gitignore` to exclude `eval/results/` and `eval/worksheets/`.
+  - Stderr logs summarize exceptions by type to prevent leaking sensitive exception payloads into CI logs.
+  - Interrupted checkpoint files are deleted upon clean completion (exit 0) unless `--keep-checkpoint` is passed.
+  - Redaction and sanitization policies for artifact export are tracked in [#106](https://github.com/ssf0409/tracelens/issues/106).
+
 ## Disclosure
 
 After a fix is released, the advisory will be published as a GitHub

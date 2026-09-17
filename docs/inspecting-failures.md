@@ -62,7 +62,9 @@ was cut.
 - Output is bounded by default: 400 characters per field and 20 steps per
   transcript, with omitted content counted. `--full` removes the bounds;
   full transcripts may contain sensitive content, so share that output
-  deliberately.
+  deliberately. (Explicit export redaction and sanitization policies are tracked
+  in [#106](https://github.com/ssf0409/tracelens/issues/106); until then, bounds
+  provide length capping rather than content filtering.)
 
 `inspect` exits 0 whenever the file could be read, failures or not: it
 reports, the baseline gate decides. Input errors exit 2.

@@ -123,6 +123,20 @@ class RunnerConfig:
     checkpoint_interval: int = 10
 
 
+def format_relative_traceback(exc: BaseException) -> str:
+    """Format an exception traceback with project-relative filenames where possible."""
+    tb = traceback.TracebackException.from_exception(exc)
+    cwd = os.getcwd()
+    for frame in tb.stack:
+        try:
+            rel = os.path.relpath(frame.filename, cwd)
+            if not rel.startswith(".."):
+                frame.filename = rel
+        except Exception:
+            pass
+    return "".join(tb.format())
+
+
 class EvaluationRunner:
     """Runs evaluations with concurrency control and timeout enforcement.
 
@@ -497,13 +511,13 @@ class EvaluationRunner:
                     TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                 )
                 trial.error_message = f"Setup failed: {exc}"
-                trial.error_traceback = traceback.format_exc()
+                trial.error_traceback = format_relative_traceback(exc)
                 logger.error(
                     "Setup %s for task %s run %d: %s",
                     "hit an infra error" if is_infra else "failed",
                     task.task_id,
                     run_index,
-                    exc,
+                    type(exc).__name__,
                 )
 
             # --- run (skipped if setup failed) ---
@@ -539,13 +553,13 @@ class EvaluationRunner:
                         TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                     )
                     trial.error_message = str(exc)
-                    trial.error_traceback = traceback.format_exc()
+                    trial.error_traceback = format_relative_traceback(exc)
                     logger.error(
                         "Agent execution %s for task %s run %d: %s",
                         "hit an infra error" if is_infra else "failed",
                         task.task_id,
                         run_index,
-                        exc,
+                        type(exc).__name__,
                     )
 
             # --- teardown (always called) ---
@@ -557,7 +571,7 @@ class EvaluationRunner:
                     trial.error_message = (
                         f"Teardown failed: {teardown_exc}"
                     )
-                    trial.error_traceback = traceback.format_exc()
+                    trial.error_traceback = format_relative_traceback(teardown_exc)
                     # The run itself succeeded; record the distinction so
                     # fail_fast doesn't abort a suite over cleanup flakiness.
                     trial.metadata["teardown_failed"] = True
@@ -570,7 +584,7 @@ class EvaluationRunner:
                     "Teardown failed for task %s run %d: %s",
                     task.task_id,
                     run_index,
-                    teardown_exc,
+                    type(teardown_exc).__name__,
                 )
 
         trial.completed_at = utc_now()
@@ -593,7 +607,7 @@ class EvaluationRunner:
                     "Grader %s crashed on trial %s: %s",
                     grader.grader_id,
                     trial.trial_id,
-                    exc,
+                    type(exc).__name__,
                 )
                 trial.add_outcome(Outcome(
                     trial_id=trial.trial_id,

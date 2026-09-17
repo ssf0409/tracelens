@@ -8,6 +8,19 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Raw evaluation artifacts and logs observe data hygiene.** `tracelens init`
+  now writes (or appends to) `.gitignore` with rules for `eval/results/`,
+  `eval/worksheets/`, and `*.bak`; generated README and CI workflows document
+  that `trials.json` and checkpoints contain raw execution evidence (which may
+  hold secrets or personal data) distinct from aggregate reports; runner stderr
+  logs summarize exceptions by type rather than dumping raw messages into CI
+  job logs, storing project-relative paths in tracebacks; successful runs clean
+  up checkpoint files upon exit 0 unless `--keep-checkpoint` is passed; and
+  `tracelens sample` / `sample_for_review` accepts `--excerpt-field` to excerpt
+  only the evaluated dictionary key into review worksheets. (#130)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

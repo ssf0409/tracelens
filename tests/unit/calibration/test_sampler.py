@@ -124,6 +124,26 @@ def test_to_annotation_template_is_consumable_by_calibration() -> None:
     assert len(annotations.annotations) == 2
 
 
+def test_worksheet_excerpt_field_selects_key() -> None:
+    batch = TrialBatch()
+    trial = Trial(task_id="dict-task", status=TrialStatus.COMPLETED)
+    trial.transcript = Transcript(
+        task_id="dict-task",
+        final_output={"answer": "Paris", "secret_key": "sk-123456", "extra": "data"},
+    )
+    trial.add_outcome(Outcome(trial_id=trial.trial_id, grader_id="g", passed=True, score=1.0))
+    batch.add_trial(trial)
+
+    # Without excerpt_field: dumps str representation of the whole dict
+    full_sheet = sample_for_review(batch, size=1)
+    assert "sk-123456" in full_sheet.items[0].output_excerpt
+
+    # With excerpt_field: excerpts only the requested key
+    field_sheet = sample_for_review(batch, size=1, excerpt_field="answer")
+    assert field_sheet.items[0].output_excerpt == "Paris"
+    assert "sk-123456" not in field_sheet.items[0].output_excerpt
+
+
 def test_unknown_strategy_raises() -> None:
     batch = _batch([0.5])
     with pytest.raises(ValueError, match="strategy"):

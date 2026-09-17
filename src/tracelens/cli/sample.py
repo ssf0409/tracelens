@@ -51,6 +51,10 @@ def add_sample_parser(subparsers: argparse._SubParsersAction) -> None:  # type: 
         help="Max chars of each final output to include (default: 280)",
     )
     parser.add_argument(
+        "--excerpt-field", default=None, dest="excerpt_field",
+        help="Key to extract when final output is a dictionary (default: whole output)",
+    )
+    parser.add_argument(
         "--output",
         help="Path to write the review worksheet JSON (default: stdout)",
     )
@@ -82,6 +86,7 @@ def cmd_sample(args: argparse.Namespace) -> int:
         strategy=args.strategy,
         seed=args.seed,
         excerpt_chars=args.excerpt_chars,
+        excerpt_field=getattr(args, "excerpt_field", None),
     )
     rows = worksheet.to_annotation_template()
 

@@ -67,6 +67,7 @@ class TestBuildParser:
             "--output", "results.json",
             "--report", "report.md",
             "--max-infra-retries", "2",
+            "--keep-checkpoint",
         ])
         assert args.num_runs == 5
         assert args.max_concurrency == 10
@@ -77,6 +78,7 @@ class TestBuildParser:
         assert args.output == "results.json"
         assert args.report == "report.md"
         assert args.max_infra_retries == 2
+        assert args.keep_checkpoint is True
 
     def test_report_required_args(self):
         """Report command requires results file."""
@@ -229,3 +231,82 @@ class TestCmdCalibrateIntegration:
             "--annotations", str(ann_path),
         ])
         assert cmd_calibrate(args) == 2
+
+
+def test_cmd_run_removes_checkpoint_on_clean_exit(tmp_path: Path, monkeypatch) -> None:
+    from tracelens.cli.main import cmd_run
+    from tracelens.core.outcome import Outcome
+    from tracelens.core.transcript import Transcript
+    from tracelens.core.trial import Trial, TrialBatch, TrialStatus
+
+    tasks_file = tmp_path / "tasks.json"
+    tasks_file.write_text(json.dumps({"tasks": [{"task_id": "t1", "name": "Task 1", "input_data": {"q": 1}}]}))
+
+    ckpt = tmp_path / "checkpoint.json"
+    ckpt.write_text("{}")
+
+    parser = build_parser()
+    args = parser.parse_args([
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", "tests.unit.execution.test_runner_provenance._Echo",
+        "--graders", "tests.unit.execution.test_runner_provenance._Pass",
+        "--checkpoint", str(ckpt),
+    ])
+
+    batch = TrialBatch()
+    trial = Trial(task_id="t1", status=TrialStatus.COMPLETED)
+    trial.transcript = Transcript(task_id="t1", final_output="ok")
+    trial.add_outcome(Outcome(trial_id=trial.trial_id, grader_id="g", passed=True, score=1.0))
+    batch.add_trial(trial)
+
+    async def fake_run(self, es):
+        return batch
+
+    import tracelens.execution.runner
+    monkeypatch.setattr(tracelens.execution.runner.EvaluationRunner, "run", fake_run)
+
+    rc = cmd_run(args)
+    assert rc == 0
+    assert not ckpt.exists()
+
+
+def test_cmd_run_retains_checkpoint_with_keep_checkpoint(tmp_path: Path, monkeypatch) -> None:
+    from tracelens.cli.main import cmd_run
+    from tracelens.core.outcome import Outcome
+    from tracelens.core.transcript import Transcript
+    from tracelens.core.trial import Trial, TrialBatch, TrialStatus
+
+    tasks_file = tmp_path / "tasks.json"
+    tasks_file.write_text(json.dumps({"tasks": [{"task_id": "t1", "name": "Task 1", "input_data": {"q": 1}}]}))
+
+    ckpt = tmp_path / "checkpoint.json"
+    ckpt.write_text("{}")
+
+    parser = build_parser()
+    args = parser.parse_args([
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", "tests.unit.execution.test_runner_provenance._Echo",
+        "--graders", "tests.unit.execution.test_runner_provenance._Pass",
+        "--checkpoint", str(ckpt),
+        "--keep-checkpoint",
+    ])
+
+    batch = TrialBatch()
+    trial = Trial(task_id="t1", status=TrialStatus.COMPLETED)
+    trial.transcript = Transcript(task_id="t1", final_output="ok")
+    trial.add_outcome(Outcome(trial_id=trial.trial_id, grader_id="g", passed=True, score=1.0))
+    batch.add_trial(trial)
+
+    async def fake_run(self, es):
+        return batch
+
+    import tracelens.execution.runner
+    monkeypatch.setattr(tracelens.execution.runner.EvaluationRunner, "run", fake_run)
+
+    rc = cmd_run(args)
+    assert rc == 0
+    assert ckpt.exists()
+
+

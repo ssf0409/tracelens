@@ -147,6 +147,15 @@ given the path to the file.
 The starter agent echoes the answer stored in each task, so this passes by
 construction: it proves the wiring, not your agent.
 
+### Data in artifacts
+
+- **Aggregate reports** (`eval/results/results.json`, `report.md`, `report.html`)
+  contain statistical summaries and gate outcomes without raw transcript dumps.
+- **Raw evidence artifacts** (`eval/results/trials.json`, checkpoints, and review
+  worksheets) capture verbatim agent outputs, tool calls, and error messages,
+  which may contain sensitive data, secrets, or PII. Review artifacts before
+  sharing or uploading outside trusted environments.
+
 ## 2. What the CI workflow does
 
 `.github/workflows/eval.yml` runs the same `tracelens run --config
@@ -302,6 +311,8 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Note: trials.json contains raw evaluation evidence (agent transcripts,
+      # error messages, tool outputs) which may include sensitive data or secrets.
       - name: Upload evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -313,6 +324,13 @@ jobs:
             eval/results/report.md
             eval/results/report.html
             eval/results/trials.json
+"""
+
+
+GITIGNORE_CONTENT = """# TraceLens evaluation outputs and raw evidence artifacts
+eval/results/
+eval/worksheets/
+*.bak
 """
 
 
@@ -378,6 +396,29 @@ def _starter_files() -> dict[Path, str]:
     }
 
 
+def _update_or_create_gitignore(root: Path) -> None:
+    """Create or append TraceLens artifact rules to .gitignore."""
+    gitignore_path = root / ".gitignore"
+    required_entries = ["eval/results/", "eval/worksheets/", "*.bak"]
+
+    if not gitignore_path.exists():
+        gitignore_path.write_text(GITIGNORE_CONTENT, encoding="utf-8")
+        return
+
+    try:
+        content = gitignore_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return
+
+    lines = [line.strip() for line in content.splitlines()]
+    missing = [entry for entry in required_entries if entry not in lines]
+    if missing:
+        addition = "\n# TraceLens evaluation outputs and raw evidence artifacts\n" + "\n".join(missing) + "\n"
+        if content and not content.endswith("\n"):
+            addition = "\n" + addition
+        gitignore_path.write_text(content + addition, encoding="utf-8")
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Execute the 'init' subcommand."""
     root = Path(args.path)
@@ -419,6 +460,8 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"overwrote {path} (backed up to {backup})")
         else:
             print(f"kept {path} (edited); pass --overwrite-edited to replace it")
+
+    _update_or_create_gitignore(root)
 
     print(f"Initialized TraceLens eval scaffold in {root}")
     print(f"Next: tracelens run --config {root / 'tracelens.yaml'}")

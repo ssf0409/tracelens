@@ -418,3 +418,33 @@ def test_resume_reruns_skipped_trials(tmp_path: Path) -> None:
 
     assert adapter.run_calls == ["t1"]  # re-ran, not skipped
     assert all(t.status != TrialStatus.SKIPPED for t in batch.trials)
+
+
+class _FailingAdapter(AgentAdapter):
+    async def run(self, task: Task) -> Transcript:
+        raise ValueError(f"SECRET_KEY_12345: failed on {task.task_id}")
+
+
+def test_runner_logs_exception_class_without_secret_message(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    eval_set = EvalSet(name="s", tasks=[_task("t_fail")])
+    runner = EvaluationRunner(
+        _FailingAdapter(),
+        [],
+        RunnerConfig(),
+    )
+    with caplog.at_level(logging.ERROR):
+        batch = asyncio.run(runner.run(eval_set))
+
+    assert batch.trials[0].status == TrialStatus.FAILED
+    assert "SECRET_KEY_12345" in batch.trials[0].error_message
+
+    # Root / runner logger records type summary, not the raw secret message
+    error_records = [r.message for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("Agent execution failed for task t_fail run 0: ValueError" in msg for msg in error_records)
+    assert not any("SECRET_KEY_12345" in msg for msg in error_records)
+
+    # error_traceback contains relative paths
+    assert "test_runner_checkpoint.py" in batch.trials[0].error_traceback
+

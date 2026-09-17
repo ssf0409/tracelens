@@ -203,6 +203,7 @@ def test_checkpoint_resume_skips_completed_trials(
         "--adapter", ADAPTER,
         "--graders", GRADER,
         "--checkpoint", str(checkpoint),
+        "--keep-checkpoint",
     )
 
     assert _run_cli(*argv) == 0
@@ -211,6 +212,22 @@ def test_checkpoint_resume_skips_completed_trials(
     # Re-run with the same checkpoint: everything already done.
     assert _run_cli(*argv) == 0
     assert EchoAdapter.run_count == 2
+
+
+def test_checkpoint_removed_on_clean_run_by_default(
+    tasks_file: Path, tmp_path: Path
+) -> None:
+    checkpoint = tmp_path / "checkpoint.json"
+    argv = (
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--checkpoint", str(checkpoint),
+    )
+
+    assert _run_cli(*argv) == 0
+    assert not checkpoint.exists()
 
 
 def test_corrupt_checkpoint_fails_cleanly(
@@ -260,6 +277,7 @@ def test_init_scaffolds_a_runnable_eval_project(
     assert _run_main(monkeypatch, "init", ".") == 0
 
     expected_files = {
+        ".gitignore",
         "tracelens.yaml",
         "eval/__init__.py",
         "eval/tasks.json",

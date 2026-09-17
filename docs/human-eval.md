@@ -60,6 +60,13 @@ well-chosen sample shows you exactly where the grader and a human disagree.
 
 `--size` is a maximum; if the batch has fewer gradeable trials, you get all of
 them. Trials without a transcript or grader score are skipped automatically.
+Pass `--excerpt-field <key>` to excerpt only the specified key when the agent's
+final output is a dictionary, limiting worksheet content to the graded field
+rather than dumping the full dictionary.
+
+Worksheets contain raw output excerpts that may include sensitive information;
+scrubbing and export redaction policies are tracked in
+[#106](https://github.com/ssf0409/tracelens/issues/106).
 
 ### The worksheet
 
@@ -161,15 +168,16 @@ you want to build calibration into your own harness. Both live in
 from tracelens.calibration import sample_for_review, CalibrationAnalyzer
 
 # 1. Pick trials for a human to grade. Strategies: "diverse", "boundary",
-#    "failures", "random". Returns a ReviewWorksheet.
-worksheet = sample_for_review(batch, size=20, strategy="boundary", seed=0)
+#    "failures", "random". Returns a ReviewWorksheet. Pass excerpt_field="answer"
+#    to excerpt only a specific field if final_output is a dictionary.
+worksheet = sample_for_review(batch, size=20, strategy="boundary", seed=0, excerpt_field="answer")
 
 # 2. Compare the grader against human annotations.
 grader_outcomes = {t.task_id: t.outcomes[0] for t in batch.trials}
 result = CalibrationAnalyzer(threshold=0.7).analyze(grader_outcomes, annotations)
 ```
 
-`sample_for_review(batch, size, strategy="diverse", seed=0)` returns a
+`sample_for_review(batch, size, strategy="diverse", seed=0, excerpt_field=None)` returns a
 `ReviewWorksheet` (the same fill-in structure the CLI writes). `analyze` takes a
 mapping of `task_id -> outcome` (anything with `.score` and `.passed`) plus a
 human `AnnotationSet`, and returns a `CalibrationResult` carrying the correlation,

@@ -256,3 +256,27 @@ class TestInitOverwriteProtection:
         # Untouched files do not have backups
         assert not (tmp_path / "eval/grader.py.bak").exists()
         assert not (tmp_path / "eval/tasks.json.bak").exists()
+
+    def test_init_creates_gitignore(self, tmp_path: Path):
+        args_init = argparse.Namespace(path=str(tmp_path), force=False, overwrite_edited=False)
+        assert cmd_init(args_init) == 0
+
+        gitignore = tmp_path / ".gitignore"
+        assert gitignore.is_file()
+        content = gitignore.read_text(encoding="utf-8")
+        assert "eval/results/" in content
+        assert "eval/worksheets/" in content
+        assert "*.bak" in content
+
+    def test_init_appends_to_existing_gitignore(self, tmp_path: Path):
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".env\n__pycache__/\n", encoding="utf-8")
+
+        args_init = argparse.Namespace(path=str(tmp_path), force=False, overwrite_edited=False)
+        assert cmd_init(args_init) == 0
+
+        content = gitignore.read_text(encoding="utf-8")
+        assert content.startswith(".env\n__pycache__/\n")
+        assert "eval/results/" in content
+        assert "eval/worksheets/" in content
+        assert "*.bak" in content

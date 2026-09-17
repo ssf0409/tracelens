@@ -81,10 +81,14 @@ def _gradeable_trials(batch: TrialBatch) -> list[Trial]:
     ]
 
 
-def _excerpt(trial: Trial, max_chars: int) -> str:
+def _excerpt(trial: Trial, max_chars: int, excerpt_field: str | None = None) -> str:
     if trial.transcript is None or trial.transcript.final_output is None:
         return ""
-    return str(trial.transcript.final_output)[:max_chars]
+    output = trial.transcript.final_output
+    if excerpt_field is not None and isinstance(output, dict):
+        val = output.get(excerpt_field, "")
+        return str(val)[:max_chars]
+    return str(output)[:max_chars]
 
 
 def _diverse(trials: list[Trial], size: int) -> list[Trial]:
@@ -136,6 +140,7 @@ def sample_for_review(
     strategy: str = "diverse",
     seed: int = 0,
     excerpt_chars: int = 280,
+    excerpt_field: str | None = None,
 ) -> ReviewWorksheet:
     """Select trials from `batch` for human review.
 
@@ -149,6 +154,8 @@ def sample_for_review(
             trials only), or ``random`` (reproducible random sample).
         seed: Seed for the ``random`` strategy, for reproducible worksheets.
         excerpt_chars: Max characters of each trial's final output to include.
+        excerpt_field: Key to extract if final_output is a dictionary (limits
+            worksheet excerpts to the graded field).
 
     Returns:
         A :class:`ReviewWorksheet` whose items have blank human-score fields.
@@ -178,7 +185,7 @@ def sample_for_review(
             trial_id=t.trial_id,
             grader_score=t.aggregate_score or 0.0,
             grader_passed=t.passed,
-            output_excerpt=_excerpt(t, excerpt_chars),
+            output_excerpt=_excerpt(t, excerpt_chars, excerpt_field=excerpt_field),
         )
         for t in selected
     ]
