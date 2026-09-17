@@ -686,6 +686,8 @@ def _gate_task_counts(gate: GateResult) -> str:
     )
     if gate.skipped_task_content_changed:
         text += f", {gate.skipped_task_content_changed} skipped (task content changed)"
+    if getattr(gate, "skipped_canary_fingerprint_mismatch", 0):
+        text += f", {gate.skipped_canary_fingerprint_mismatch} skipped (canary fingerprint mismatch)"
     return text
 
 
@@ -720,6 +722,8 @@ def _regression_notes(task: Any, regression: Any) -> str:
         notes.append("blocking")
     if regression.insufficient_data:
         notes.append("insufficient samples; severity from thresholds")
+    if getattr(regression, "custom_threshold", None):
+        notes.append(f"custom threshold: {regression.custom_threshold}")
     if task.infra_config_mismatch:
         notes.append("infra config differs from baseline")
     return "; ".join(notes)

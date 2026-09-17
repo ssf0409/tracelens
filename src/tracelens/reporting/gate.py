@@ -61,6 +61,7 @@ class TaskGateOutcome(StrEnum):
     NO_GRADABLE_TRIALS = "no_gradable_trials"
     NO_COMPARABLE_METRICS = "no_comparable_metrics"
     TASK_CONTENT_CHANGED = "task_content_changed"
+    CANARY_FINGERPRINT_MISMATCH = "canary_fingerprint_mismatch"
 
 
 EXIT_CODES: dict[GateStatus, int] = {
@@ -151,6 +152,7 @@ class TaskGateResult:
     overall_severity: RegressionSeverity = RegressionSeverity.NONE
     infra_config_mismatch: bool = False
     infra_config_diff: dict[str, tuple[Any, Any]] = field(default_factory=dict)
+    canary_fingerprint_mismatch: bool = False
     regressions: list[MetricRegression] = field(default_factory=list)
     improvements: list[MetricRegression] = field(default_factory=list)
 
@@ -178,6 +180,7 @@ class TaskGateResult:
             "overall_severity": self.overall_severity.value,
             "infra_config_mismatch": self.infra_config_mismatch,
             "infra_config_diff": _diff_to_json(self.infra_config_diff),
+            "canary_fingerprint_mismatch": self.canary_fingerprint_mismatch,
             "regressions": [r.model_dump(mode="json") for r in self.regressions],
             "improvements": [r.model_dump(mode="json") for r in self.improvements],
         }
@@ -196,6 +199,7 @@ class TaskGateResult:
             overall_severity=RegressionSeverity(data.get("overall_severity", "none")),
             infra_config_mismatch=bool(data.get("infra_config_mismatch", False)),
             infra_config_diff=_diff_from_json(data.get("infra_config_diff", {})),
+            canary_fingerprint_mismatch=bool(data.get("canary_fingerprint_mismatch", False)),
             regressions=[
                 MetricRegression.model_validate(r) for r in data.get("regressions", [])
             ],
@@ -219,6 +223,7 @@ class GateResult:
     skipped_no_gradable: int = 0
     skipped_no_comparable_metrics: int = 0
     skipped_task_content_changed: int = 0
+    skipped_canary_fingerprint_mismatch: int = 0
     blocking_regressions: int = 0
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -252,6 +257,10 @@ class GateResult:
             parts.append(
                 f"{self.skipped_task_content_changed} skipped (task content changed)"
             )
+        if self.skipped_canary_fingerprint_mismatch:
+            parts.append(
+                f"{self.skipped_canary_fingerprint_mismatch} skipped (canary fingerprint mismatch)"
+            )
         parts.append(f"{self.blocking_regressions} blocking regression(s)")
         if self.status is GateStatus.UNEVALUABLE:
             parts.append("UNEVALUABLE")
@@ -269,6 +278,7 @@ class GateResult:
             "skipped_no_gradable": self.skipped_no_gradable,
             "skipped_no_comparable_metrics": self.skipped_no_comparable_metrics,
             "skipped_task_content_changed": self.skipped_task_content_changed,
+            "skipped_canary_fingerprint_mismatch": self.skipped_canary_fingerprint_mismatch,
             "blocking_regressions": self.blocking_regressions,
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
@@ -289,6 +299,9 @@ class GateResult:
             skipped_no_gradable=int(data.get("skipped_no_gradable", 0)),
             skipped_no_comparable_metrics=int(data.get("skipped_no_comparable_metrics", 0)),
             skipped_task_content_changed=int(data.get("skipped_task_content_changed", 0)),
+            skipped_canary_fingerprint_mismatch=int(
+                data.get("skipped_canary_fingerprint_mismatch", 0)
+            ),
             blocking_regressions=int(data.get("blocking_regressions", 0)),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),
@@ -329,7 +342,8 @@ def evaluate_gate(
     Returns:
         A :class:`GateResult` with one :class:`TaskGateResult` per task.
     """
-    detector = RegressionDetector(noise_band_absolute=noise_band)
+    min_delta = 0.0 if threshold == RegressionSeverity.MINOR else 5.0
+    detector = RegressionDetector(min_delta_percent=min_delta, noise_band_absolute=noise_band)
     trials_by_task: dict[str, list[Trial]] = {}
     for trial in batch.trials:
         trials_by_task.setdefault(trial.task_id, []).append(trial)
@@ -371,6 +385,36 @@ def evaluate_gate(
             continue
         if current_hash and not baseline.task_hash:
             unhashed_baselines.append(task_id)
+
+        # Resolve current_spec early for canary baseline enforcement and compare_with_specs.
+        current_spec = decision_spec
+        if current_spec is None:
+            current_spec, warning = spec_from_trials(task_trials)
+            if warning and warning not in warnings:
+                warnings.append(warning)
+
+        # Enforce canary fingerprint contract: canary baselines (BaselineType.CANARY / is_canary)
+        # require a DecisionSpec with a matching fingerprint. Missing or mismatched
+        # DecisionSpec identity evidence makes the gate unevaluable.
+        if baseline.is_canary:
+            cur_fp = current_spec.fingerprint if current_spec else None
+            base_fp = baseline.fingerprint
+            if cur_fp is None or base_fp != cur_fp:
+                expected_str = short_hash(base_fp) if base_fp else "none"
+                got_str = short_hash(cur_fp) if cur_fp else "none"
+                tasks.append(TaskGateResult(
+                    task_id=task_id,
+                    outcome=TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH,
+                    reason=(
+                        f"canary baseline fingerprint mismatch ({expected_str} -> {got_str}); "
+                        "pass matching --decision-spec or re-store canary baseline"
+                    ),
+                    compared_trials=len(current_results),
+                    excluded_trials=excluded,
+                    canary_fingerprint_mismatch=True,
+                ))
+                continue
+
         if not current_results:
             tasks.append(TaskGateResult(
                 task_id=task_id,
@@ -393,11 +437,6 @@ def evaluate_gate(
                 available_metrics=current_metrics,
             ))
             continue
-        current_spec = decision_spec
-        if current_spec is None:
-            current_spec, warning = spec_from_trials(task_trials)
-            if warning and warning not in warnings:
-                warnings.append(warning)
         report = detector.compare_with_specs(
             baseline,
             current_results,
@@ -426,6 +465,9 @@ def evaluate_gate(
     content_changed = [
         t for t in tasks if t.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
     ]
+    canary_mismatch = [
+        t for t in tasks if t.outcome is TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH
+    ]
     blocking = [t for t in checked if t.blocking]
     if unhashed_baselines:
         warnings.append(
@@ -435,7 +477,7 @@ def evaluate_gate(
         )
 
     reasons: list[str] = []
-    if not checked or no_gradable or no_comparable or content_changed:
+    if not checked or no_gradable or no_comparable or content_changed or canary_mismatch:
         status = GateStatus.UNEVALUABLE
         if not checked:
             reasons.append("no task could be compared against a baseline")
@@ -443,6 +485,11 @@ def evaluate_gate(
             reasons.append(
                 f"{len(content_changed)} task(s) whose content changed since their "
                 "baseline was stored: " + ", ".join(t.task_id for t in content_changed)
+            )
+        if canary_mismatch:
+            reasons.append(
+                f"{len(canary_mismatch)} canary task(s) with fingerprint mismatch: "
+                + ", ".join(t.task_id for t in canary_mismatch)
             )
         if no_gradable:
             reasons.append(
@@ -488,6 +535,7 @@ def evaluate_gate(
         skipped_no_gradable=len(no_gradable),
         skipped_no_comparable_metrics=len(no_comparable),
         skipped_task_content_changed=len(content_changed),
+        skipped_canary_fingerprint_mismatch=len(canary_mismatch),
         blocking_regressions=len(blocking),
         reasons=reasons,
         warnings=warnings,

@@ -154,6 +154,12 @@ Set regression thresholds from observed variance, not arbitrary numbers:
 baseline.add_metric(metric_name="pass_rate", value=0.85, std=0.03, relative_threshold=0.06)
 ```
 
+Per-metric thresholds (`regression_threshold_relative` and
+`regression_threshold_absolute` on `MetricBaseline`) are enforced by the CI
+baseline gate: if configured on a metric's baseline, any decline that stays within
+that threshold is tolerated and not flagged as a regression. When a custom threshold
+is breached, the regression is reported along with custom threshold notes in gate tables.
+
 Storing, promoting, and comparing baselines (including canary baselines for
 safety-critical metrics that must never regress) is covered end to end in the
 [Baseline Regression Tutorial](baseline-regression-tutorial.md).

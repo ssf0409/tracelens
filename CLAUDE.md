@@ -271,11 +271,15 @@ tracelens run \
 Gate semantics: a misconfigured check (missing `--baselines-file`, or the
 file doesn't exist) exits 2 before the eval runs. After execution, exit 2
 also marks an unevaluable gate: no tasks checked, or any baseline-backed task
-with no gradable trials, no comparable CLI metrics, or task content that
-changed since its baseline was stored. This takes precedence
+with no gradable trials, no comparable CLI metrics, task content that
+changed since its baseline was stored, or a canary baseline fingerprint mismatch.
+This takes precedence
 over policy failures; otherwise exit 1 means a blocking regression or missing
-required baseline. Exit 0 means an evaluable gate passed. Tasks without
-baselines are warned and counted; `--require-baselines` makes them fail
+required baseline. Exit 0 means an evaluable gate passed. `--fail-on-regression minor`
+lowers `min_delta_percent` to 0.0 so minor drops block. Custom thresholds on
+`MetricBaseline` (`regression_threshold_relative` / `regression_threshold_absolute`)
+are respected by the gate and exempt declines within threshold from blocking.
+Tasks without baselines are warned and counted; `--require-baselines` makes them fail
 instead, and zero matching baselines always makes the gate unevaluable. Noise-aware
 comparison activates when both sides carry a `DecisionSpec` — via
 `--decision-spec` or adapter-stamped transcripts, plus

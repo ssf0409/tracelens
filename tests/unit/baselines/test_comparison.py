@@ -3,6 +3,7 @@
 import warnings
 
 from tracelens.baselines.comparison import (
+    SEVERITY_ORDER,
     MetricRegression,
     RegressionDetector,
     RegressionReport,
@@ -23,9 +24,16 @@ class TestRegressionSeverity:
             RegressionSeverity.SEVERE,
         ]
 
-        # Verify they can be compared in order
+        assert levels == SEVERITY_ORDER
+
+        # String enum alphabetical ordering would put "none" > "moderate" > "minor"
+        # Verify that SEVERITY_ORDER.index correctly reflects severity priority
         for i in range(len(levels) - 1):
-            assert levels[i] != levels[i + 1]
+            assert SEVERITY_ORDER.index(levels[i]) < SEVERITY_ORDER.index(levels[i + 1])
+
+        # Verify max() with key=SEVERITY_ORDER.index handles mixture correctly
+        mixed = [RegressionSeverity.MINOR, RegressionSeverity.NONE, RegressionSeverity.MODERATE]
+        assert max(mixed, key=SEVERITY_ORDER.index) is RegressionSeverity.MODERATE
 
 
 class TestRegressionReport:

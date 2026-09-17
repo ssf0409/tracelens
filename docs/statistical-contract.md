@@ -146,18 +146,29 @@ de-duplication.
 current trials against the stored baseline mean:
 
 - `delta` and `delta_percent` come from means; a finding below
-  `min_delta_percent` (default 5 %) is not reported.
+  `min_delta_percent` (default 5 %; set to 0.0 % when evaluating under
+  `--fail-on-regression minor`) is not reported unless a custom
+  `MetricBaseline` regression threshold (`regression_threshold_relative` or
+  `regression_threshold_absolute`) is breached. If custom per-metric
+  thresholds are defined on `MetricBaseline`, declines within the threshold
+  do not flag as regressions.
 - Significance uses a one-sample t-test against the baseline mean when the
   current sample has `n >= 2` and the baseline has a standard deviation, with
   z-test fallbacks for degenerate cases. A test that cannot be run is
   reported as `insufficient_data`, never as "not significant".
 - **Severity is derived from `|delta_percent|` alone** (minor below 5 %,
   moderate 5–15 %, severe above 15 %) and is reported next to significance,
-  not combined with it.
+  not combined with it. Severity comparisons adhere to the total order
+  `NONE < MINOR < MODERATE < SEVERE`.
 - With a `DecisionSpec` on both sides, an absolute delta smaller than the
   noise band (default 0.03 on a 0–1 metric) is marked `within_noise_band` and
   does not block; a changed infrastructure configuration is reported as
   `infra_config_mismatch`.
+- Canary baselines (`baseline.is_canary` / `BaselineType.CANARY`) protect safety
+  floors and require an explicit matching `DecisionSpec` fingerprint. A run with
+  missing or mismatched fingerprint identity evidence is marked
+  `TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH` and makes the gate
+  `UNEVALUABLE` (exit 2): missing identity evidence never authorizes a pass.
 - Samples are gradable trials only; `TIMEOUT` is included as a failure.
 
 ### Run-versus-run comparison (`tracelens compare`, issue #28)

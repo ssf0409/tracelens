@@ -8,6 +8,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gate policy enforcement for regressions, per-metric thresholds, and canary baselines.**
+  `--fail-on-regression minor` now lowers `min_delta_percent` to 0.0% so minor drops
+  under 5% properly block instead of being filtered out before detection.
+  `RegressionSeverity` comparisons and aggregations now follow the strict severity
+  ordering `NONE < MINOR < MODERATE < SEVERE` rather than string enum alphabetical
+  sorting. Per-metric regression thresholds configured on `MetricBaseline`
+  (`regression_threshold_relative` and `regression_threshold_absolute`) are honored by
+  the gate: declines within the configured threshold are not flagged as regressions,
+  and breached thresholds are surfaced in CI and gate table notes. Protected canary
+  baselines (`BaselineType.CANARY` / `baseline.is_canary`) enforce their `DecisionSpec`
+  fingerprints at gate time: a run with a missing or mismatched fingerprint is marked
+  `TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH` and makes the gate `UNEVALUABLE` (exit 2).
+  (#113)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added

@@ -197,7 +197,7 @@ every output: the exit code, the summary on stdout, and a `gate` object in the
 | `not_requested` | 0 | The run had no `--baseline-check`. | Nothing; no gate was evaluated. |
 | `passed` | 0 | At least one task was compared and nothing blocked. | Merge. |
 | `blocked` | 1 | A regression at or above `--fail-on-regression`, or `--require-baselines` with a task that has no baseline. | Read the regression table, decide whether the change is acceptable, then fix the agent or promote the baseline. |
-| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials, no comparable metric, or content that changed since its baseline was stored. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons (re-store the baseline of an edited task), then rerun. |
+| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials, no comparable metric, content that changed since its baseline was stored, or a canary baseline fingerprint mismatch. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons (re-store the baseline of an edited task or pass matching `--decision-spec`), then rerun. |
 
 A misconfigured gate (missing `--baselines-file`, an unreadable baselines
 file, or a gate-only flag without `--baseline-check`) also exits 2, before
@@ -222,6 +222,7 @@ The `gate` object in `results.json` (abridged):
   "skipped_no_gradable": 0,
   "skipped_no_comparable_metrics": 0,
   "skipped_task_content_changed": 0,
+  "skipped_canary_fingerprint_mismatch": 0,
   "blocking_regressions": 1,
   "reasons": ["1 blocking regression(s) at threshold 'moderate': t-fail (severe)"],
   "tasks": [
@@ -248,14 +249,16 @@ output, grader feedback, and transcript steps
 ([Debugging a Failed Evaluation](inspecting-failures.md)).
 
 Each task's `outcome` is one of `checked`, `no_baseline`,
-`no_gradable_trials`, `no_comparable_metrics`, or `task_content_changed`,
-with a `reason` when it was not checked. The last one means the task's
-content hash (recorded in the run's [provenance](reproducibility.md#run-provenance)
-and as `task_summaries[].task_hash`) no longer matches the `task_hash` stored
-on its baseline: a task edited after baselining is never compared by id
-alone. Re-store that baseline to clear it; baselines without a `task_hash`
-are compared as before, with a warning naming them. To look at a saved
-decision again:
+`no_gradable_trials`, `no_comparable_metrics`, `task_content_changed`, or
+`canary_fingerprint_mismatch`, with a `reason` when it was not checked.
+`task_content_changed` means the task's content hash (recorded in the run's
+[provenance](reproducibility.md#run-provenance) and as
+`task_summaries[].task_hash`) no longer matches the `task_hash` stored on its
+baseline: a task edited after baselining is never compared by id alone.
+`canary_fingerprint_mismatch` means a canary baseline's expected
+`fingerprint` was missing or mismatched in the run's `DecisionSpec`.
+Re-store that baseline or provide matching `--decision-spec` to clear it;
+baselines without a `task_hash` are compared as before, with a warning naming them.
 
 ```bash
 tracelens report --results eval/results/results.json --format markdown
@@ -293,6 +296,20 @@ key; `tracelens report` renders it without inventing one.
   the gate exits 2. An unevaluable check takes precedence over exit 1, while
   still printing any observed regressions and exclusion counts. Diagnostic
   output files requested with `--output` / `--save-trials` are still written.
+- Canary baselines (`baseline.is_canary` / `BaselineType.CANARY`) require
+  a matching `DecisionSpec` fingerprint. If the run lacks a `DecisionSpec` or
+  its fingerprint does not match the canary baseline's stored fingerprint, the
+  task outcome is recorded as `canary_fingerprint_mismatch`, making the gate
+  `UNEVALUABLE` (exit 2).
+- Per-metric regression thresholds configured on `MetricBaseline`
+  (`regression_threshold_relative` and `regression_threshold_absolute`) are
+  honored by the gate. A decline smaller than the configured threshold is not
+  flagged as a regression and does not block. In the gate table and CI output,
+  regressions subject to custom thresholds are annotated with their configured
+  limits.
+- When `--fail-on-regression minor` is passed, `min_delta_percent` is lowered
+  from the default 5% to 0.0%, ensuring minor performance declines are caught
+  and evaluated.
 - Pass `--decision-spec run_spec.json` (or stamp `DecisionSpec` on
   transcripts in your adapter) and store each baseline with its
   `decision_spec` to enable infra-noise-aware comparison: sub-noise-band
