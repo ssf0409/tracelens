@@ -40,8 +40,12 @@ CLI = (
 
 def tracelens(*args: str, cwd: Path, expect: int) -> subprocess.CompletedProcess[str]:
     """Run one documented command and assert its exit code, with context on failure."""
+    repo_root = str(Path(__file__).resolve().parent.parent.parent)
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{repo_root}:{existing_pythonpath}" if existing_pythonpath else repo_root
     result = subprocess.run(
-        [*CLI, *args], cwd=cwd, capture_output=True, text=True, timeout=300,
+        [*CLI, *args], cwd=cwd, capture_output=True, text=True, timeout=300, env=env,
     )
     assert result.returncode == expect, (
         f"tracelens {' '.join(args)}\nexit {result.returncode}, expected {expect}\n"
@@ -332,3 +336,29 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     calib_fail_data = load(project / "eval/results/calibration-fail.json")
     assert calib_fail_data["is_calibrated"] is False
     assert calib_fail_data["sample_count"] == len(disagreeing_worksheet)
+
+    # 16. Exercise LLM-as-judge QualityGrader through run -> sample -> reconcile
+    tracelens(
+        "run", "--config", "tracelens.yaml", "--no-baseline-check",
+        "--graders", "examples.graders.quality_grader.QualityGrader",
+        "--save-trials", "eval/results/llm-trials.json",
+        cwd=project, expect=0,
+    )
+    llm_trials = load(project / "eval/results/llm-trials.json")
+    assert llm_trials["trials"][0]["outcomes"][0]["grader_id"] == "quality"
+    tracelens(
+        "sample", "--trials", "eval/results/llm-trials.json", "--size", "2",
+        "--strategy", "diverse", "--output", "eval/results/llm-review.json",
+        cwd=project, expect=0,
+    )
+    llm_sheet = load(project / "eval/results/llm-review.json")
+    assert len(llm_sheet) >= 2
+    for row in llm_sheet:
+        row["human_score"] = row["grader_score"]
+        row["human_passed"] = row["grader_passed"]
+    (project / "eval/results/llm-review-filled.json").write_text(json.dumps(llm_sheet, indent=2))
+    reconcile_llm = tracelens(
+        "reconcile", "--annotations", "eval/results/llm-review-filled.json",
+        cwd=project, expect=0,
+    )
+    assert "Calibrated:           YES" in reconcile_llm.stdout

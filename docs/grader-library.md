@@ -278,6 +278,30 @@ match to pass) and `score_per_event` (default `True`). When `require_all` is
 
 ---
 
+## LLM-as-judge graders
+
+While deterministic graders validate output syntax and tool calls, subjective
+quality evaluation uses an `LLMGrader`. TraceLens includes a runnable,
+zero-argument CLI-loadable example in
+[`examples/graders/quality_grader.py`](https://github.com/ssf0409/tracelens/blob/main/examples/graders/quality_grader.py):
+
+```python
+from examples.graders.quality_grader import QualityGrader
+
+# CLI-loadable with: tracelens run --graders examples.graders.quality_grader.QualityGrader
+grader = QualityGrader()
+```
+
+It dynamically configures its `LLMProvider` using environment variables
+(`TRACELENS_JUDGE_PROVIDER=openai|anthropic`, along with `OPENAI_API_KEY` or
+`ANTHROPIC_API_KEY`) and seamlessly falls back to an offline `InMemoryProvider`
+when no keys are present, enabling zero-key testing and offline CI execution.
+See [Human-Eval Calibration](human-eval.md) and
+[`examples/llm_provider_examples.py`](https://github.com/ssf0409/tracelens/blob/main/examples/llm_provider_examples.py)
+for live provider examples and custom calibration workflows.
+
+---
+
 ## Which grader do I want?
 
 | Need | Grader |
@@ -292,6 +316,7 @@ match to pass) and `score_per_event` (default `True`). When `require_all` is
 | Enforce required / allowed / forbidden tools | `ToolCallGrader` |
 | Detect flaky tool usage / phantom calls | `TraceConsistencyGrader` |
 | Verify an ordered sequence of actions | `EventChainVerifier` |
+| Subjective quality / rubric evaluation | `QualityGrader` (example `LLMGrader`) |
 
 For declarative output rules, `BehaviorContract.to_graders()` generates a
 matching grader per section automatically — see
