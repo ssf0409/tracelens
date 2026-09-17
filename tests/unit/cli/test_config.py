@@ -32,6 +32,7 @@ run:
   timeout: 45
   progress: true
   checkpoint: eval/results/checkpoint.json
+  keep_checkpoint: true
   max_infra_retries: 2
   infra_exceptions: [builtins.OSError]
   decision_spec: eval/spec.json
@@ -85,6 +86,7 @@ class TestLoadRunConfig:
             "timeout": 45.0,
             "progress": True,
             "checkpoint": str(base / "eval/results/checkpoint.json"),
+            "keep_checkpoint": True,
             "max_infra_retries": 2,
             "infra_exceptions": ["builtins.OSError"],
             "decision_spec": str(base / "eval/spec.json"),

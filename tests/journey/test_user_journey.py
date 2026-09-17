@@ -95,8 +95,9 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     init = tracelens("init", ".", cwd=project, expect=0)
     assert "Next: tracelens run --config tracelens.yaml" in init.stdout
     for relative in ("tracelens.yaml", "eval/tasks.json", "eval/adapter.py", "eval/grader.py",
-                     "eval/README.md", ".github/workflows/eval.yml"):
+                     "eval/README.md", ".github/workflows/eval.yml", ".gitignore"):
         assert (project / relative).is_file(), relative
+    assert "eval/results/" in (project / ".gitignore").read_text()
     assert (project / "pyproject.toml").read_text().startswith("[project]")
     tracelens("init", ".", cwd=project, expect=2)
 
@@ -229,15 +230,26 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     checkpoint_args = (
         "run", "--config", "tracelens.yaml", "--no-baseline-check", "--num-runs", "2",
         "--checkpoint", "eval/results/checkpoint.json",
+        "--keep-checkpoint",
         "--output", "eval/results/checkpoint-results.json",
     )
     tracelens(*checkpoint_args, cwd=project, expect=0)
     calls = (project / "calls.log").read_text().splitlines()
     assert len(calls) == 4  # 2 tasks x 2 runs
     assert load(project / "eval/results/checkpoint-results.json")["total_trials"] == 4
+    assert (project / "eval/results/checkpoint.json").is_file()
+    # Second run with --keep-checkpoint: nothing re-ran, checkpoint still retained
     tracelens(*checkpoint_args, cwd=project, expect=0)
     assert (project / "calls.log").read_text().splitlines() == calls  # nothing re-ran
     assert load(project / "eval/results/checkpoint-results.json")["total_trials"] == 4
+    # Complete run without --keep-checkpoint removes the checkpoint
+    clean_checkpoint_args = (
+        "run", "--config", "tracelens.yaml", "--no-baseline-check", "--num-runs", "2",
+        "--checkpoint", "eval/results/checkpoint.json",
+        "--output", "eval/results/checkpoint-results.json",
+    )
+    tracelens(*clean_checkpoint_args, cwd=project, expect=0)
+    assert not (project / "eval/results/checkpoint.json").exists()
     adapter.write_text(source)
 
     # 13. The whole suite passes again, and compare calls it equivalent.

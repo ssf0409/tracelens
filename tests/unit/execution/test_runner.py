@@ -257,17 +257,31 @@ class TestRunnerLifecycleHooks:
         assert batch.trials[0].status == TrialStatus.FAILED
         assert "Setup failed" in batch.trials[0].error_message
 
-    async def test_run_failure_still_calls_teardown(self):
+    async def test_run_failure_still_calls_teardown(self, caplog):
         """Run failure still calls teardown."""
+        import logging
         adapter = _LifecycleTracker()
-        adapter.run_error = ValueError("run boom")
+        adapter.run_error = ValueError("run boom with sensitive_key=sk-12345")
 
         runner = EvaluationRunner(adapter, [_PassGrader()])
-        batch = await runner.run(_make_eval_set(1))
+        with caplog.at_level(logging.ERROR):
+            batch = await runner.run(_make_eval_set(1))
 
         assert adapter.calls == ["setup", "run", "teardown"]
-        assert batch.trials[0].status == TrialStatus.FAILED
-        assert "run boom" in batch.trials[0].error_message
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.FAILED
+        assert "run boom with sensitive_key=sk-12345" in trial.error_message
+        # Logged summary to stderr contains the exception class but not the secret body
+        log_text = caplog.text
+        assert "ValueError" in log_text
+        assert "sk-12345" not in log_text
+        # Traceback contains relative path instead of absolute path
+        assert trial.error_traceback is not None
+        assert "ValueError: run boom" in trial.error_traceback
+        # Project files in traceback should not start with absolute root directory
+        import os
+        cwd = os.getcwd()
+        assert cwd not in trial.error_traceback
 
     async def test_teardown_failure_on_success_marks_failed(self):
         """Teardown failure on an otherwise-successful trial marks it FAILED."""
