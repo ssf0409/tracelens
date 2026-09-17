@@ -233,7 +233,7 @@ Which statistic answers which question:
 |----------|-----|------|
 | Can it do this at all? | `pass_at_k` | [pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md) |
 | Is it reliable enough to ship? | `pass_to_k` | [pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md) |
-| Is version B actually better than A? | `compare_metrics` | [Comparing Versions](comparing-versions.md) |
+| Is version B actually better than A? | `compare_runs` / `tracelens compare` (or `compare_metrics` for independent unpaired samples) | [Comparing Versions](comparing-versions.md) |
 | How confident are we in any number? | bootstrap CI | [Statistical Comparison](statistical-comparison.md) |
 
 **Reports.** Hand the batch to `ReportGenerator` for markdown, JSON, HTML, or a

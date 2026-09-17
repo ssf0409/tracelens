@@ -151,7 +151,7 @@ Compared v2 vs v1 on mean_score (higher is better): paired task bootstrap over 6
   readings: significant, |delta| >= threshold 0.05
   Verdict: IMPROVEMENT (exit 0)
   What changed: DecisionSpec prompts (attribution evidence, not proof of cause)
-  What moved (largest first): ticket-4 +0.230 (n 10/10), ticket-1 +0.188 (n 10/10), ...
+  What moved (largest first): ticket-4 +0.230 (n 10/10), ticket-1 +0.188 (n 10/10), ticket-2 +0.177 (n 10/10), ticket-3 +0.154 (n 10/10), ticket-5 +0.129 (n 10/10), and 1 more
 ```
 
 Read it top to bottom: *what was compared* (metric, tasks, how they were
@@ -258,7 +258,7 @@ and explained in [Reproducibility & DecisionSpec](reproducibility.md).
 - [Statistical Contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28)
   — the estimand, sampling unit, and verdict table `tracelens compare` implements.
 - [Statistical Comparison](statistical-comparison.md) — the bootstrap CI, effect
-  size, and significance machinery behind `compare_metrics`.
+  size, and significance machinery behind `compare_metrics` (for independent unpaired samples).
 - [Reproducibility & DecisionSpec](reproducibility.md) — how fingerprints make a
   result attributable to a specific model/prompt.
 - [pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md) — capability vs reliability, the

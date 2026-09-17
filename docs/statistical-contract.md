@@ -304,6 +304,7 @@ are never compared across silently different populations.
 | A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
 | The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
 | No run-versus-run command; `compare_metrics` resampled two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 (fixed) |
+| `estimate_metric` and `compare_metrics` exported at package root | Trial-level, non-contract tools assuming independent samples; documented with caveat (prefer `compare_runs` for paired task suites) | #132 (documented) |
 
 ## Related pages
 

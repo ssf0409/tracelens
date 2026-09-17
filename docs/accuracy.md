@@ -30,8 +30,12 @@ tasks you need depends on the scenario:
 | High-stakes decision | 10 | 20+ |
 
 **Rule of thumb:** if your confidence-interval width is `> 0.1`, you need more
-runs. Put a CI on every metric with `estimate_metric` and watch `ci_width` — the
-mechanics are in [Statistical Comparison](statistical-comparison.md).
+data. For single independent metrics, watch `ci_width` via `estimate_metric`.
+For suite-level comparisons (`tracelens compare` / `compare_runs`), the task is
+the sampling unit: adding more runs per task reduces within-task variance, but
+tightening the suite difference CI requires expanding the number of tasks in the
+eval set (see [Statistical Contract](statistical-contract.md)).
+The mechanics are in [Statistical Comparison](statistical-comparison.md).
 
 ### Tasks in Eval Set
 

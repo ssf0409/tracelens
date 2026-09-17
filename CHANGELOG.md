@@ -8,6 +8,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Statistical guidance aligned with the contract.** Updated documentation in
+  `docs/statistical-comparison.md`, `docs/accuracy.md`, `docs/user-guide.md`, and
+  `docs/comparing-versions.md` to consistently present the task as the sampling
+  unit for suite comparisons, recommend `compare_runs` / `tracelens compare` with
+  appropriate caveats for `compare_metrics` on independent samples, remove promises
+  of empirical rate fallbacks for `pass@k` when `n < k`, document `estimate_metric`
+  and `compare_metrics` as trial-level non-contract tools in the statistical
+  contract deviation table, and regenerate the version comparison example output.
+  (#132)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
