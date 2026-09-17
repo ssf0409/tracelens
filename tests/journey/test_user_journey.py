@@ -165,12 +165,23 @@ def test_documented_user_journey(tmp_path: Path) -> None:
 
     # 8. Fix it and rerun only the affected task; the gate checks just that task.
     adapter.write_text(source)
+    runs_dir = project / "eval/results/runs"
     run = tracelens(
-        "run", "--config", "tracelens.yaml", "--task-id", "starter-capital", cwd=project, expect=0,
+        "run", "--config", "tracelens.yaml", "--task-id", "starter-capital",
+        "--runs-dir", "eval/results/runs", cwd=project, expect=0,
     )
     assert "[tracelens] running 1 of 2 task(s): starter-capital" in run.stderr
-    data = load(results)
+    assert "to inspect failures: tracelens inspect" in run.stderr
+    run_dirs = list(runs_dir.iterdir())
+    assert len(run_dirs) == 1
+    isolated_run_dir = run_dirs[0]
+    data = load(isolated_run_dir / "results.json")
     assert data["total_tasks"] == 1 and data["gate"]["status"] == "passed" and data["gate"]["checked"] == 1
+    assert data["provenance"]["measurement"]["is_subset"] is True
+    assert data["provenance"]["measurement"]["selected_task_ids"] == ["starter-capital"]
+    assert data["provenance"]["measurement"]["total_eval_set_tasks"] == 2
+    # Prior full-run evidence in fixed paths remains preserved
+    assert load(results)["total_tasks"] == 2
     tracelens(
         "run", "--config", "tracelens.yaml", "--task-id", "no-such-task", cwd=project, expect=2,
     )

@@ -344,3 +344,31 @@ class TestCompatibility:
     def test_report_round_trips_through_json(self):
         report = check_compatibility(_provenance([_task("a", 1)]), _provenance([_task("a", 2)]))
         assert CompatibilityReport.model_validate(json.loads(report.model_dump_json())) == report
+
+    def test_subset_provenance_summary_lines_and_roundtrip(self):
+        eval_set = EvalSet(name="my_suite", tasks=[_task("t1")], is_subset=True, selected_task_ids=["t1"], total_eval_set_tasks=10)
+        prov = build_provenance(
+            eval_set=eval_set,
+            adapter=_Adapter(),
+            graders=[_Grader()],
+            settings=_settings(),
+            decision_spec=None,
+            run_id="run-sub",
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+            is_subset=eval_set.is_subset,
+            selected_task_ids=eval_set.selected_task_ids,
+            total_eval_set_tasks=eval_set.total_eval_set_tasks,
+        )
+        assert prov.measurement.is_subset is True
+        assert prov.measurement.selected_task_ids == ["t1"]
+        assert prov.measurement.total_eval_set_tasks == 10
+        lines = prov.summary_lines()
+        eval_line = next(line for line in lines if line.startswith("Eval set:"))
+        assert "1 task(s) (subset of 10)" in eval_line
+
+        # Roundtrip through JSON
+        dumped = json.loads(prov.model_dump_json())
+        loaded = RunProvenance.model_validate(dumped)
+        assert loaded.measurement.is_subset is True
+        assert loaded.measurement.selected_task_ids == ["t1"]
+        assert loaded.measurement.total_eval_set_tasks == 10

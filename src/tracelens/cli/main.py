@@ -185,6 +185,10 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
+        "--runs-dir", default=argparse.SUPPRESS,
+        help="Directory to write run artifacts under a run_id subdirectory",
+    )
+    run_parser.add_argument(
         "--output", default=argparse.SUPPRESS,
         help="Path to write JSON results",
     )
@@ -413,6 +417,21 @@ def _validate_run_parameters(args: argparse.Namespace) -> str | None:
             f"{name('--max-infra-retries', 'run.max_infra_retries')} cannot be negative "
             f"(got {args.max_infra_retries})"
         )
+    if args.runs_dir:
+        conflicts = [
+            flag for flag, val in (
+                (name("--output", "run.outputs.results"), args.output),
+                (name("--report", "run.outputs.report"), args.report),
+                (name("--html-report", "run.outputs.html_report"), args.html_report),
+                (name("--save-trials", "run.outputs.trials"), args.save_trials),
+            )
+            if val is not None
+        ]
+        if conflicts:
+            return (
+                f"{name('--runs-dir', 'run.outputs.runs_dir')} cannot be used with individual "
+                f"output path(s): {', '.join(conflicts)}"
+            )
     return None
 
 
@@ -542,7 +561,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
     except EvalSetLoadError as exc:
         return usage_error(str(exc), exc=exc, debug=debug)
-    if args.task_ids:
+    total_eval_set_tasks = len(tasks)
+    is_subset = bool(args.task_ids)
+    if is_subset:
         known = {task.task_id for task in tasks}
         unknown = [task_id for task_id in args.task_ids if task_id not in known]
         if unknown:
@@ -558,7 +579,37 @@ def cmd_run(args: argparse.Namespace) -> int:
             + ", ".join(task.task_id for task in tasks),
             file=sys.stderr,
         )
-    eval_set = EvalSet(name=Path(args.eval_set).stem, tasks=tasks)
+
+    # Preflight collision check for subset runs using fixed legacy output paths
+    if args.task_ids and not args.runs_dir:
+        existing_fixed = [
+            (label, path)
+            for label, path in (
+                ("output", args.output),
+                ("report", args.report),
+                ("html_report", args.html_report),
+                ("save_trials", args.save_trials),
+            )
+            if path and Path(path).exists()
+        ]
+        if existing_fixed:
+            existing_desc = ", ".join(f"{lbl} ({p})" for lbl, p in existing_fixed)
+            return usage_error(
+                f"rerunning a subset with fixed output paths would overwrite previous run evidence: "
+                f"{existing_desc}",
+                hint=(
+                    "Pass --runs-dir (or set outputs.runs_dir in config) to isolate runs into "
+                    "run directories, or specify distinct file paths for this rerun."
+                ),
+            )
+
+    eval_set = EvalSet(
+        name=Path(args.eval_set).stem,
+        tasks=tasks,
+        is_subset=is_subset,
+        selected_task_ids=list(args.task_ids) if args.task_ids else None,
+        total_eval_set_tasks=total_eval_set_tasks,
+    )
 
     # Load adapter and graders (usage error -> exit 2, before any agent call)
     import_hint = (
@@ -636,22 +687,44 @@ def cmd_run(args: argparse.Namespace) -> int:
         gate = GateResult.not_requested()
     report.gate = gate
 
+    # Determine output destinations
+    out_results: str | None = args.output
+    out_report: str | None = args.report
+    out_html: str | None = args.html_report
+    out_trials: str | None = args.save_trials
+
+    if args.runs_dir:
+        run_dir = Path(args.runs_dir) / batch.batch_id
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            # Collision-safe allocation fallback
+            run_dir = Path(args.runs_dir) / f"{batch.batch_id}_{Path(args.eval_set).stem}"
+            run_dir.mkdir(parents=True, exist_ok=False)
+        except OSError as exc:
+            return usage_error(f"could not create run directory: {exc}", exc=exc, debug=debug)
+
+        out_results = str(run_dir / "results.json")
+        out_report = str(run_dir / "report.md")
+        out_html = str(run_dir / "report.html")
+        out_trials = str(run_dir / "trials.json")
+
     # Write outputs (always, even when the gate blocks: the artifacts are
     # the evidence). A write failure is a clear error, never a traceback.
     written: list[tuple[str, str]] = []
     try:
-        if args.output:
-            _write_output(args.output, json.dumps(report.to_dict(), indent=2, default=str))
-            written.append(("results", args.output))
-        if args.report:
-            _write_output(args.report, gen.render_markdown(report))
-            written.append(("report", args.report))
-        if args.html_report:
-            _write_output(args.html_report, gen.render_html(report))
-            written.append(("html report", args.html_report))
-        if args.save_trials:
-            _write_output(args.save_trials, json.dumps(batch.to_dict(), indent=2))
-            written.append(("trials", args.save_trials))
+        if out_results:
+            _write_output(out_results, json.dumps(report.to_dict(), indent=2, default=str))
+            written.append(("results", out_results))
+        if out_report:
+            _write_output(out_report, gen.render_markdown(report))
+            written.append(("report", out_report))
+        if out_html:
+            _write_output(out_html, gen.render_html(report))
+            written.append(("html report", out_html))
+        if out_trials:
+            _write_output(out_trials, json.dumps(batch.to_dict(), indent=2))
+            written.append(("trials", out_trials))
     except OSError as exc:
         return usage_error(f"could not write output file: {exc}", exc=exc, debug=debug)
     # Say where the artifacts went (stderr: stdout stays the summary only).
@@ -659,6 +732,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"[tracelens] wrote {label}: {path}", file=sys.stderr)
     if args.checkpoint:
         print(f"[tracelens] checkpoint: {args.checkpoint}", file=sys.stderr)
+
+    # Print a runnable inspect command hint on stderr when trials were saved
+    trials_entry = next((p for lbl, p in written if lbl == "trials"), None)
+    if trials_entry:
+        eval_set_flag = f" --eval-set {args.eval_set}" if getattr(args, "eval_set", None) else ""
+        print(
+            f"[tracelens] to inspect failures: tracelens inspect {trials_entry} --failures{eval_set_flag}",
+            file=sys.stderr,
+        )
 
     # CI summary to stdout, including the gate lines when a gate ran
     print(gen.render_ci_summary(report))

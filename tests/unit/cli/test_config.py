@@ -36,6 +36,7 @@ run:
   infra_exceptions: [builtins.OSError]
   decision_spec: eval/spec.json
   outputs:
+    runs_dir: eval/results/runs
     results: eval/results/results.json
     report: eval/results/report.md
     html_report: eval/results/report.html
@@ -88,6 +89,7 @@ class TestLoadRunConfig:
             "max_infra_retries": 2,
             "infra_exceptions": ["builtins.OSError"],
             "decision_spec": str(base / "eval/spec.json"),
+            "runs_dir": str(base / "eval/results/runs"),
             "output": str(base / "eval/results/results.json"),
             "report": str(base / "eval/results/report.md"),
             "html_report": str(base / "eval/results/report.html"),

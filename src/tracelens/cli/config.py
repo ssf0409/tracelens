@@ -53,6 +53,7 @@ RUN_DEFAULTS: dict[str, Any] = {
     "baselines_file": None,
     "require_baselines": False,
     "fail_on_regression": "moderate",
+    "runs_dir": None,
     "output": None,
     "report": None,
     "html_report": None,
@@ -95,6 +96,7 @@ _FIELDS: tuple[_Field, ...] = (
     _Field(("run", "max_infra_retries"), "max_infra_retries", "int"),
     _Field(("run", "infra_exceptions"), "infra_exceptions", "str_list"),
     _Field(("run", "decision_spec"), "decision_spec", "str", is_path=True),
+    _Field(("run", "outputs", "runs_dir"), "runs_dir", "str", is_path=True),
     _Field(("run", "outputs", "results"), "output", "str", is_path=True),
     _Field(("run", "outputs", "report"), "report", "str", is_path=True),
     _Field(("run", "outputs", "html_report"), "html_report", "str", is_path=True),
@@ -290,6 +292,14 @@ def resolve_run_settings(
     explicit = explicit_run_options(args)
     for dest in explicit:
         merged[dest] = getattr(args, dest)
+    if "runs_dir" in explicit:
+        for legacy_key in ("output", "report", "html_report", "save_trials"):
+            if legacy_key not in explicit:
+                merged[legacy_key] = None
+    elif any(legacy_key in explicit for legacy_key in ("output", "report", "html_report", "save_trials")):
+        if "runs_dir" not in explicit:
+            merged["runs_dir"] = None
+
     missing = [
         label
         for label, dest in (

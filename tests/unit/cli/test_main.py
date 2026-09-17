@@ -118,6 +118,33 @@ class TestBuildParser:
         with pytest.raises(ConfigError, match=r"--eval-set \(run.eval_set\)"):
             resolve_run_settings(args)
 
+    def test_run_with_runs_dir_flag(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--eval-set", "tasks.json",
+            "--adapter", "my.Adapter",
+            "--graders", "my.Grader",
+            "--runs-dir", "eval/runs",
+        ])
+        assert args.runs_dir == "eval/runs"
+
+    def test_validate_run_parameters_runs_dir_conflict(self):
+        from tracelens.cli.main import _validate_run_parameters
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--eval-set", "tasks.json",
+            "--adapter", "my.Adapter",
+            "--graders", "my.Grader",
+            "--runs-dir", "eval/runs",
+            "--output", "results.json",
+        ])
+        resolved, _ = resolve_run_settings(args)
+        msg = _validate_run_parameters(resolved)
+        assert msg is not None
+        assert "--runs-dir cannot be used with individual output path(s): --output" in msg
+
 
 class TestCalibrateParser:
     def test_calibrate_required_args(self):

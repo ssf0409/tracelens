@@ -338,7 +338,8 @@ run:
   infra_exceptions: [builtins.OSError]       # --infra-exceptions
   decision_spec: eval/decision-spec.json     # --decision-spec
   outputs:
-    results: eval/results/results.json       # --output
+    runs_dir: eval/results/runs              # --runs-dir (isolated <runs_dir>/<run_id>/ output)
+    results: eval/results/results.json       # --output (cannot combine with runs_dir)
     report: eval/results/report.md           # --report
     html_report: eval/results/report.html    # --html-report
     trials: eval/results/trials.json         # --save-trials

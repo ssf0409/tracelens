@@ -170,6 +170,9 @@ class MeasurementSetup(BaseModel):
     task_hashes: dict[str, str] = Field(default_factory=dict)
     graders: list[ComponentIdentity] = Field(default_factory=list)
     runner: RunnerSettings
+    is_subset: bool = False
+    selected_task_ids: list[str] | None = None
+    total_eval_set_tasks: int | None = None
 
 
 class CandidateSpec(BaseModel):
@@ -205,10 +208,15 @@ class RunProvenance(BaseModel):
         """Human-readable ``label: value`` lines for reports."""
         m, c = self.measurement, self.candidate
         suite = m.eval_set_name or "(unnamed)"
+        scope_text = (
+            f"{len(m.task_hashes)} task(s) (subset of {m.total_eval_set_tasks})"
+            if m.is_subset and m.total_eval_set_tasks is not None
+            else f"{len(m.task_hashes)} task(s)"
+        )
         lines = [
             f"Run: {self.run_id} (TraceLens {self.tracelens_version})",
             (
-                f"Eval set: {suite}, {len(m.task_hashes)} task(s), "
+                f"Eval set: {suite}, {scope_text}, "
                 f"content {short_hash(m.eval_set_hash)}"
             ),
             "Graders: " + (", ".join(g.describe() for g in m.graders) or "none"),
@@ -240,6 +248,9 @@ def build_provenance(
     decision_spec: DecisionSpec | None,
     run_id: str,
     started_at: datetime | None,
+    is_subset: bool = False,
+    selected_task_ids: list[str] | None = None,
+    total_eval_set_tasks: int | None = None,
 ) -> RunProvenance:
     """Record the provenance of a run about to execute."""
     return RunProvenance(
@@ -254,6 +265,9 @@ def build_provenance(
                 for g in graders
             ],
             runner=settings,
+            is_subset=is_subset,
+            selected_task_ids=selected_task_ids,
+            total_eval_set_tasks=total_eval_set_tasks,
         ),
         candidate=CandidateSpec(
             adapter=ComponentIdentity.of(adapter),

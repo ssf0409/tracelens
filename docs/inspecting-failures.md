@@ -70,7 +70,7 @@ reports, the baseline gate decides. Input errors exit 2.
 ## 4. Fix, then rerun just that task
 
 ```bash
-tracelens run --config tracelens.yaml --task-id starter-capital
+tracelens run --config tracelens.yaml --task-id starter-capital --runs-dir eval/results/runs
 ```
 
 `--task-id` (repeatable; `run.task_ids` in the config) runs only the named
@@ -78,6 +78,15 @@ tasks and refuses ids that are not in the eval set. It is a separate run: its
 provenance, its reports, and its checkpoint identity cover the selected tasks
 only, so do not reuse the full run's `--checkpoint` path, and read its pass
 rate as "these tasks", not the suite.
+
+To avoid accidentally overwriting previous full-run evidence, TraceLens
+strictly prevents subset reruns from overwriting existing fixed output files
+(`--output`, `--report`, etc.), exiting with code 2 and a helpful hint. Use
+run directory mode (`--runs-dir runs/` or `outputs.runs_dir: runs` in
+`tracelens.yaml`), which writes every invocation into its own isolated
+`<runs_dir>/<run_id>/` directory containing `results.json`, `trials.json`,
+`report.md`, and `report.html`. TraceLens also prints a runnable inspection
+command on stderr after writing trials.
 
 ## 5. Confirm on the whole suite
 

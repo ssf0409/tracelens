@@ -1605,3 +1605,72 @@ def test_report_format_ci_reprints_the_run_summary(
     assert "Baseline check:" in gated_stdout and "REGRESSION DETECTED" in gated_stdout
     assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
     assert capsys.readouterr().out == gated_stdout
+
+
+# --- Issue #101: run directory mode & subset rerun safety ---------------------
+
+
+def test_legacy_fixed_path_collision_on_subset_rerun_exits_2(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rerunning a subset when fixed legacy output files exist exits 2 without running adapter."""
+    out = tmp_path / "results.json"
+    out.write_text("existing evidence")
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--task-id", "t-pass", "--output", str(out),
+    ) == 2
+    err = capsys.readouterr().err
+    assert "rerunning a subset with fixed output paths would overwrite previous run evidence" in err
+    assert "Pass --runs-dir (or set outputs.runs_dir in config)" in err
+    assert out.read_text() == "existing evidence"
+    assert EchoAdapter.run_count == 0
+
+
+def test_runs_dir_mode_creates_isolated_run_artifacts_and_inspect_hint(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--runs-dir isolates full run and subset rerun into distinct run directories and prints inspect hint."""
+    runs_dir = tmp_path / "runs"
+    # 1. Full run
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--runs-dir", str(runs_dir),
+    ) == 0
+    err = capsys.readouterr().err
+    assert "[tracelens] to inspect failures: tracelens inspect" in err
+    assert f"--eval-set {tasks_file}" in err
+
+    run_subdirs = list(runs_dir.iterdir())
+    assert len(run_subdirs) == 1
+    first_run = run_subdirs[0]
+    assert (first_run / "results.json").exists()
+    assert (first_run / "trials.json").exists()
+    assert (first_run / "report.md").exists()
+    assert (first_run / "report.html").exists()
+
+    first_results = json.loads((first_run / "results.json").read_text())
+    assert len(first_results["task_summaries"]) == 2
+    assert first_results["provenance"]["measurement"]["is_subset"] is False
+
+    # 2. Subset rerun using --runs-dir
+    assert _run_cli(
+        "run", "--eval-set", str(tasks_file), "--adapter", ADAPTER, "--graders", GRADER,
+        "--runs-dir", str(runs_dir), "--task-id", "t-fail",
+    ) == 0
+    run_subdirs_after = list(runs_dir.iterdir())
+    assert len(run_subdirs_after) == 2
+
+    # The first run remains untouched
+    first_results_after = json.loads((first_run / "results.json").read_text())
+    assert len(first_results_after["task_summaries"]) == 2
+
+    # The subset run directory has 1 task summary and subset provenance
+    second_run = [d for d in run_subdirs_after if d != first_run][0]
+    second_results = json.loads((second_run / "results.json").read_text())
+    assert len(second_results["task_summaries"]) == 1
+    assert second_results["task_summaries"][0]["task_id"] == "t-fail"
+    prov = second_results["provenance"]["measurement"]
+    assert prov["is_subset"] is True
+    assert prov["selected_task_ids"] == ["t-fail"]
+    assert prov["total_eval_set_tasks"] == 2

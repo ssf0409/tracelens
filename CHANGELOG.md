@@ -8,6 +8,32 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **Run directory output mode.** `tracelens run --runs-dir <PATH>` (and
+  `outputs.runs_dir` in `tracelens.yaml`) writes every run's artifacts
+  (`results.json`, `trials.json`, `report.md`, `report.html`) into an isolated
+  `<runs_dir>/<run_id>/` directory with collision-safe allocation, avoiding
+  clobbered results between consecutive invocations. `--runs-dir` is mutually
+  exclusive with individual output path flags (`--output`, `--report`, etc.).
+  (#101)
+- **Runnable inspect failure hints.** TraceLens now prints a ready-to-run
+  command on stderr whenever trials are written:
+  `[tracelens] to inspect failures: tracelens inspect <trials_path> --failures [--eval-set <eval_set>]`.
+  (#101)
+- **Run scope tracking in provenance.** `RunProvenance` records `is_subset`,
+  `selected_task_ids`, and `total_eval_set_tasks` in `MeasurementSetup`, and
+  summarizes targeted reruns as `(subset of N)` in report summaries. (#101)
+
+### Fixed
+
+- **Prevent subset runs from silently overwriting full-run evidence.** When
+  rerunning a subset of tasks (`--task-id` / `run.task_ids`) with legacy fixed
+  output paths, TraceLens preflight checks whether any configured output file
+  already exists and exits with code 2 before calling the agent or adapter,
+  preventing loss of full-suite evidence and prompting the user to pass
+  `--runs-dir` or separate file paths. (#101)
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
