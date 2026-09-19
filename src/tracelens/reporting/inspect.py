@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from tracelens._version import __version__
+from tracelens.core.provenance import task_content_hash
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, Transcript, TranscriptStep
 from tracelens.core.trial import Trial, TrialBatch, TrialStatus
@@ -27,6 +28,89 @@ from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 MISSING = "missing"
 DEFAULT_MAX_STEPS = 20
 DEFAULT_MAX_CHARS = 400
+
+
+class TaskContextError(ValueError):
+    """Raised when task context resolution or validation fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        task_id: str | None = None,
+        task_ids: list[str] | None = None,
+        recorded_hash: str | None = None,
+        computed_hash: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.task_id = task_id or (task_ids[0] if task_ids else None)
+        self.task_ids = task_ids or ([task_id] if task_id else [])
+        self.recorded_hash = recorded_hash
+        self.computed_hash = computed_hash
+
+
+class TaskDuplicateIdError(TaskContextError):
+    """Raised when an eval set contains duplicate task IDs."""
+
+    def __init__(
+        self,
+        task_ids: list[str],
+        *,
+        message: str | None = None,
+    ) -> None:
+        seen = set()
+        dupes = []
+        for i in task_ids:
+            if i in seen:
+                dupes.append(i)
+            seen.add(i)
+
+        if message is None:
+            formatted = ", ".join(repr(i) for i in sorted(set(dupes)))
+            message = f"duplicate task ID(s) in eval set: {formatted}; each task ID must be unique"
+        super().__init__(
+            message,
+            task_ids=dupes,
+            reason="duplicate_task_id",
+        )
+
+
+class TaskContentMismatchError(TaskContextError):
+    """Raised when a task in the eval set does not match the recorded hash."""
+
+    def __init__(
+        self,
+        task_id: str,
+        *,
+        recorded_hash: str,
+        computed_hash: str,
+        message: str | None = None,
+    ) -> None:
+        if message is None:
+            message = (
+                f"task {task_id!r} content does not match the task recorded in the trials "
+                f"(recorded hash {recorded_hash[:12]}, eval set hash {computed_hash[:12]}). "
+                "Supply the original eval set used for the run, or run without --eval-set "
+                "to inspect the recorded execution evidence alone."
+            )
+        super().__init__(
+            message,
+            reason="content_mismatch",
+            task_id=task_id,
+            recorded_hash=recorded_hash,
+            computed_hash=computed_hash,
+        )
+
+
+
+class TaskContextStatus(StrEnum):
+    """Verification status of attached task context."""
+
+    VERIFIED = "verified"
+    UNVERIFIED = "unverified"
+    NONE = "none"
 
 
 class TrialKind(StrEnum):
@@ -177,6 +261,7 @@ class TrialView(BaseModel):
     actual: str
     outcomes: list[OutcomeView] = Field(default_factory=list)
     transcript: TranscriptView | None = None
+    task_context_status: TaskContextStatus = TaskContextStatus.NONE
 
     def headline(self) -> str:
         text = (
@@ -200,6 +285,7 @@ class InspectionReport(BaseModel):
     selected: int
     shown: int
     eval_set_supplied: bool = False
+    task_context_status: TaskContextStatus = TaskContextStatus.NONE
     max_steps: int | None = DEFAULT_MAX_STEPS
     max_chars: int | None = DEFAULT_MAX_CHARS
     full: bool = False
@@ -263,6 +349,7 @@ def trial_view(
     *,
     task: Task | None = None,
     eval_set_supplied: bool = False,
+    task_context_status: TaskContextStatus = TaskContextStatus.NONE,
     max_steps: int | None = DEFAULT_MAX_STEPS,
     max_chars: int | None = DEFAULT_MAX_CHARS,
 ) -> TrialView:
@@ -309,6 +396,7 @@ def trial_view(
         transcript=(
             _transcript_view(transcript, max_steps, max_chars) if transcript is not None else None
         ),
+        task_context_status=task_context_status,
     )
 
 
@@ -342,6 +430,38 @@ def select_trials(
     return selected
 
 
+def validate_task_context(
+    by_id: dict[str, Task],
+    shown: Sequence[Trial],
+    provenance_hashes: dict[str, str],
+) -> dict[str, TaskContextStatus]:
+    """Validate task set for hash mismatches and resolve per-task context statuses.
+
+    Returns:
+        Mapping from task_id to TaskContextStatus.
+    """
+    has_provenance_hashes = bool(provenance_hashes)
+    attached_task_ids = {trial.task_id for trial in shown if trial.task_id in by_id}
+
+    per_task_status: dict[str, TaskContextStatus] = {}
+
+    for tid in attached_task_ids:
+        task_obj = by_id[tid]
+        if not has_provenance_hashes or tid not in provenance_hashes:
+            per_task_status[tid] = TaskContextStatus.UNVERIFIED
+            continue
+
+        recorded_hash = provenance_hashes[tid]
+        computed_hash = task_content_hash(task_obj)
+        if recorded_hash != computed_hash:
+            raise TaskContentMismatchError(
+                tid, recorded_hash=recorded_hash, computed_hash=computed_hash
+            )
+        per_task_status[tid] = TaskContextStatus.VERIFIED
+
+    return per_task_status
+
+
 def build_inspection(
     batch: TrialBatch,
     *,
@@ -369,7 +489,27 @@ def build_inspection(
         totals[classify(trial)] += 1
     selected = select_trials(batch, kinds=kinds, task_ids=task_ids, grader_ids=grader_ids)
     shown = selected if limit is None else selected[:limit]
-    by_id = {task.task_id: task for task in tasks} if tasks is not None else {}
+
+    if tasks is None:
+        by_id: dict[str, Task] = {}
+        per_task_status: dict[str, TaskContextStatus] = {}
+        report_context_status = TaskContextStatus.NONE
+    else:
+        by_id = {task.task_id: task for task in tasks}
+        if len(tasks) != len(by_id):
+            raise TaskDuplicateIdError(task_ids=[t.task_id for t in tasks])
+
+        task_hashes = (
+            batch.provenance.measurement.task_hashes
+            if (batch.provenance is not None and batch.provenance.measurement is not None)
+            else {}
+        )
+        per_task_status = validate_task_context(by_id, shown, task_hashes)
+        has_unverified = TaskContextStatus.UNVERIFIED in per_task_status.values()
+        report_context_status = (
+            TaskContextStatus.UNVERIFIED if has_unverified else TaskContextStatus.VERIFIED
+        )
+
     parts = []
     if kinds is None:
         parts.append("all trials")
@@ -388,6 +528,7 @@ def build_inspection(
         selected=len(selected),
         shown=len(shown),
         eval_set_supplied=tasks is not None,
+        task_context_status=report_context_status,
         max_steps=max_steps,
         max_chars=max_chars,
         full=full,
@@ -396,6 +537,7 @@ def build_inspection(
                 trial,
                 task=by_id.get(trial.task_id),
                 eval_set_supplied=tasks is not None,
+                task_context_status=per_task_status.get(trial.task_id, TaskContextStatus.NONE),
                 max_steps=max_steps,
                 max_chars=max_chars,
             )
@@ -431,12 +573,17 @@ def render_text(report: InspectionReport) -> str:
     ]
     if not report.eval_set_supplied:
         lines.append("  expected outputs: not supplied (pass --eval-set to show them)")
+    elif report.task_context_status == TaskContextStatus.UNVERIFIED:
+        lines.append("  expected outputs: unverified (trials file carries no task hashes)")
     for number, trial in enumerate(report.trials, start=1):
         lines.append("")
         lines.append(f"[{number}] {trial.headline()}")
         lines.append(f"    why:      {KIND_MEANING[trial.kind]}")
-        if trial.task_name:
-            lines.append(f"    task:     {trial.task_name}")
+        task_label = trial.task_name
+        if trial.task_context_status == TaskContextStatus.UNVERIFIED and task_label:
+            task_label += " (unverified)"
+        if task_label:
+            lines.append(f"    task:     {task_label}")
         if trial.task_input is not None:
             lines.append(f"    input:    {trial.task_input}")
         if trial.error_message:
@@ -480,7 +627,13 @@ def _trial_html(number: int, trial: TrialView) -> str:
     color = _KIND_COLORS[trial.kind]
     rows = [_row("why", KIND_MEANING[trial.kind])]
     if trial.task_name:
-        rows.append(_row("task", trial.task_name))
+        rows.append(_row(
+            "task",
+            f"{trial.task_name} (unverified)"
+            if trial.task_context_status == TaskContextStatus.UNVERIFIED
+            else trial.task_name,
+        ))
+
     if trial.task_input is not None:
         rows.append(_row("input", trial.task_input))
     if trial.error_message:
@@ -530,10 +683,12 @@ def render_html(report: InspectionReport) -> str:
     showing = (
         f"; showing the first {report.shown}" if report.shown < report.selected else ""
     )
-    expected_note = (
-        "" if report.eval_set_supplied
-        else "<p class=\"muted\">Expected outputs: not supplied (pass --eval-set to show them).</p>"
-    )
+    if not report.eval_set_supplied:
+        expected_note = "<p class=\"muted\">Expected outputs: not supplied (pass --eval-set to show them).</p>"
+    elif report.task_context_status == TaskContextStatus.UNVERIFIED:
+        expected_note = "<p class=\"muted\">Expected outputs: unverified (trials file carries no task hashes).</p>"
+    else:
+        expected_note = ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
