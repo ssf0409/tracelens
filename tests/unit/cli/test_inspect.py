@@ -200,4 +200,5 @@ def test_eval_set_duplicate_task_id_exits_2(artifacts, capsys):
     assert code == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "duplicate task ID 't-pass' in eval set" in captured.err
+    # Verify the error is propagated to the CLI
+    assert "duplicate task ID(s) in eval set: 't-pass'" in captured.err

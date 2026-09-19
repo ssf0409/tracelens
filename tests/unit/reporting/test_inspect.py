@@ -305,7 +305,7 @@ class TestBuildAndRender:
         assert exc_info_dup.value.task_id == "b"
         assert exc_info_dup.value.task_ids == ["b"]
         assert exc_info_dup.value.reason == "duplicate_task_id"
-        assert "duplicate task ID 'b'" in str(exc_info_dup.value)
+        assert "duplicate task ID(s) in eval set: 'b'" in str(exc_info_dup.value)
 
         # Multiple duplicate task IDs report all duplicates together
         t_dup2 = Task(task_id="c", name="task c dup", input_data={"q": "question c dup"})

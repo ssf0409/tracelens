@@ -60,16 +60,20 @@ class TaskDuplicateIdError(TaskContextError):
         *,
         message: str | None = None,
     ) -> None:
+        seen = set()
+        dupes = []
+        for i in task_ids:
+            if i in seen:
+                dupes.append(i)
+            seen.add(i)
+
         if message is None:
-            if len(task_ids) == 1:
-                message = f"duplicate task ID {task_ids[0]!r} in eval set; each task ID must be unique"
-            else:
-                formatted = ", ".join(repr(i) for i in sorted(set(task_ids)))
-                message = f"duplicate task IDs in eval set: {formatted}; each task ID must be unique"
+            formatted = ", ".join(repr(i) for i in sorted(set(dupes)))
+            message = f"duplicate task ID(s) in eval set: {formatted}; each task ID must be unique"
         super().__init__(
             message,
+            task_ids=dupes,
             reason="duplicate_task_id",
-            task_ids=task_ids,
         )
 
 
@@ -486,29 +490,21 @@ def build_inspection(
     selected = select_trials(batch, kinds=kinds, task_ids=task_ids, grader_ids=grader_ids)
     shown = selected if limit is None else selected[:limit]
 
-    by_id: dict[str, Task] = {}
-    if tasks is not None:
-        duplicates: list[str] = []
-        for task in tasks:
-            if task.task_id in by_id:
-                duplicates.append(task.task_id)
-            by_id[task.task_id] = task
-        if duplicates:
-            raise TaskDuplicateIdError(task_ids=duplicates)
-
-    task_hashes = (
-        batch.provenance.measurement.task_hashes
-        if (batch.provenance is not None and batch.provenance.measurement is not None)
-        else {}
-    )
-    per_task_status = (
-        validate_task_context(by_id, shown, task_hashes)
-        if tasks is not None
-        else {}
-    )
     if tasks is None:
+        by_id: dict[str, Task] = {}
+        per_task_status: dict[str, TaskContextStatus] = {}
         report_context_status = TaskContextStatus.NONE
     else:
+        by_id = {task.task_id: task for task in tasks}
+        if len(tasks) != len(by_id):
+            raise TaskDuplicateIdError(task_ids=[t.task_id for t in tasks])
+
+        task_hashes = (
+            batch.provenance.measurement.task_hashes
+            if (batch.provenance is not None and batch.provenance.measurement is not None)
+            else {}
+        )
+        per_task_status = validate_task_context(by_id, shown, task_hashes)
         has_unverified = TaskContextStatus.UNVERIFIED in per_task_status.values()
         report_context_status = (
             TaskContextStatus.UNVERIFIED if has_unverified else TaskContextStatus.VERIFIED
