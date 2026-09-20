@@ -121,7 +121,7 @@ def _summary_is_a_proportion(mean_b: float, n_b: int, std_b: float | None) -> bo
     This is an inference for baselines that do not say. A baseline that sets
     ``MetricBaseline.is_rate`` is taken at its word and never reaches here.
     """
-    if not 0.0 <= mean_b <= 1.0:
+    if n_b < 1 or not 0.0 <= mean_b <= 1.0:
         return False
     k = mean_b * n_b
     if abs(k - round(k)) > _COUNT_TOLERANCE:
@@ -229,7 +229,12 @@ def _sides(
     mean_c = float(np.mean(current_values))
     std_c = float(np.std(current_values, ddof=1)) if n_c >= 2 else None
     mean_b = float(metric_baseline.baseline_value)
-    n_b = int(metric_baseline.sample_size)
+    # A stored size below zero is a corrupt record, not evidence. Floor it
+    # rather than handing a negative count to the exact test, which would
+    # raise out of SciPy and take the whole run down; the comparison then
+    # falls through to "no measured spread" and the gate reports that it
+    # could not evaluate this task.
+    n_b = max(0, int(metric_baseline.sample_size))
     # Fewer than two stored trials is not evidence of a spread, whatever the
     # field says; and the size is never inflated to match the check, which
     # would credit the baseline with runs it never had.
@@ -244,7 +249,8 @@ def _sides(
     is_rate = metric_baseline.is_rate
     if is_rate is None:
         is_rate = _summary_is_a_proportion(mean_b, n_b, std_b)
-    binary = bool(is_rate) and _is_binary(current_values)
+    # Counting needs a baseline with trials to count, whatever it declares.
+    binary = bool(is_rate) and n_b >= 1 and _is_binary(current_values)
     return _Sides(
         binary=binary,
         mean_b=mean_b,
@@ -268,6 +274,13 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
         return TEST_BOSCHLOO, _boschloo_p(
             sides.k_b, sides.n_b, sides.k_c, sides.n_c, alternative
         )
+    if sides.mean_b == sides.mean_c:
+        # No difference in either direction. Worth stating before the
+        # branches below, because the permutation value is the probability
+        # of the most extreme split and only applies when the two sides
+        # actually separate -- two constant sides at the SAME value would
+        # otherwise read as the strongest evidence the sizes allow.
+        return None, 1.0
     std_b, std_c = sides.std_b, sides.std_c
     if std_b is None:
         # The baseline stored fewer than two trials, so it has no measured

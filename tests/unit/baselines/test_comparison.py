@@ -13,7 +13,7 @@ from tracelens.baselines.comparison import (
     relative_change,
     severity_at_least,
 )
-from tracelens.baselines.manager import TaskBaseline
+from tracelens.baselines.manager import MetricBaseline, TaskBaseline
 
 
 class TestRegressionSeverity:
@@ -654,6 +654,22 @@ class TestMetricTypeComesFromTheBaseline:
         ).regressions[0]
         assert reg.test == "boschloo_exact"
 
+    def test_a_corrupt_sample_size_is_no_evidence_and_does_not_crash(self) -> None:
+        # A negative count handed to the exact test raises out of SciPy and
+        # takes the whole run down. A corrupt record is not evidence: the
+        # comparison has no valid test, so the check is undetectable and
+        # nothing about it can block.
+        for size in (0, -1):
+            baseline = TaskBaseline(task_id="t1")
+            baseline.metrics["pass_rate"] = MetricBaseline(
+                metric_name="pass_rate", baseline_value=1.0, sample_size=size
+            )
+            report = RegressionDetector().compare(baseline, [{"pass_rate": 0.0}] * 3)
+            reg = report.regressions[0]
+            assert reg.test is None and reg.p_value is None
+            assert reg.insufficient_data is True and reg.undetectable is True
+            assert report.should_block_ci(RegressionSeverity.MINOR) is False
+
     def test_a_baseline_may_declare_what_it_is(self) -> None:
         values = [{"pass_rate": v} for v in (1.0, 1.0, 0.0, 0.0, 0.0)]
         declared = TaskBaseline(task_id="t1")
@@ -710,6 +726,20 @@ class TestContinuousMetricTests:
         assert reg.p_value == pytest.approx(0.0608, abs=5e-4)
         assert reg.is_significant is False
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
+
+    def test_two_constant_sides_at_the_same_value_are_no_evidence(self) -> None:
+        # The permutation value is the probability of the MOST extreme
+        # split, so it only applies when the two sides actually separate.
+        # Two constant sides at the same value do not, and reading
+        # 1/C(8, 4) there would make "nothing changed" the strongest
+        # evidence the sample sizes allow.
+        report = RegressionDetector(min_delta_percent=0.0).compare(
+            self._baseline(0.9, 0.0, 4), [{"mean_score": 0.9}] * 4
+        )
+        finding = (report.regressions or report.improvements)[0]
+        assert finding.delta == 0.0
+        assert finding.p_value == 1.0 and finding.is_significant is False
+        assert report.has_regression is False
 
     def test_exact_permutation_when_both_sides_are_constant(self) -> None:
         report = RegressionDetector().compare(self._baseline(1.0, 0.0, 10), [{"mean_score": 0.5}] * 5)
