@@ -46,7 +46,7 @@ counted as excluded.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -582,6 +582,36 @@ def _apply_multiplicity(
     return levels
 
 
+def _thin_advice(
+    needed: Sequence[int],
+    undetectable_ids: Sequence[str],
+    thin_baselines: Collection[str],
+    *,
+    parenthetical: bool = False,
+) -> str:
+    """What to change so the check could decide something next time.
+
+    More check trials only help when the baselines carry evidence to compare
+    them against. When every undecidable task is held back by a baseline
+    that stored fewer than two trials, telling the operator to run more
+    trials is advice that provably cannot work.
+    """
+    if needed:
+        tail = (
+            " (and store baselines from at least as many)"
+            if parenthetical
+            else " and store baselines from at least as many"
+        )
+        return f"; run at least {max(needed)} trials per task{tail}"
+    if thin_baselines and all(task_id in thin_baselines for task_id in undetectable_ids):
+        return (
+            "; their baselines stored fewer than two trials, so they carry no "
+            "measured spread -- re-store them from several runs, as more check "
+            "trials alone cannot decide them"
+        )
+    return ""
+
+
 def _suite_results(
     per_task_means: Mapping[str, list[tuple[float, float]]],
     *,
@@ -715,13 +745,12 @@ def evaluate_gate(
     if not 0.0 < alpha < 1.0:
         raise ValueError(f"alpha must be strictly between 0 and 1, got {alpha!r}")
     # Power notes are computed once, after the run-level correction.
-    # One run-level budget. With both criteria live they split it evenly so
-    # the union of the two chances to block stays at ``alpha``; with the
-    # suite criterion reporting only, the per-task family owns all of it.
-    task_alpha = alpha / 2 if suite_blocking else alpha
-    suite_alpha = alpha / 2 if suite_blocking else alpha
+    # One run-level budget, split once it is known whether both criteria are
+    # actually live (below). ``_apply_multiplicity`` re-annotates every
+    # finding at the level the run settles on, so the detector's own level
+    # only governs the first pass.
     detector = RegressionDetector(
-        significance_level=task_alpha, noise_band_absolute=noise_band, power_notes=False
+        significance_level=alpha, noise_band_absolute=noise_band, power_notes=False
     )
     trials_by_task: dict[str, list[Trial]] = {}
     for trial in batch.trials:
@@ -821,12 +850,23 @@ def evaluate_gate(
             improvements=list(report.improvements),
         ))
 
+    # Split the budget only when the suite criterion can really take a share:
+    # it needs at least two checked tasks carrying the same metric, and
+    # charging the per-task family half the level for a criterion that never
+    # forms would halve the run's sensitivity for nothing.
+    suite_is_live = suite_blocking and any(
+        len(pairs) >= 2 for pairs in per_task_means.values()
+    )
+    task_alpha = alpha / 2 if suite_is_live else alpha
+    suite_alpha = alpha / 2 if suite_is_live else alpha
+
     # Run-level policy: adjust for multiplicity, then decide each task from
     # its significant findings and record what its sample sizes can show.
     levels = _apply_multiplicity(
         tasks, detector, alpha=task_alpha, multiplicity=multiplicity
     )
     checked = [t for t in tasks if t.outcome is TaskGateOutcome.CHECKED]
+    thin_baselines: set[str] = set()
     # One family over every (task, metric) pair the run compared.
     family_size = sum(len(t.compared_metrics) for t in checked)
     # The strictest level any test in the run is held to, for the messages.
@@ -851,6 +891,10 @@ def evaluate_gate(
             detectable = detectable or ok
             if trials is not None:
                 needed.append(trials)
+            if not ok and metric_baseline.sample_size < 2:
+                # More check trials cannot decide a baseline that stored no
+                # measured spread, so the advice has to name the baseline.
+                thin_baselines.add(task.task_id)
         task.detectable = detectable
         task.trials_needed = None if detectable or not needed else min(needed)
 
@@ -889,9 +933,8 @@ def evaluate_gate(
         )
     if undetectable and len(undetectable) < len(checked):
         needed = [t.trials_needed for t in undetectable if t.trials_needed is not None]
-        advice = (
-            f"; run at least {max(needed)} trials per task (and store baselines from "
-            "at least as many)" if needed else ""
+        advice = _thin_advice(
+            needed, [t.task_id for t in undetectable], thin_baselines, parenthetical=True
         )
         warnings.append(
             f"{len(undetectable)} checked task(s) have too few trials to block on their "
@@ -927,9 +970,8 @@ def evaluate_gate(
             )
         if checked and undetectable and len(undetectable) == len(checked) and not suite_can_reject:
             needed = [t.trials_needed for t in undetectable if t.trials_needed is not None]
-            advice = (
-                f"; run at least {max(needed)} trials per task and store baselines from "
-                "at least as many" if needed else ""
+            advice = _thin_advice(
+                needed, [t.task_id for t in undetectable], thin_baselines
             )
             reasons.append(
                 "no checked task has enough trials to detect even a total failure "
@@ -991,6 +1033,6 @@ def evaluate_gate(
         alpha=alpha,
         multiplicity=multiplicity,
         family_size=family_size,
-        suite_blocking=suite_blocking,
+        suite_blocking=suite_is_live,
         suite=suite,
     )

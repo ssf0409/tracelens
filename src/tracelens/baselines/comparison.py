@@ -85,6 +85,10 @@ _COUNT_TOLERANCE = 1e-6
 # Slack on the widest spread 0/1 data of a given size can show, before a
 # recorded spread is judged too large to have come from a proportion.
 _BERNOULLI_TOLERANCE = 0.02
+# Per stored trial, how far the implied success count may sit from a whole
+# number and still be read as one: enough for a rate written to three
+# decimals, far less than any real non-count.
+_ROUNDED_RATE_TOLERANCE = 5e-4
 # ``trials_needed`` scans stop here; beyond it the advice is "more than".
 TRIALS_NEEDED_CAP = 200
 
@@ -119,7 +123,12 @@ def _is_a_whole_count(mean_b: float, n_b: int) -> bool:
     if n_b < 1 or not math.isfinite(mean_b) or not 0.0 <= mean_b <= 1.0:
         return False
     k = mean_b * n_b
-    return abs(k - round(k)) <= _COUNT_TOLERANCE
+    # A rate written out to a few decimals (0.667 of three trials) is still a
+    # count, so the slack grows with the size it is multiplied by. It stays
+    # far tighter than the gap a real non-count leaves: half a success over
+    # five trials misses by 0.5 against a tolerance of 0.0025.
+    tolerance = max(_COUNT_TOLERANCE, _ROUNDED_RATE_TOLERANCE * n_b)
+    return abs(k - round(k)) <= tolerance
 
 
 def _summary_is_a_proportion(mean_b: float, n_b: int, std_b: float | None) -> bool:

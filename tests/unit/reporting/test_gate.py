@@ -514,18 +514,29 @@ class TestRunLevelPolicy:
         paid = next(s for s in gate.suite if s.p_value == smallest)
         assert paid.p_value_adjusted == pytest.approx(min(1.0, 2 * smallest))
 
-    def test_the_budget_split_is_recorded_not_inferred(self, tmp_path):
-        # With fewer than two tasks per metric no suite entry exists, but
-        # the per-task family was still held to half the budget. Inferring
-        # the split from the (empty) suite list said alpha=0.05 for a
-        # decision actually made at 0.025.
+    def test_the_budget_is_split_only_when_the_suite_can_take_a_share(self, tmp_path):
+        # One task means no suite criterion can form, so charging the
+        # per-task family half the level would halve the run's sensitivity
+        # for a criterion that never runs.
         manager = _manager_n(tmp_path, {"a": 1.0}, sample_size=5)
-        gate = evaluate_gate(_batch(*_runs("a", _passes(2, 5))), manager, suite_blocking=True)
+        alone = evaluate_gate(
+            _batch(*_runs("a", _passes(2, 5))), manager, suite_blocking=True
+        )
+        assert alone.suite == [] and alone.suite_blocking is False
+        assert alone.policy_text() == (
+            "alpha=0.05, Holm-adjusted across 1 compared (task, metric) test(s)"
+        )
 
-        assert gate.suite == [] and gate.suite_blocking is True
-        assert "split with the suite criterion" in gate.policy_text()
-        assert "0.025 for the per-task family" in gate.policy_text()
-        assert GateResult.from_dict(gate.to_dict()).policy_text() == gate.policy_text()
+        # Two tasks can, so both criteria are live and the budget splits.
+        manager2 = _manager_n(tmp_path, {"a": 1.0, "b": 1.0}, sample_size=5)
+        both = evaluate_gate(
+            _batch(*_runs("a", _passes(2, 5)), *_runs("b", _passes(2, 5))),
+            manager2, suite_blocking=True,
+        )
+        assert both.suite and both.suite_blocking is True
+        assert "0.025 for the per-task family" in both.policy_text()
+        # The split the run used is recorded, not re-derived on read.
+        assert GateResult.from_dict(both.to_dict()).policy_text() == both.policy_text()
 
     def test_suite_level_criterion_ignores_one_task_among_many(self, tmp_path):
         ids = [f"t{i}" for i in range(10)]
@@ -595,6 +606,27 @@ class TestRunLevelPolicy:
         assert failing.status is GateStatus.BLOCKED
         assert all(not task.blocking for task in failing.tasks)
         assert next(s for s in failing.suite if s.metric_name == "pass_rate").blocking
+
+    def test_a_thin_baseline_is_named_as_the_limit(self, tmp_path):
+        # Both baselines stored one trial, so no number of check trials can
+        # decide them. Telling the operator to run more is advice that
+        # cannot work; the note has to name the baselines instead.
+        manager = BaselineManager(tmp_path / "baselines.json")
+        for task_id in ("a", "b"):
+            baseline = TaskBaseline(task_id=task_id)
+            baseline.add_metric("mean_score", 0.9, std=0.0, sample_size=1)
+            manager.set_baseline(baseline)
+        manager.save()
+        batch = _batch(*[
+            _trial(task_id, True, run_index=i, score=0.5)
+            for task_id in ("a", "b") for i in range(3)
+        ])
+
+        gate = evaluate_gate(batch, manager)
+        assert gate.status is GateStatus.UNEVALUABLE
+        assert "stored fewer than two trials" in gate.reasons[0]
+        assert "more check trials alone cannot decide them" in gate.reasons[0]
+        assert "run at least" not in gate.reasons[0]
 
     def test_partly_undetectable_run_is_a_warning(self, tmp_path):
         manager = BaselineManager(tmp_path / "baselines.json")

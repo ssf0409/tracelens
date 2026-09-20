@@ -24,7 +24,11 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   suite of 40 deterministic and 10 correlated flaky tasks blocked 11.6 % of
   the time in simulation. `--suite-blocking`
   (`run.baseline.suite_blocking`) opts in and splits the 5 % budget evenly
-  between the two criteria. A check none of whose tasks could have blocked at
+  between the two criteria -- but only when a suite criterion can actually
+  form, so a run that could never have one keeps the whole budget for its
+  per-task tests, and the suite criteria share their half through the same
+  Holm adjustment rather than spending it once per stored metric.
+  A check none of whose tasks could have blocked at
   their sample sizes is `UNEVALUABLE` (exit 2) with the trials per task it
   would need, and tasks that cannot block on their own are named in a
   warning. The gate JSON records `alpha`, `multiplicity`, `family_size` and
