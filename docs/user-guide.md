@@ -351,6 +351,7 @@ run:
     require_baselines: false         # --require-baselines / --no-require-baselines
     noise_band: 0.03                 # --noise-band
     multiplicity: holm               # --multiplicity
+    suite_blocking: false            # --suite-blocking / --no-suite-blocking
 ```
 
 Every key is optional, but some layer must provide `eval_set`, `adapter`,

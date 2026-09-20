@@ -5,21 +5,24 @@ metric, and reports every drop above the reporting floor together with the
 evidence for it. The procedure is specified in ``docs/statistical-contract.md``
 ("Baseline regression detection"):
 
-- A 0/1-valued metric (``pass_rate``, or any metric whose current samples
-  are all 0 or 1) is compared with Boschloo's exact unconditional test on
-  the two success counts. The baseline count is its mean times its
-  ``sample_size``.
-- A continuous metric uses a two-sample t-test from the stored summary:
-  Welch's when both sides have a measured spread, pooled-variance when one
-  side has none; when both sides are constant, the exact permutation
-  p-value. A single current trial is compared with the baseline sample as a
-  prediction interval.
+- Whether a metric is a 0/1 proportion is decided by the baseline, not by
+  where the current sample happens to land: either the baseline declares it
+  (``MetricBaseline.is_rate``) or its stored summary is consistent with one
+  (mean times ``sample_size`` is a whole count, and any positive recorded
+  spread is one 0/1 data of that size could show). Such a metric is
+  compared with Boschloo's exact unconditional test on the two counts.
+- A continuous metric uses **Welch's** t-test from the stored summary. A
+  zero measured spread on one side is not a reason to assume equal
+  population variances, so the pooled-variance test is not used. When both
+  sides are constant the p-value is the exact permutation value; a single
+  current trial against a measured baseline is a prediction-interval t.
 - p-values are one-sided in the observed direction and never fabricated. A
   comparison with no valid test is ``insufficient_data``.
-- A baseline whose ``sample_size`` was never recorded (the default, 1) is
-  treated as if it had been measured with as many trials as the current
-  check (``baseline_n_assumed``); a baseline spread that was never recorded
-  is taken from the current sample.
+- Evidence is never invented for the baseline. Its recorded ``sample_size``
+  is used as recorded, and a baseline that stored fewer than two trials has
+  no measured spread at all: such a comparison has almost no power, is
+  reported as ``undetectable``, and makes the gate unevaluable rather than
+  borrowing the current sample's evidence to stand in for it.
 - Blocking needs both an effect at or above the severity threshold and a
   significant test. A drop that is reported but not significant is
   ``underpowered`` and carries the number of trials that would decide it;
@@ -63,13 +66,23 @@ DEFAULT_SIGNIFICANCE_LEVEL: float = 0.05
 # Names recorded on ``MetricRegression.test``.
 TEST_BOSCHLOO = "boschloo_exact"
 TEST_WELCH = "welch_t"
-TEST_POOLED = "pooled_t"
 TEST_PERMUTATION = "exact_permutation"
+TEST_PREDICTION = "prediction_t"
+# No longer produced: a zero measured spread on one side does not justify
+# assuming the two populations share a variance. Kept so findings stored by
+# an earlier version still round-trip.
+TEST_POOLED = "pooled_t"
 
 # Direction of a one-sided test: "greater" means the baseline mean is higher.
 Alternative = Literal["greater", "less"]
 
 _BINARY_TOLERANCE = 1e-9
+# ``baseline_value * sample_size`` must be this close to a whole number for
+# the stored baseline to be read as a count of successes.
+_COUNT_TOLERANCE = 1e-6
+# Slack on the widest spread 0/1 data of a given size can show, before a
+# recorded spread is judged too large to have come from a proportion.
+_BERNOULLI_TOLERANCE = 0.02
 # ``trials_needed`` scans stop here; beyond it the advice is "more than".
 TRIALS_NEEDED_CAP = 200
 
@@ -84,20 +97,68 @@ def _round_half_up(x: float) -> int:
     return int(math.floor(x + 0.5))
 
 
+def _bernoulli_std(k: int, n: int) -> float:
+    """Sample standard deviation (ddof=1) of ``n`` 0/1 values with ``k`` ones."""
+    if n < 2:
+        return 0.0
+    return math.sqrt(k * (n - k) / (n * (n - 1)))
+
+
+def _summary_is_a_proportion(mean_b: float, n_b: int, std_b: float | None) -> bool:
+    """Whether the stored baseline summary is consistent with a 0/1 rate.
+
+    Every check is on the baseline's own evidence, never on the current
+    sample: the mean sits in [0, 1]; the mean times the recorded size is a
+    whole count of successes, which is what rules out a continuous score
+    such as 0.1 over five trials (half a success is not a count); and any
+    positive recorded spread is one 0/1 data of that size could actually
+    show. The spread is deliberately only a sanity bound, not a match:
+    a real proportion records zero whenever every trial agreed, callers that
+    never computed a spread leave the field at its 0.0 default, and
+    ``tracelens init`` scaffolds a nominal 0.05 -- none of which is evidence
+    against a rate.
+
+    This is an inference for baselines that do not say. A baseline that sets
+    ``MetricBaseline.is_rate`` is taken at its word and never reaches here.
+    """
+    if not 0.0 <= mean_b <= 1.0:
+        return False
+    k = mean_b * n_b
+    if abs(k - round(k)) > _COUNT_TOLERANCE:
+        return False
+    if std_b is None or std_b <= 0.0:
+        return True
+    if n_b < 2:
+        return False  # a positive spread cannot have been measured from one trial
+    # The widest spread 0/1 data of this size can show is at a half-and-half
+    # split; anything beyond it did not come from a proportion.
+    widest = _bernoulli_std(n_b // 2, n_b)
+    return std_b <= widest + _BERNOULLI_TOLERANCE
+
+
 @lru_cache(maxsize=65536)
 def _boschloo_p(k_b: int, n_b: int, k_c: int, n_c: int, alternative: Alternative) -> float:
     """One-sided Boschloo p-value for baseline ``k_b/n_b`` vs current ``k_c/n_c``.
 
-    ``alternative="greater"`` tests "the baseline rate is higher" (a drop);
-    ``"less"`` tests a rise. Cached: a gate over many tasks repeats the same
-    small tables.
+    SciPy's model puts one binomial experiment in each **column** and names
+    the two probabilities after the first row's entries, so the baseline and
+    the current sample are the two columns, not the two rows. Transposing
+    the table asks a different question -- it fixes the wrong margin -- and
+    at unequal sizes it answers differently: 7/7 against 2/4 reads p=0.0420
+    transposed and p=0.0538 as written here.
+
+    ``alternative="greater"`` therefore tests "the baseline rate is higher"
+    (a drop) and ``"less"`` a rise. Cached: a gate over many tasks repeats
+    the same small tables.
     """
-    table = [[k_b, n_b - k_b], [k_c, n_c - k_c]]
+    table = [[k_b, k_c], [n_b - k_b, n_c - k_c]]
     result = stats.boschloo_exact(table, alternative=alternative)
     p = float(result.pvalue)
-    if math.isnan(p):
-        # An all-zero column (no success, or no failure, on either side): the
-        # two rates are equal, so there is no evidence of a difference.
+    if not math.isfinite(p):
+        # Defensive: every column here sums to at least one trial, so SciPy
+        # has a defined value for each table this builds. Should that ever
+        # change, "no evidence" is the safe reading -- clamping a NaN would
+        # silently produce p=0.0 and fabricate significance.
         return 1.0
     return float(min(1.0, max(0.0, p)))
 
@@ -140,10 +201,21 @@ class _Sides:
     def k_c(self) -> int:
         return min(self.n_c, max(0, _round_half_up(self.mean_c * self.n_c)))
 
-    def scaled(self, n_c: int) -> _Sides:
-        """The same rates and spreads observed with ``n_c`` current trials."""
-        n_b = n_c if self.baseline_n_assumed else self.n_b
-        return replace(self, n_b=n_b, n_c=n_c)
+    def scaled(self, n_c: int, *, grow_baseline: bool = False) -> _Sides:
+        """The same rates and spreads projected onto ``n_c`` current trials.
+
+        Only ``_trials_needed`` uses this, and only to answer "how many
+        trials would decide the change we just saw" -- a power projection,
+        never a reported p-value. ``grow_baseline`` also re-stores the
+        baseline at the same size. A current sample of one has no measured
+        spread, so the projection borrows the baseline's; that assumption is
+        confined to this planning path.
+        """
+        n_b = n_c if grow_baseline else self.n_b
+        std_c = self.std_c
+        if std_c is None and n_c >= 2:
+            std_c = self.std_b
+        return replace(self, n_b=n_b, n_c=n_c, std_c=std_c)
 
     def worst_case(self) -> _Sides:
         """Every current trial at the bad end of a 0/1 metric."""
@@ -157,12 +229,22 @@ def _sides(
     mean_c = float(np.mean(current_values))
     std_c = float(np.std(current_values, ddof=1)) if n_c >= 2 else None
     mean_b = float(metric_baseline.baseline_value)
-    assumed = metric_baseline.sample_size < 2
-    n_b = n_c if assumed else int(metric_baseline.sample_size)
-    std_b: float | None = float(metric_baseline.std_deviation)
-    if assumed and metric_baseline.std_deviation <= 0.0:
-        std_b = None  # never measured: the current spread stands in
-    binary = _is_binary(current_values) and 0.0 <= mean_b <= 1.0
+    n_b = int(metric_baseline.sample_size)
+    # Fewer than two stored trials is not evidence of a spread, whatever the
+    # field says; and the size is never inflated to match the check, which
+    # would credit the baseline with runs it never had.
+    declared = n_b < 2
+    recorded_std = float(metric_baseline.std_deviation)
+    std_b: float | None = None if declared else recorded_std
+    # The metric's type comes from the baseline: an explicit declaration
+    # when there is one, otherwise whether its stored summary is consistent
+    # with a proportion. The current sample can only confirm that, never
+    # decide it -- otherwise a continuous score that happens to land on 0
+    # changes the test family and the verdict.
+    is_rate = metric_baseline.is_rate
+    if is_rate is None:
+        is_rate = _summary_is_a_proportion(mean_b, n_b, std_b)
+    binary = bool(is_rate) and _is_binary(current_values)
     return _Sides(
         binary=binary,
         mean_b=mean_b,
@@ -171,7 +253,7 @@ def _sides(
         mean_c=mean_c,
         n_c=n_c,
         std_c=std_c,
-        baseline_n_assumed=assumed,
+        baseline_n_assumed=declared,
         higher_is_better=metric_baseline.higher_is_better,
     )
 
@@ -186,31 +268,47 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
         return TEST_BOSCHLOO, _boschloo_p(
             sides.k_b, sides.n_b, sides.k_c, sides.n_c, alternative
         )
-    std_b = sides.std_b
-    std_c = sides.std_c
+    std_b, std_c = sides.std_b, sides.std_c
     if std_b is None:
-        std_b = std_c  # unrecorded baseline spread: assume the current one
-    if std_b is None:
-        return None, None  # one trial against a declared number: no test
-    if sides.n_c >= 2 and std_c is not None and std_b > 0.0 and std_c > 0.0:
-        test, equal_var = TEST_WELCH, False
-    elif std_b > 0.0 or (std_c is not None and std_c > 0.0):
-        test, equal_var = TEST_POOLED, True
-    else:
+        # The baseline stored fewer than two trials, so it has no measured
+        # spread. Standing the current sample's spread in for it would
+        # credit the baseline with evidence it never carried, which is how a
+        # declared target comes to block a run on its own.
+        return None, None
+    if std_c is None:
+        # One current trial against a measured baseline: the question is
+        # whether a single new observation is consistent with the baseline
+        # sample, which is a prediction interval, not a two-sample t-test.
+        if std_b > 0.0:
+            se = std_b * math.sqrt(1.0 + 1.0 / sides.n_b)
+            t_stat = (sides.mean_c - sides.mean_b) / se
+            df = sides.n_b - 1
+            p = (
+                float(stats.t.cdf(t_stat, df))
+                if alternative == "greater"
+                else float(stats.t.sf(t_stat, df))
+            )
+            return TEST_PREDICTION, min(1.0, max(0.0, p))
+        # A constant baseline and one differing observation: the exact
+        # permutation value over the pooled values.
+        return TEST_PERMUTATION, 1.0 / math.comb(sides.n_b + 1, 1)
+    if std_b == 0.0 and std_c == 0.0:
         # Both sides constant: only one split of the pooled values puts all
         # the extreme ones on the current side.
         return TEST_PERMUTATION, 1.0 / math.comb(sides.n_b + sides.n_c, sides.n_c)
-    if sides.n_b + sides.n_c < 3:
-        return None, None
+    # Welch throughout, including when one measured spread is zero: a sample
+    # that happened to show no variance is not evidence that the two
+    # populations share one, and pooling on that basis divides the delta by
+    # a standard error the data never supported.
     result = stats.ttest_ind_from_stats(
         sides.mean_b, std_b, sides.n_b,
-        sides.mean_c, std_c if std_c is not None else 0.0, sides.n_c,
-        equal_var=equal_var, alternative=alternative,
+        sides.mean_c, std_c, sides.n_c,
+        equal_var=False, alternative=alternative,
     )
     p = float(result.pvalue)
-    if math.isnan(p):
+    if not math.isfinite(p):
         return None, None
-    return test, min(1.0, max(0.0, p))
+    return TEST_WELCH, min(1.0, max(0.0, p))
 
 
 def _alternative(sides: _Sides) -> Alternative:
@@ -233,12 +331,10 @@ def _trials_needed(
     """
     if sides.mean_c == sides.mean_b:
         return None
-    if both_sides:
-        sides = replace(sides, baseline_n_assumed=True)
     alternative = _alternative(sides)
 
     def significant(n: int) -> bool:
-        _test, p = _p_value(sides.scaled(n), alternative)
+        _test, p = _p_value(sides.scaled(n, grow_baseline=both_sides), alternative)
         return p is not None and p <= alpha
 
     low = sides.n_c  # known not significant (or the caller would not ask)
@@ -332,9 +428,14 @@ class MetricRegression(BaseModel):
     within_noise_band: bool = False
 
     # How the evidence was produced: the test (``boschloo_exact``,
-    # ``welch_t``, ``pooled_t``, ``exact_permutation``, or ``None``), the two
-    # sample sizes, whether the baseline size was assumed equal to the
-    # current one, and the spreads the t-tests saw.
+    # ``welch_t``, ``exact_permutation``, ``prediction_t``, or ``None``;
+    # ``pooled_t`` only in findings stored by an older version), the two
+    # sample sizes as recorded, and the spreads the tests saw
+    # (``baseline_std`` is ``None`` when the baseline never measured one).
+    # ``baseline_n_assumed`` marks a baseline that stored fewer than two
+    # trials: its mean is a declared value rather than a measurement, so it
+    # carries no spread and almost no power. The size itself is never
+    # inflated to match the check.
     test: str | None = None
     baseline_n: int | None = None
     current_n: int | None = None
@@ -710,6 +811,11 @@ class RegressionDetector:
         finding.trials_needed = None
         finding.trials_needed_on_both_sides = False
         finding.undetectable = False
+        if finding.p_value is None:
+            # No valid test exists for this comparison, so no effect of any
+            # size could have been detected. That is a fact about the
+            # evidence, not a power note, so it is recorded either way.
+            finding.undetectable = True
         sides = self._sides_of(finding)
         if not power_notes or sides is None or finding.p_value is None or not finding.underpowered:
             return

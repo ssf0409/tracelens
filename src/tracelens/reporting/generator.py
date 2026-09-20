@@ -411,13 +411,23 @@ class ReportGenerator:
                 lines.append("| " + " | ".join(row) + " |")
             lines.append("")
 
-        # Legacy hand-attached regression report (CLI runs use ``gate``)
+        # Legacy hand-attached regression report (CLI runs use ``gate``).
+        # Rendered whenever anything was observed, significant or not: an
+        # underpowered drop that no test could confirm is still a finding,
+        # and hiding it reads as a clean run (issue #111).
         if (
             report.gate is None
             and report.regression_report
-            and report.regression_report.has_regression
+            and (
+                report.regression_report.regressions
+                or report.regression_report.improvements
+            )
         ):
-            lines.append("## Regression Alert")
+            lines.append(
+                "## Regression Alert"
+                if report.regression_report.has_regression
+                else "## Baseline Comparison"
+            )
             lines.append("")
             lines.append(report.regression_report.to_ci_output())
             lines.append("")
@@ -483,12 +493,19 @@ class ReportGenerator:
                 if suite.is_regression:
                     lines.append(f"[tracelens] suite-level {suite.describe()}")
             lines.append(report.gate.summary_line())
-        elif report.regression_report and report.regression_report.has_regression:
+        elif report.regression_report and report.regression_report.regressions:
             # Prefer the noise-aware "blocking" count if specs were provided.
             n_blocking = len(report.regression_report.blocking_regressions)
             n_total = len(report.regression_report.regressions)
             severity = report.regression_report.overall_severity.value.upper()
-            if report.regression_report.infra_config_mismatch and n_blocking < n_total:
+            if not report.regression_report.has_regression:
+                # Observed but not significant: say so rather than nothing,
+                # so an underpowered check cannot read as a clean run.
+                lines.append(
+                    f"No significant regression ({n_total} observed drop(s) "
+                    "not significant at these sample sizes)"
+                )
+            elif report.regression_report.infra_config_mismatch and n_blocking < n_total:
                 lines.append(
                     f"REGRESSION [{severity}] — {n_blocking}/{n_total} blocking "
                     f"({n_total - n_blocking} within infra-noise band; configs differ)"
@@ -573,9 +590,18 @@ class ReportGenerator:
         if (
             report.gate is None
             and report.regression_report
-            and report.regression_report.has_regression
+            and (
+                report.regression_report.regressions
+                or report.regression_report.improvements
+            )
         ):
-            severity = report.regression_report.overall_severity.value.upper()
+            confirmed = report.regression_report.has_regression
+            heading = "Regression Alert" if confirmed else "Baseline Comparison"
+            severity = (
+                report.regression_report.overall_severity.value.upper()
+                if confirmed
+                else "NOT SIGNIFICANT"
+            )
             sev_color = {"MINOR": "#eab308", "MODERATE": "#f97316", "SEVERE": "#ef4444"}.get(
                 severity, "#6b7280"
             )
@@ -586,7 +612,8 @@ class ReportGenerator:
                     f"<td>{r.baseline_mean:.4f}</td>"
                     f"<td>{r.current_mean:.4f}</td>"
                     f"<td>{r.delta_percent:+.1f}%</td>"
-                    f"<td>{r.severity.value}</td></tr>\n"
+                    f"<td>{r.severity.value}</td>"
+                    f"<td>{escape(r.evidence_text())}</td></tr>\n"
                 )
             imp_rows = ""
             for i in report.regression_report.improvements:
@@ -598,13 +625,13 @@ class ReportGenerator:
                 )
             regression_html = f"""
     <section>
-      <h2>Regression Alert
+      <h2>{heading}
         <span style="background:{sev_color};color:#fff;padding:2px 10px;
           border-radius:12px;font-size:0.75em;margin-left:8px">{severity}</span>
       </h2>
-      <table><thead><tr>
-        <th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th><th>Severity</th>
-      </tr></thead><tbody>{reg_rows}</tbody></table>
+      {'<table><thead><tr><th>Metric</th><th>Baseline</th><th>Current</th>'
+        '<th>Change</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>'
+        + reg_rows + "</tbody></table>" if reg_rows else ""}
       {"<h3>Improvements</h3><table><thead><tr><th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th></tr></thead><tbody>" + imp_rows + "</tbody></table>" if imp_rows else ""}
     </section>"""
 
@@ -731,16 +758,43 @@ def _provenance_section_html(report: ReportData) -> str:
     )
 
 
-def _regression_notes(task: Any, regression: Any, threshold: RegressionSeverity) -> str:
+def _finding_blocks(regression: Any, threshold: RegressionSeverity) -> bool:
+    """Whether this finding, read on its own, meets the blocking policy."""
+    return bool(
+        not regression.within_noise_band
+        and regression.is_significant
+        and severity_at_least(regression.severity, threshold)
+    )
+
+
+def _regression_notes(
+    task: Any,
+    regression: Any,
+    threshold: RegressionSeverity,
+    *,
+    contradicts_record: bool = False,
+) -> str:
+    """The note beside one finding, read off what the run recorded.
+
+    ``contradicts_record`` is set when the run recorded the task as blocking
+    but none of its findings still reproduce that -- an artifact written
+    before the evidence fields existed, or re-rendered against a different
+    threshold. Saying only "not blocking" there would contradict the
+    verdict printed at the top of the same report.
+    """
     notes: list[str] = []
     if regression.within_noise_band:
         notes.append("within infra-noise band; not blocking")
-    elif regression.is_significant and severity_at_least(regression.severity, threshold):
+    elif _finding_blocks(regression, threshold):
         notes.append("blocking")
     elif regression.is_significant:
         notes.append("significant; below the blocking threshold")
+    elif regression.p_value is None:
+        notes.append("not blocking: no valid test")
     else:
         notes.append("not blocking: not significant")
+    if contradicts_record:
+        notes.append("the run recorded this task as blocking")
     if task.infra_config_mismatch:
         notes.append("infra config differs from baseline")
     return "; ".join(notes)
@@ -768,6 +822,12 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
     threshold = gate.threshold or RegressionSeverity.MODERATE
     for task in gate.tasks:
+        # A task the run recorded as blocking whose findings no longer
+        # reproduce that: the rows must not read as a clean task under a
+        # header that says BLOCKED.
+        contradicts = bool(task.blocking) and not any(
+            _finding_blocks(r, threshold) for r in task.regressions
+        )
         for regression in task.regressions:
             rows.append((
                 task.task_id,
@@ -777,7 +837,9 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
                 f"{regression.delta_percent:+.1f}%",
                 regression.severity.value,
                 regression.evidence_text(),
-                _regression_notes(task, regression, threshold),
+                _regression_notes(
+                    task, regression, threshold, contradicts_record=contradicts
+                ),
             ))
     return rows
 

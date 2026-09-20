@@ -47,6 +47,7 @@ run:
     require_baselines: true
     noise_band: 0.05
     multiplicity: none
+    suite_blocking: true
 """
 
 MINIMAL = "run:\n  eval_set: t.json\n  adapter: a.A\n  graders: [g.G]\n"
@@ -99,6 +100,7 @@ class TestLoadRunConfig:
             "require_baselines": True,
             "noise_band": 0.05,
             "multiplicity": "none",
+            "suite_blocking": True,
         }
         # Every config value lands on a real run setting, and the file covers
         # every setting the CLI has (import_root is config-only).

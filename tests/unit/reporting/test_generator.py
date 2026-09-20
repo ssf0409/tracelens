@@ -5,8 +5,21 @@ import re
 
 import pytest
 
+from tracelens.baselines.comparison import (
+    MetricRegression,
+    RegressionDetector,
+    RegressionReport,
+    RegressionSeverity,
+)
+from tracelens.baselines.manager import TaskBaseline
 from tracelens.core.outcome import Outcome
 from tracelens.core.trial import Trial, TrialBatch, TrialStatus
+from tracelens.reporting.gate import (
+    GateResult,
+    GateStatus,
+    TaskGateOutcome,
+    TaskGateResult,
+)
 from tracelens.reporting.generator import (
     ReportData,
     ReportGenerator,
@@ -634,7 +647,7 @@ class TestGateReporting:
         assert "1 checked, 1 skipped (no baseline)" in md
         assert "| Task | Metric | Baseline | Current | Change | Severity | Evidence | Notes |" in md
         assert "| t1 | pass_rate | 1.0000 | 0.0000 | -100.0% | severe | p=0.0009, significant | blocking |" in md
-        assert "**Significance**: alpha=0.05, Holm-adjusted across 1 checked task(s)" in md
+        assert "**Significance**: alpha=0.05, Holm-adjusted across 1 compared (task, metric) test(s)" in md
         assert "Skipped tasks: t2 (no baseline stored for this task)" in md
 
         ci = gen.render_ci_summary(report)
@@ -767,6 +780,105 @@ class TestGateReporting:
         assert "**Grader-Error Rate**: 50.0% (1 of 2 trials)" in gen.render_markdown(report)
         assert "grader_errors=50.0%" in gen.render_ci_summary(report)
         assert "Grader Errors" in gen.render_html(report)
+
+
+class TestObservedFindingsReachEveryFormat:
+    """Issue #111: an underpowered drop must never read as a clean run.
+
+    The renderers used to gate the whole section on ``has_regression``,
+    which now means "a significant drop was observed". A library caller
+    attaching a report of drops that no test could confirm therefore saw
+    nothing at all in Markdown, HTML or the CI summary -- the exact failure
+    the issue is about, surviving on the path the CLI does not take.
+    """
+
+    @staticmethod
+    def _underpowered() -> RegressionReport:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 1.0, std=0.0, sample_size=5)
+        report = RegressionDetector().compare(
+            baseline, [{"pass_rate": v} for v in (1.0, 1.0, 1.0, 0.0, 0.0)]
+        )
+        assert report.has_regression is False and len(report.regressions) == 1
+        return report
+
+    def test_markdown_shows_a_drop_no_test_could_confirm(self) -> None:
+        data = ReportData(regression_report=self._underpowered())
+        markdown = ReportGenerator().render_markdown(data)
+        assert "## Baseline Comparison" in markdown
+        assert "pass_rate: 1.0000 -> 0.6000 (-40.0%)" in markdown
+        assert "not significant" in markdown
+
+    def test_ci_summary_says_what_was_observed(self) -> None:
+        data = ReportData(regression_report=self._underpowered())
+        summary = ReportGenerator().render_ci_summary(data)
+        assert "No significant regression (1 observed drop(s) not significant" in summary
+        assert "REGRESSION [" not in summary
+
+    def test_html_shows_the_finding_with_its_evidence(self) -> None:
+        data = ReportData(regression_report=self._underpowered())
+        html = ReportGenerator().render_html(data)
+        assert "Baseline Comparison" in html and "NOT SIGNIFICANT" in html
+        assert "<th>Evidence</th>" in html and "not significant" in html
+
+    def test_a_confirmed_regression_still_reads_as_an_alert(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 1.0, std=0.0, sample_size=5)
+        report = RegressionDetector().compare(
+            baseline, [{"pass_rate": v} for v in (1.0, 0.0, 0.0, 0.0, 0.0)]
+        )
+        assert report.has_regression is True
+        data = ReportData(regression_report=report)
+        gen = ReportGenerator()
+        assert "## Regression Alert" in gen.render_markdown(data)
+        assert "REGRESSION [SEVERE]" in gen.render_ci_summary(data)
+        assert "Regression Alert" in gen.render_html(data)
+
+
+class TestNotesFollowTheRecordedDecision:
+    """A row must not contradict the verdict at the top of the same report."""
+
+    def test_a_recorded_block_is_not_relabelled_as_clean(self) -> None:
+        # A gate recorded as blocking whose finding carries no evidence --
+        # an artifact written before the evidence fields existed. Reading
+        # the row on its own gives "not blocking", which would contradict
+        # the BLOCKED header, so the note says what the run recorded.
+        finding = MetricRegression(
+            metric_name="pass_rate", baseline_mean=1.0, current_mean=0.0,
+            delta=-1.0, delta_percent=-100.0, p_value=None, is_significant=False,
+            severity=RegressionSeverity.SEVERE,
+        )
+        task = TaskGateResult(
+            task_id="t1", outcome=TaskGateOutcome.CHECKED, regressions=[finding],
+            blocking=True, has_regression=True,
+            overall_severity=RegressionSeverity.SEVERE,
+        )
+        gate = GateResult(
+            status=GateStatus.BLOCKED, exit_code=1,
+            threshold=RegressionSeverity.MODERATE, tasks=[task], checked=1,
+        )
+        markdown = ReportGenerator().render_markdown(ReportData(gate=gate))
+        assert "BLOCKED" in markdown
+        assert "the run recorded this task as blocking" in markdown
+        assert "not blocking: no valid test" in markdown
+
+    def test_an_ordinary_non_blocking_row_says_nothing_extra(self) -> None:
+        finding = MetricRegression(
+            metric_name="pass_rate", baseline_mean=1.0, current_mean=0.6,
+            delta=-0.4, delta_percent=-40.0, p_value=0.09, is_significant=False,
+            severity=RegressionSeverity.SEVERE,
+        )
+        task = TaskGateResult(
+            task_id="t1", outcome=TaskGateOutcome.CHECKED, regressions=[finding],
+            blocking=False,
+        )
+        gate = GateResult(
+            status=GateStatus.PASSED, exit_code=0,
+            threshold=RegressionSeverity.MODERATE, tasks=[task], checked=1,
+        )
+        markdown = ReportGenerator().render_markdown(ReportData(gate=gate))
+        assert "not blocking: not significant" in markdown
+        assert "the run recorded this task as blocking" not in markdown
 
 
 class TestProvenanceReporting:

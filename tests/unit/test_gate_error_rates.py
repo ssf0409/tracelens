@@ -18,7 +18,7 @@ def test_power_and_false_alarm_numbers_quoted_in_the_contract() -> None:
     block = gate_error_rates.block_probability
     # Power for 1.0 -> 0.4, one task (T=1, level 0.05).
     assert block(5, 5, 1.0, 0.4, 0.05) == pytest.approx(0.683, abs=0.002)
-    assert block(10, 10, 1.0, 0.4, 0.05) == pytest.approx(0.988, abs=0.002)
+    assert block(10, 10, 1.0, 0.4, 0.05) == pytest.approx(0.945, abs=0.002)
     # ... and under Holm over fifty tasks (level 0.001).
     assert block(5, 5, 1.0, 0.4, 0.001) == pytest.approx(0.078, abs=0.002)
     assert block(20, 20, 1.0, 0.4, 0.001) == pytest.approx(0.979, abs=0.002)
@@ -38,7 +38,10 @@ def test_run_level_false_alarm_stays_under_five_percent_with_ten_flaky_tasks() -
 
 def test_trials_to_decide_a_total_failure() -> None:
     needed = gate_error_rates.trials_to_detect_total_failure
-    assert needed(1, 0.05) == 3 and needed(1, 0.025) == 3
+    # A baseline of one stored trial is nearly powerless now that its size
+    # is no longer inflated to match the check: seven trials to decide a
+    # total failure on its own, fifteen once two tests share alpha.
+    assert needed(1, 0.05) == 7 and needed(1, 0.025) == 15
     assert needed(5, 0.025) == 2 and needed(20, 0.001) == 3
 
 

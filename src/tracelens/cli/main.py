@@ -189,11 +189,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--multiplicity", default=argparse.SUPPRESS,
         choices=list(MULTIPLICITY_CHOICES),
         help=(
-            "How the baseline check holds many tasks to one significance "
-            "level: 'holm' adjusts each metric's per-task p-values across "
-            "the checked tasks so the run's chance of a false block is at "
-            "most alpha; 'none' tests every task at alpha on its own "
+            "How the baseline check holds many tests to one significance "
+            "level: 'holm' adjusts the p-values of every compared "
+            "(task, metric) pair as one family, so the run's chance of a "
+            "false block is at most alpha; 'none' tests each on its own "
             f"(default: {d['multiplicity']})"
+        ),
+    )
+    run_parser.add_argument(
+        "--suite-blocking", action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
+        help=(
+            "Let the suite-level criterion block the run, not just report. "
+            "Off by default: its sign-flip p-value assumes the per-task "
+            "differences are independent, and correlated task outcomes "
+            "inflate its false-alarm rate well past alpha. Switching it on "
+            "splits alpha evenly between the per-task and suite criteria "
+            f"(default: {'on' if d['suite_blocking'] else 'off'})"
         ),
     )
     run_parser.add_argument(
@@ -643,6 +655,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             decision_spec=decision_spec,
             task_ids=[summary.task_id for summary in report.task_summaries],
             multiplicity=args.multiplicity,
+            suite_blocking=args.suite_blocking,
         )
         _print_gate_diagnostics(gate)
     else:
@@ -678,6 +691,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     if gate.status is GateStatus.UNEVALUABLE:
         # Missing evidence invalidates the check even if another task regressed.
+        # The recorded reasons say which evidence is missing and, for an
+        # underpowered check, how many trials would fix it -- print them
+        # rather than leaving CLI-only users with the generic advice.
+        for reason in gate.reasons:
+            print(f"Error: {reason}", file=sys.stderr)
         print(
             "Error: baseline check is unevaluable; verify the eval set, "
             "run count, and matching baseline metrics; fix any infra/grader "

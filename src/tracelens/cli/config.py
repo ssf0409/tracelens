@@ -54,6 +54,7 @@ RUN_DEFAULTS: dict[str, Any] = {
     "require_baselines": False,
     "fail_on_regression": "moderate",
     "multiplicity": "holm",
+    "suite_blocking": False,
     "output": None,
     "report": None,
     "html_report": None,
@@ -106,6 +107,7 @@ _FIELDS: tuple[_Field, ...] = (
     _Field(("run", "baseline", "fail_on_regression"), "fail_on_regression", "str", choices=_SEVERITIES),
     _Field(("run", "baseline", "require_baselines"), "require_baselines", "bool"),
     _Field(("run", "baseline", "multiplicity"), "multiplicity", "str", choices=_MULTIPLICITY),
+    _Field(("run", "baseline", "suite_blocking"), "suite_blocking", "bool"),
     _Field(("run", "baseline", "noise_band"), "noise_band", "number"),
 )
 

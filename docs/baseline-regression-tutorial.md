@@ -167,8 +167,8 @@ That is the CI gate: a pull request can exit non-zero when
 `report.should_block_ci(threshold=RegressionSeverity.MODERATE)` returns `True`.
 Blocking needs both the size of the drop (severity, from the relative
 change) and the evidence for it (a one-sided test on the stored summary and
-the candidate samples; here a pooled t-test, since the candidate values are
-constant). A drop the evidence cannot confirm is still printed, marked `not
+the candidate samples; here Welch's t-test, which uses each side's own
+measured spread rather than assuming the two share one). A drop the evidence cannot confirm is still printed, marked `not
 significant` with the number of trials that would decide it, and never
 blocks; see the [statistical contract](statistical-contract.md#baseline-regression-detection)
 for the tests and their error rates.

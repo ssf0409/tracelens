@@ -104,6 +104,14 @@ class MetricBaseline(BaseModel):
     # Direction indicator for proper comparison
     higher_is_better: bool = True  # False for metrics like drawdown
 
+    # Whether this metric is a 0/1 proportion (a pass rate) rather than a
+    # continuous score. It decides which test compares the metric, so it
+    # belongs to the metric's definition, not to whatever one sample of
+    # current values happens to look like. ``None`` (the default, and what
+    # every baseline stored before this field existed carries) means "not
+    # declared": the comparison infers it from the stored summary instead.
+    is_rate: bool | None = None
+
 
 class TaskBaseline(BaseModel):
     """Baseline for a complete task.
@@ -185,8 +193,13 @@ class TaskBaseline(BaseModel):
         absolute_threshold: float | None = None,
         relative_threshold: float | None = None,
         higher_is_better: bool = True,
+        is_rate: bool | None = None,
     ) -> None:
-        """Add or update a metric baseline."""
+        """Add or update a metric baseline.
+
+        ``is_rate`` declares whether the metric is a 0/1 proportion; leave
+        it ``None`` to let the comparison infer it from the stored summary.
+        """
         self.metrics[metric_name] = MetricBaseline(
             metric_name=metric_name,
             baseline_value=value,
@@ -195,6 +208,7 @@ class TaskBaseline(BaseModel):
             regression_threshold_absolute=absolute_threshold,
             regression_threshold_relative=relative_threshold,
             higher_is_better=higher_is_better,
+            is_rate=is_rate,
         )
         self.updated_at = utc_now()
 

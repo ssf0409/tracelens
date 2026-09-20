@@ -10,23 +10,42 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
-- **One run, one significance level.** `evaluate_gate` Holm-adjusts each
-  metric's per-task p-values across the checked tasks by default
+- **One run, one error budget.** `evaluate_gate` Holm-adjusts the p-values of
+  every compared `(task, metric)` pair as a single family by default
   (`--multiplicity holm`; `run.baseline.multiplicity` in `tracelens.yaml`),
-  so an unchanged suite blocks by chance on some task at most 5 % of the
-  time however many tasks are flaky; `--multiplicity none` holds every task
-  to 5 % on its own. A suite-level criterion (the mean of the per-task
-  differences with the contract's task bootstrap and sign-flip test) blocks
-  on a broad regression that no single task can show. A check none of whose
-  tasks could have blocked at their sample sizes is `UNEVALUABLE` (exit 2)
-  with the trials per task it would need, and tasks that cannot block on
-  their own are named in a warning. The gate JSON records `alpha`,
-  `multiplicity`, `family_size`, and `suite`; each task records `detectable`
-  and `trials_needed`. Blocking now requires a significant test as well as
-  the severity threshold, so a regression that used to block on its size
-  alone (a hand-written baseline with no `sample_size` against one or two
-  trials) is now reported as undetectable instead; run at least three trials
-  a side, five recommended, and store baselines from ten or more. (#111)
+  so an unchanged suite blocks by chance at most 5 % of the time however many
+  tasks are flaky and however many metrics each stores; `--multiplicity none`
+  holds every test to 5 % on its own. Adjusting each metric separately, as
+  the first cut of this work did, gave a suite storing both `pass_rate` and
+  `mean_score` two independent chances to block. The suite-level statistic
+  (the mean of the per-task differences with the contract's task bootstrap
+  and sign-flip test) is **reported but no longer blocks by default**: its
+  p-value assumes the per-task differences are independent, and an unchanged
+  suite of 40 deterministic and 10 correlated flaky tasks blocked 11.6 % of
+  the time in simulation. `--suite-blocking`
+  (`run.baseline.suite_blocking`) opts in and splits the 5 % budget evenly
+  between the two criteria. A check none of whose tasks could have blocked at
+  their sample sizes is `UNEVALUABLE` (exit 2) with the trials per task it
+  would need, and tasks that cannot block on their own are named in a
+  warning. The gate JSON records `alpha`, `multiplicity`, `family_size` and
+  `suite` (each suite entry now carries `blocking_enabled`); each task records
+  `detectable` and `trials_needed`. Blocking requires a significant test as
+  well as the severity threshold. (#111)
+- **The baseline is taken at its word, and no further.** Its recorded
+  `sample_size` is used as recorded; a baseline that stored fewer than two
+  trials carries no measured spread, and the current sample's spread is
+  never borrowed to stand in for it. *Breaking:* a hand-written baseline
+  (the model defaults are `sample_size=1`, `std_deviation=0.0`) can no longer
+  block a run — it is reported as `undetectable` and the gate is unevaluable
+  with the trials it would need, instead of deciding on evidence that was
+  never collected. Store baselines from real runs: one stored trial needs
+  seven check trials to decide even a total failure, and fifteen once two
+  tests share the budget. (#111)
+- **A metric is a 0/1 proportion because its baseline says so**, not because
+  one sample of current values happened to land on 0 and 1. `MetricBaseline`
+  gains `is_rate` (`None`, the default and what every existing baseline
+  carries, means "infer from the stored summary"); `TaskBaseline.add_metric`
+  and `tracelens init`'s scaffold pass it. (#111)
 - The Markdown and HTML gate tables gain an **Evidence** column (the test's
   p-value, adjusted p-value, and the trials that would decide an
   underpowered drop), the Baseline Gate section states the significance
@@ -51,17 +70,45 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   significant vanished from stdout, JSON, Markdown, and HTML, so an
   underpowered check looked like a clean pass; the baseline's `sample_size`
   was never used; and a run blocked whenever any task did, with no control
-  over how many tasks shared the 5 % false-alarm budget. Now 0/1 metrics get
-  Boschloo's exact test on the two counts (baseline `sample_size` included),
-  continuous metrics get Welch's, pooled, or exact-permutation tests from the
-  stored summary, p-values are one-sided in the observed direction and never
-  fabricated, and every change above the reporting floor is reported with
-  its evidence: `test`, `p_value`, `p_value_adjusted`, the two sample sizes,
-  `underpowered`, `trials_needed`, and `undetectable`. A drop that is not
-  significant is printed (`observed drop, not blocking`) with the trials that
-  would decide it, and never blocks. The contract page states the decision
-  procedure and its exact false-alarm and power tables
+  over how many tasks shared the 5 % false-alarm budget. Now a proportion
+  gets Boschloo's exact test on the two counts (baseline `sample_size`
+  included), continuous metrics get Welch's or exact-permutation tests from
+  the stored summary, p-values are one-sided in the observed direction and
+  never fabricated, and every change above the reporting floor is reported
+  with its evidence: `test`, `p_value`, `p_value_adjusted`, the two sample
+  sizes, `underpowered`, `trials_needed`, and `undetectable`. A drop that is
+  not significant is printed (`observed drop, not blocking`) with the trials
+  that would decide it, and never blocks. The contract page states the
+  decision procedure and its exact false-alarm and power tables
   (`scripts/gate_error_rates.py` regenerates them). (#111)
+- **Boschloo's contingency table was transposed.** SciPy's model puts one
+  binomial sample in each column and the implementation passed them as rows,
+  which fixes the wrong margin and answers a different question. At unequal
+  sample sizes the two orientations disagree enough to change a verdict: a
+  baseline of 7 passes in 7 against 2 of 4 now read 0.0420 and blocked where
+  the documented orientation gives 0.0538 and does not. Every published 0/1
+  p-value and every error-rate and power table moves with the fix. (#111)
+- **A zero measured spread no longer switches to a pooled-variance
+  t-test.** One sample showing no variance is not evidence that the two
+  populations share one: a baseline recorded as mean 0.5 with spread 0 over
+  100 trials, checked against three scattered values, read p ≈ 6e-34 and
+  blocked, where Welch on the same numbers gives 0.0608 and does not. Welch
+  is now used throughout, and a single current trial against a measured
+  baseline is a prediction-interval t rather than a t-test against a
+  fabricated spread of zero. (#111)
+- **An underpowered drop no longer disappears through the library API.**
+  The Markdown, HTML and CI-summary renderers gated the whole section on
+  "a significant drop was observed", so a caller attaching a
+  `RegressionReport` of drops that no test could confirm saw nothing at all
+  — the failure this issue is about, surviving on the path the CLI does not
+  take. Every observed finding is now rendered with its evidence, under a
+  heading that says whether it was confirmed. (#111)
+- **Report rows read off the recorded decision.** A gate recorded as blocked
+  whose findings carry no evidence (an artifact written before the evidence
+  fields existed) no longer renders rows labelled "not blocking" under a
+  `BLOCKED` header; the note says what the run recorded. `tracelens run`
+  also prints the recorded reasons on an unevaluable gate, so the trials it
+  needs reach CLI-only users instead of only the JSON. (#111)
 
 ## [0.6.0] - 2026-09-15
 

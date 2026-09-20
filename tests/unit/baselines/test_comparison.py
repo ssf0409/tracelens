@@ -441,13 +441,15 @@ class TestExactTestsOnPassRates:
         assert report.has_regression is True
         reg = report.regressions[0]
         assert reg.test == "boschloo_exact"
-        assert reg.p_value == pytest.approx(0.0350, abs=5e-4)
+        # scipy.stats.boschloo_exact([[5, 2], [0, 3]], alternative="greater")
+        # -- the two samples are the columns, as SciPy documents.
+        assert reg.p_value == pytest.approx(0.0309, abs=5e-4)
         assert reg.is_significant and not reg.underpowered
         assert reg.severity is RegressionSeverity.SEVERE
         assert (reg.baseline_n, reg.current_n, reg.baseline_n_assumed) == (5, 5, False)
         assert report.should_block_ci(RegressionSeverity.MODERATE) is True
         assert "REGRESSION DETECTED [SEVERE]" in report.to_ci_output()
-        assert "p=0.0350, significant" in report.to_ci_output()
+        assert "p=0.0309, significant" in report.to_ci_output()
 
     def test_three_of_five_is_reported_but_not_significant(self) -> None:
         report = RegressionDetector().compare(self._baseline(), self._trials(3, 5))
@@ -456,7 +458,8 @@ class TestExactTestsOnPassRates:
         # neither counts as a detected regression nor blocks.
         assert len(report.regressions) == 1
         reg = report.regressions[0]
-        assert reg.p_value == pytest.approx(0.1031, abs=5e-4)
+        # boschloo_exact([[5, 3], [0, 2]], alternative="greater")
+        assert reg.p_value == pytest.approx(0.0937, abs=5e-4)
         assert reg.is_significant is False and reg.underpowered is True
         assert reg.insufficient_data is False
         assert report.has_regression is False
@@ -464,12 +467,11 @@ class TestExactTestsOnPassRates:
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
         text = report.to_ci_output()
         assert "No significant regression (1 observed drop(s)" in text
-        assert "pass_rate: 1.0000 -> 0.6000 (-40.0%) [p=0.1031, not significant" in text
-        # A 5-trial baseline caps the evidence any number of current trials
-        # can give against it; the advice is to re-store it from more runs.
-        assert reg.trials_needed_on_both_sides is True
-        assert reg.trials_needed is not None and 5 <= reg.trials_needed <= 12
-        assert "re-store it from more runs" in reg.evidence_text()
+        assert "pass_rate: 1.0000 -> 0.6000 (-40.0%) [p=0.0937, not significant" in text
+        # The advice says what would decide the rates actually observed:
+        # 19 current trials against the stored 5.
+        assert reg.trials_needed == 19 and reg.trials_needed_on_both_sides is False
+        assert "about 19 current trials would decide it" in reg.evidence_text()
 
     def test_more_current_trials_tighten_the_test(self) -> None:
         detector = RegressionDetector()
@@ -488,7 +490,8 @@ class TestExactTestsOnPassRates:
 
         assert small.regressions[0].is_significant is False
         assert large.regressions[0].is_significant is True
-        assert large.regressions[0].p_value == pytest.approx(0.0380, abs=5e-4)
+        # boschloo_exact([[10, 3], [0, 2]], alternative="greater")
+        assert large.regressions[0].p_value == pytest.approx(0.0460, abs=5e-4)
 
     def test_scaffold_style_std_does_not_change_a_count_test(self) -> None:
         detector = RegressionDetector()
@@ -496,13 +499,19 @@ class TestExactTestsOnPassRates:
         scaffold = detector.compare(self._baseline(std=0.05), self._trials(3, 5))
         assert plain.regressions[0].p_value == scaffold.regressions[0].p_value
 
-    def test_unrecorded_sample_size_is_assumed_equal_to_the_check(self) -> None:
+    def test_a_declared_baseline_is_never_credited_with_runs_it_never_had(self) -> None:
+        # A baseline that stored one trial is a declared value, not five
+        # runs of evidence. Inflating its size to match the check turned
+        # 1-of-1 into 5-of-5 and blocked on a comparison that never
+        # happened; the honest table is 1/1 against 2/5.
         report = RegressionDetector().compare(self._baseline(sample_size=1), self._trials(2, 5))
 
         reg = report.regressions[0]
-        assert reg.baseline_n_assumed is True and reg.baseline_n == 5
-        assert reg.p_value == pytest.approx(0.0350, abs=5e-4)
-        assert reg.is_significant
+        assert reg.baseline_n_assumed is True and reg.baseline_n == 1
+        assert reg.baseline_std is None  # one trial measures no spread
+        # boschloo_exact([[1, 2], [0, 3]], alternative="greater")
+        assert reg.p_value == pytest.approx(0.2730, abs=5e-4)
+        assert reg.is_significant is False
 
     def test_one_trial_against_a_declared_number_cannot_decide(self) -> None:
         report = RegressionDetector().compare(self._baseline(sample_size=1), self._trials(0, 1))
@@ -510,21 +519,34 @@ class TestExactTestsOnPassRates:
         reg = report.regressions[0]
         assert reg.p_value == pytest.approx(0.25)
         assert reg.is_significant is False and reg.underpowered is True
-        assert reg.undetectable is True and reg.trials_needed == 3
+        assert reg.undetectable is True and reg.trials_needed == 7
         assert reg.severity is RegressionSeverity.SEVERE  # the size of the drop, as observed
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
-    def test_total_failure_over_three_trials_blocks(self) -> None:
-        report = RegressionDetector().compare(self._baseline(sample_size=1), self._trials(0, 3))
-        reg = report.regressions[0]
-        assert reg.p_value == pytest.approx(0.0156, abs=5e-4)
-        assert reg.is_significant and report.should_block_ci()
+    def test_a_declared_baseline_cannot_decide_a_total_failure_but_a_measured_one_can(
+        self,
+    ) -> None:
+        # boschloo_exact([[1, 0], [0, 3]], "greater") = 0.1055: one stored
+        # trial cannot carry a run-blocking verdict, however total the
+        # failure. Five stored trials can: [[5, 0], [0, 3]] = 0.0050.
+        declared = RegressionDetector().compare(
+            self._baseline(sample_size=1), self._trials(0, 3)
+        ).regressions[0]
+        assert declared.p_value == pytest.approx(0.1055, abs=5e-4)
+        assert declared.is_significant is False
+
+        measured = RegressionDetector().compare(
+            self._baseline(sample_size=5), self._trials(0, 3)
+        )
+        assert measured.regressions[0].p_value == pytest.approx(0.0050, abs=5e-4)
+        assert measured.regressions[0].is_significant and measured.should_block_ci()
 
     def test_p_values_are_one_sided_in_the_observed_direction(self) -> None:
         report = RegressionDetector().compare(self._baseline(0.6, sample_size=10), self._trials(5, 5))
         assert not report.regressions
         imp = report.improvements[0]
-        assert imp.p_value == pytest.approx(0.0810, abs=5e-4)
+        # boschloo_exact([[6, 5], [4, 0]], alternative="less")
+        assert imp.p_value == pytest.approx(0.0647, abs=5e-4)
         assert imp.is_significant is False and imp.trials_needed == 6
         assert "Improvements:" in report.to_ci_output()
 
@@ -537,6 +559,107 @@ class TestExactTestsOnPassRates:
         assert report.has_regression is True
         assert report.regressions[0].delta > 0
         assert report.regressions[0].is_significant
+
+
+class TestTheTableSciPyExpects:
+    """Regression tests for the transposed Boschloo table.
+
+    SciPy's model puts one binomial experiment in each column. The earlier
+    implementation passed the two samples as rows, which fixes the wrong
+    margin and answers a different question; at unequal sample sizes the
+    two orientations disagree enough to flip a verdict.
+    """
+
+    @staticmethod
+    def _baseline(value: float, sample_size: int) -> TaskBaseline:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(
+            metric_name="pass_rate", value=value, std=0.0, sample_size=sample_size
+        )
+        return baseline
+
+    @staticmethod
+    def _trials(passes: int, total: int) -> list[dict[str, float]]:
+        return [{"pass_rate": 1.0 if i < passes else 0.0} for i in range(total)]
+
+    def test_unequal_sample_sizes_use_the_orientation_scipy_documents(self) -> None:
+        # Seven stored trials, all passing, against two of four now.
+        # boschloo_exact([[7, 2], [0, 2]], alternative="greater") = 0.05378,
+        # which does not reach alpha. Transposed it reads 0.04205 and blocks.
+        report = RegressionDetector().compare(self._baseline(1.0, 7), self._trials(2, 4))
+
+        reg = report.regressions[0]
+        assert reg.test == "boschloo_exact"
+        assert reg.p_value == pytest.approx(0.0538, abs=5e-4)
+        assert reg.is_significant is False
+        assert report.should_block_ci(RegressionSeverity.MINOR) is False
+
+    def test_a_rise_is_the_mirror_of_the_matching_drop(self) -> None:
+        # The same table read the other way round: 2/5 -> 5/5 as an
+        # improvement carries the p-value of 5/5 -> 2/5 as a drop.
+        drop = RegressionDetector().compare(
+            self._baseline(1.0, 5), self._trials(2, 5)
+        ).regressions[0]
+        rise = RegressionDetector().compare(
+            self._baseline(0.4, 5), self._trials(5, 5)
+        ).improvements[0]
+        assert drop.p_value == pytest.approx(rise.p_value)
+        assert drop.p_value == pytest.approx(0.0309, abs=5e-4)
+
+    def test_a_declared_baseline_cannot_manufacture_a_block(self) -> None:
+        # The reported case: one stored trial that passed, against eighty of
+        # a hundred now. Inflating the baseline to the check size evaluated
+        # it as 100/100 against 80/100 and blocked at p=1.3e-07. The honest
+        # table is boschloo_exact([[1, 80], [0, 20]], "greater") = 0.70137.
+        report = RegressionDetector().compare(
+            self._baseline(1.0, 1),
+            [{"pass_rate": 1.0}] * 80 + [{"pass_rate": 0.0}] * 20,
+        )
+
+        reg = report.regressions[0]
+        assert reg.baseline_n == 1 and reg.current_n == 100
+        assert reg.p_value == pytest.approx(0.7014, abs=5e-4)
+        assert reg.is_significant is False
+        assert report.should_block_ci(RegressionSeverity.MINOR) is False
+
+
+class TestMetricTypeComesFromTheBaseline:
+    """The test family must not depend on where the current sample lands."""
+
+    @staticmethod
+    def _continuous() -> TaskBaseline:
+        # A tenth of a success over five trials is not a count, so this
+        # summary cannot be a proportion however the current values look.
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="score", value=0.1, std=0.01, sample_size=5)
+        return baseline
+
+    def test_an_infinitesimal_change_cannot_switch_the_test_family(self) -> None:
+        detector = RegressionDetector()
+        zeros = detector.compare(self._continuous(), [{"score": 0.0}] * 5).regressions[0]
+        almost = detector.compare(self._continuous(), [{"score": 1e-8}] * 5).regressions[0]
+
+        # Same family, and p-values that differ only by the 1e-8 itself.
+        assert zeros.test == almost.test == "welch_t"
+        assert zeros.p_value == pytest.approx(almost.p_value, rel=1e-3)
+        assert zeros.is_significant == almost.is_significant
+
+    def test_a_scaffolded_pass_rate_is_still_a_proportion(self) -> None:
+        # ``tracelens init`` records a nominal spread it never measured.
+        # That is not evidence against a rate, so the exact test still runs.
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 1.0, std=0.05, sample_size=5)
+        reg = RegressionDetector().compare(
+            baseline, [{"pass_rate": v} for v in (1.0, 1.0, 0.0, 0.0, 0.0)]
+        ).regressions[0]
+        assert reg.test == "boschloo_exact"
+
+    def test_a_baseline_may_declare_what_it_is(self) -> None:
+        values = [{"pass_rate": v} for v in (1.0, 1.0, 0.0, 0.0, 0.0)]
+        declared = TaskBaseline(task_id="t1")
+        declared.add_metric("pass_rate", 1.0, std=0.05, sample_size=5, is_rate=False)
+        reg = RegressionDetector().compare(declared, values).regressions[0]
+        assert reg.test == "welch_t"  # the declaration wins over the inference
 
 
 class TestContinuousMetricTests:
@@ -559,17 +682,33 @@ class TestContinuousMetricTests:
         assert reg.baseline_std == pytest.approx(0.05)
         assert reg.current_std == pytest.approx(0.0652, abs=1e-3)
 
-    def test_pooled_when_the_current_sample_is_constant(self) -> None:
-        # The old z-fallback case: z = 0.2 / (0.3 / sqrt(5)) ~ 1.49. Now the
-        # drop is reported, marked not significant, and the note says how
-        # many trials would decide it.
+    def test_welch_when_one_measured_spread_is_zero(self) -> None:
+        # A hundred baseline trials with sd 0.3 against five that all read
+        # 1.0. Welch uses each side's own measured spread; pooling them
+        # instead would assume the two populations share a variance, which
+        # nothing here shows -- and that assumption is what let a baseline
+        # recorded with sd 0 read p=6e-34 against three scattered trials.
         report = RegressionDetector().compare(self._baseline(1.2, 0.3, 100), [{"mean_score": 1.0}] * 5)
 
-        assert report.has_regression is False
         reg = report.regressions[0]
-        assert reg.test == "pooled_t"
-        assert reg.is_significant is False and reg.underpowered is True
-        assert reg.trials_needed == 7 and reg.trials_needed_on_both_sides is False
+        assert reg.test == "welch_t"
+        assert reg.baseline_std == pytest.approx(0.3) and reg.current_std == pytest.approx(0.0)
+        assert reg.is_significant and report.has_regression is True
+
+    def test_a_zero_baseline_spread_no_longer_pools(self) -> None:
+        # The reported case: baseline mean .5 recorded with sd 0 over 100
+        # trials, checked against three scattered values. Pooling gave
+        # p=6e-34 and blocked; Welch on the same numbers gives 0.0608 and
+        # does not. ttest_ind_from_stats(.5, 0, 100, .2, 0.2, 3,
+        # equal_var=False, alternative="greater") = 0.06084.
+        report = RegressionDetector().compare(
+            self._baseline(0.5, 0.0, 100),
+            [{"mean_score": v} for v in (0.0, 0.2, 0.4)],
+        )
+        reg = report.regressions[0]
+        assert reg.test == "welch_t"
+        assert reg.p_value == pytest.approx(0.0608, abs=5e-4)
+        assert reg.is_significant is False
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
     def test_exact_permutation_when_both_sides_are_constant(self) -> None:
@@ -580,9 +719,11 @@ class TestContinuousMetricTests:
         assert reg.is_significant and report.should_block_ci()
 
     def test_single_observation_against_a_baseline_sample(self) -> None:
+        # One new observation against a measured baseline is a prediction
+        # interval, not a two-sample t-test with a fabricated spread of zero.
         report = RegressionDetector().compare(self._baseline(1.0, 0.05, 10), [{"mean_score": 0.3}])
         reg = report.regressions[0]
-        assert reg.test == "pooled_t" and reg.is_significant
+        assert reg.test == "prediction_t" and reg.is_significant
         assert reg.current_n == 1 and reg.current_std is None
 
     def test_one_trial_against_a_declared_number_has_no_test(self) -> None:
@@ -593,14 +734,19 @@ class TestContinuousMetricTests:
         assert "no valid test (insufficient data)" in reg.evidence_text()
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
-    def test_unrecorded_spread_is_taken_from_the_current_sample(self) -> None:
+    def test_an_unrecorded_spread_is_not_borrowed_from_the_current_sample(self) -> None:
+        # A baseline of one trial measured no spread. Standing the current
+        # sample's spread in for it manufactures the evidence the test then
+        # reports, so there is no valid test at all.
         report = RegressionDetector().compare(
             self._baseline(0.9, 0.0, 1),
             [{"mean_score": v} for v in (0.5, 0.6, 0.55, 0.65, 0.5)],
         )
         reg = report.regressions[0]
-        assert reg.test == "welch_t" and reg.baseline_n_assumed
-        assert reg.baseline_std is None and reg.is_significant
+        assert reg.test is None and reg.p_value is None
+        assert reg.baseline_n_assumed and reg.baseline_std is None
+        assert reg.insufficient_data is True and reg.is_significant is False
+        assert reg.undetectable is True
 
 
 class TestBlockingPolicy:
@@ -662,15 +808,15 @@ class TestBlockingPolicy:
         trials = [{"pass_rate": 1.0}] * 3 + [{"pass_rate": 0.0}] * 2
 
         quiet = RegressionDetector(power_notes=False).compare(baseline, trials).regressions[0]
-        assert quiet.p_value == pytest.approx(0.1031, abs=5e-4)
+        assert quiet.p_value == pytest.approx(0.0937, abs=5e-4)
         assert quiet.is_significant is False and quiet.underpowered is True
         assert quiet.trials_needed is None and quiet.undetectable is False
 
         # The notes are computed on request, at the level the caller names.
         RegressionDetector().annotate(quiet, 0.05)
-        assert quiet.trials_needed == 7
+        assert quiet.trials_needed == 19
         full = RegressionDetector().compare(baseline, trials).regressions[0]
-        assert full.trials_needed == 7 and full.evidence_text() == quiet.evidence_text()
+        assert full.trials_needed == 19 and full.evidence_text() == quiet.evidence_text()
 
 
 class TestSmallSampleHonesty:
@@ -703,8 +849,9 @@ class TestSmallSampleHonesty:
             self._degenerate_baseline(), [{"pass_rate": 0.0}, {"pass_rate": 0.0}]
         )
         reg = report.regressions[0]
-        assert reg.p_value == pytest.approx(0.0625)
-        assert reg.undetectable is True and reg.trials_needed == 3
+        # boschloo_exact([[1, 0], [0, 2]], alternative="greater")
+        assert reg.p_value == pytest.approx(0.1481, abs=5e-4)
+        assert reg.undetectable is True and reg.trials_needed == 7
         assert report.should_block_ci() is False
 
     def test_single_trial_against_a_measured_baseline_can_decide(self) -> None:
@@ -726,19 +873,20 @@ class TestSmallSampleHonesty:
         assert reg.p_value is not None and reg.p_value < 0.001
         assert reg.insufficient_data is False and report.should_block_ci()
 
-    def test_degenerate_table_is_no_evidence(self) -> None:
-        # A declared 10% rate with no recorded sample size, checked with four
-        # failures: at the assumed size the baseline count rounds to zero
-        # too, so the table is [[0, 4], [0, 4]] and scipy has no p-value.
-        # That is "no evidence", never a block.
+    def test_a_declared_rate_that_is_not_a_count_is_no_evidence(self) -> None:
+        # A declared 10% rate over one stored trial: a tenth of a success is
+        # not a count, so this summary is not a proportion and the exact
+        # test does not apply; one trial also measured no spread, so no
+        # t-test applies either. The drop is reported with no evidence
+        # behind it, and nothing about it can block.
         baseline = TaskBaseline(task_id="t1")
         baseline.add_metric(metric_name="pass_rate", value=0.1, std=0.0, sample_size=1)
         report = RegressionDetector().compare(baseline, [{"pass_rate": 0.0}] * 4)
 
         reg = report.regressions[0]
-        assert reg.test == "boschloo_exact" and reg.p_value == 1.0
+        assert reg.test is None and reg.p_value is None
+        assert reg.insufficient_data is True
         assert reg.is_significant is False and reg.undetectable is True
-        assert reg.trials_needed == 35  # the baseline count first rounds up there
         assert report.has_regression is False
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
@@ -753,13 +901,22 @@ class TestSmallSampleHonesty:
         assert reg.is_significant is False
         # The worst case for this metric is every trial at 1.0, which is what
         # was observed: still not significant, so the drop is undetectable.
-        assert reg.undetectable is True and reg.trials_needed == 3
+        assert reg.undetectable is True and reg.trials_needed == 7
         metric = baseline.get_metric("error_rate")
         assert metric is not None
-        assert detector.detectability(metric, [1.0], 0.05) == (False, 3)
+        assert detector.detectability(metric, [1.0], 0.05) == (False, 7)
 
-        decided = detector.compare(baseline, [{"error_rate": 1.0}] * 3).regressions[0]
-        assert decided.p_value == pytest.approx(1 / 64)
+        # Three trials against one stored trial still cannot decide it
+        # (boschloo_exact([[0, 3], [1, 0]], alternative="less") = 0.1055);
+        # a baseline stored from five clean runs can.
+        declared = detector.compare(baseline, [{"error_rate": 1.0}] * 3).regressions[0]
+        assert declared.p_value == pytest.approx(0.1055, abs=5e-4)
+        assert declared.is_significant is False
+
+        measured = TaskBaseline(task_id="t1")
+        measured.add_metric("error_rate", 0.0, sample_size=5, higher_is_better=False)
+        decided = detector.compare(measured, [{"error_rate": 1.0}] * 3).regressions[0]
+        assert decided.p_value == pytest.approx(0.0050, abs=5e-4)
         assert decided.is_significant is True and decided.undetectable is False
 
 
@@ -769,11 +926,13 @@ class TestReportedButNotSignificantPolicy:
     def test_consistent_but_nonsignificant_drop_is_reported_not_blocking(self) -> None:
         baseline = TaskBaseline(task_id="t1")
         baseline.add_metric(
-            metric_name="mean_score", value=1.2, std=0.3, sample_size=100
+            metric_name="mean_score", value=1.2, std=0.3, sample_size=5
         )
         detector = RegressionDetector()
 
-        report = detector.compare(baseline, [{"mean_score": 1.0}] * 5)
+        report = detector.compare(
+            baseline, [{"mean_score": v} for v in (1.0, 1.2, 1.1, 1.05, 1.15)]
+        )
 
         assert report.has_regression is False
         assert len(report.regressions) == 1

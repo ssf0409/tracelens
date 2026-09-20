@@ -380,8 +380,9 @@ class TestRunLevelPolicy:
     """Issue #111: one decision per run, held to one significance level."""
 
     def test_holm_across_tasks_requires_stronger_evidence(self, tmp_path):
-        # Two tasks, each 5/5 in the baseline and 2/5 now: p=0.035 each, which
-        # is under alpha on its own but not once both tasks share alpha.
+        # Two tasks, each 5/5 in the baseline and 2/5 now: p=0.0309 each
+        # (boschloo_exact([[5, 2], [0, 3]], "greater")), under alpha on its
+        # own but not once both tasks share alpha.
         manager = _manager_n(tmp_path, {"a": 1.0, "b": 1.0}, sample_size=5)
         batch = _batch(*_runs("a", _passes(2, 5)), *_runs("b", _passes(2, 5)))
 
@@ -391,8 +392,8 @@ class TestRunLevelPolicy:
         assert holm.alpha == 0.05
         for task in holm.tasks:
             reg = task.regressions[0]
-            assert reg.p_value == pytest.approx(0.035, abs=5e-4)
-            assert reg.p_value_adjusted == pytest.approx(0.070, abs=1e-3)
+            assert reg.p_value == pytest.approx(0.0309, abs=5e-4)
+            assert reg.p_value_adjusted == pytest.approx(0.0618, abs=1e-3)
             assert reg.is_significant is False and reg.underpowered is True
             assert task.blocking is False and task.has_regression is False
         assert holm.blocking_regressions == 0
@@ -404,12 +405,14 @@ class TestRunLevelPolicy:
         assert uncorrected.status is GateStatus.BLOCKED
         assert uncorrected.blocking_regressions == 2
         assert uncorrected.tasks[0].regressions[0].p_value_adjusted is None
-        assert uncorrected.policy_text() == "alpha=0.05 per task, no multiplicity correction"
+        assert uncorrected.policy_text() == "alpha=0.05 per test, no multiplicity correction"
 
-        # A single task carries no correction at all.
+        # A single test carries no correction at all.
         single = evaluate_gate(_batch(*_runs("a", _passes(2, 5))), manager, task_ids=["a"])
         assert single.status is GateStatus.BLOCKED and single.family_size == 1
-        assert single.policy_text() == "alpha=0.05, Holm-adjusted across 1 checked task(s)"
+        assert single.policy_text() == (
+            "alpha=0.05, Holm-adjusted across 1 compared (task, metric) test(s)"
+        )
 
     def test_stronger_per_task_evidence_survives_the_correction(self, tmp_path):
         manager = _manager_n(tmp_path, {"a": 1.0, "b": 1.0}, sample_size=5)
@@ -417,21 +420,28 @@ class TestRunLevelPolicy:
         gate = evaluate_gate(batch, manager)
         assert gate.status is GateStatus.BLOCKED and gate.blocking_regressions == 1
         reg = gate.tasks[0].regressions[0]
-        assert reg.p_value == pytest.approx(0.0069, abs=5e-4)
-        assert reg.p_value_adjusted == pytest.approx(0.0137, abs=5e-4)  # 2 * p, under 0.05
+        # boschloo_exact([[5, 1], [0, 4]], alternative="greater")
+        assert reg.p_value == pytest.approx(0.0107, abs=5e-4)
+        assert reg.p_value_adjusted == pytest.approx(0.0215, abs=5e-4)  # 2 * p, under 0.05
         assert gate.tasks[1].regressions == []
 
-    def test_suite_level_criterion_catches_a_broad_regression(self, tmp_path):
+    def test_suite_level_criterion_reports_a_broad_regression_without_blocking(
+        self, tmp_path
+    ):
         # Twenty tasks each slip from 5/5 to 4/5: no task can show it
-        # (p=0.29 each), the suite can (every difference is negative).
+        # (p=0.29 each), the suite statistic can (every difference is
+        # negative). It is reported, but blocking on it is off by default:
+        # the sign-flip p-value assumes the per-task differences are
+        # independent, and correlated task outcomes inflate its false-alarm
+        # rate well past alpha.
         ids = [f"t{i:02d}" for i in range(20)]
         manager = _manager_n(tmp_path, dict.fromkeys(ids, 1.0), sample_size=5)
         batch = _batch(*[t for task_id in ids for t in _runs(task_id, _passes(4, 5))])
 
         gate = evaluate_gate(batch, manager)
         assert all(not task.blocking for task in gate.tasks)
-        assert gate.status is GateStatus.BLOCKED and gate.exit_code == 1
-        assert gate.blocking_regressions == 1
+        assert gate.status is GateStatus.PASSED and gate.exit_code == 0
+        assert gate.blocking_regressions == 0
         suite = {s.metric_name: s for s in gate.suite}
         assert set(suite) == {"pass_rate"}  # the baselines carry pass_rate only
         effect = suite["pass_rate"]
@@ -440,10 +450,50 @@ class TestRunLevelPolicy:
         assert effect.p_value is not None and effect.p_value < 0.001
         assert effect.ci_upper is not None and effect.ci_upper < 0
         assert effect.severity is RegressionSeverity.SEVERE
-        assert effect.is_regression and effect.is_significant and effect.blocking
+        assert effect.is_regression and effect.is_significant
+        assert effect.blocking is False and effect.blocking_enabled is False
+        assert "reported only" in effect.describe()
+
+    def test_suite_level_blocking_is_available_on_request(self, tmp_path):
+        ids = [f"t{i:02d}" for i in range(20)]
+        manager = _manager_n(tmp_path, dict.fromkeys(ids, 1.0), sample_size=5)
+        batch = _batch(*[t for task_id in ids for t in _runs(task_id, _passes(4, 5))])
+
+        gate = evaluate_gate(batch, manager, suite_blocking=True)
+        assert gate.status is GateStatus.BLOCKED and gate.exit_code == 1
+        assert gate.blocking_regressions == 1
+        effect = next(s for s in gate.suite if s.metric_name == "pass_rate")
+        assert effect.blocking and effect.blocking_enabled
         assert gate.reasons[0].startswith("1 suite-level regression(s) at threshold 'moderate': ")
         assert "pass_rate: 1.0000 -> 0.8000 (-20.0%) over 20 task(s)" in gate.reasons[0]
         assert "significant, severe: blocking" in effect.describe()
+        # Both criteria live: each is held to half the run's budget.
+        assert "split with the suite criterion" in gate.policy_text()
+
+    def test_correlated_tasks_make_the_suite_statistic_overstate_its_evidence(
+        self, tmp_path
+    ):
+        # Why suite-level blocking is off by default. The sign-flip test
+        # treats each task's difference as an independent draw. Ten tasks
+        # that share one run-level outcome carry one task's worth of
+        # evidence, but the statistic reads them as ten, and its p-value
+        # falls by three orders of magnitude for no new information.
+        ids = [f"t{i:02d}" for i in range(10)]
+        manager = _manager_n(tmp_path, dict.fromkeys(ids, 1.0), sample_size=5)
+        shared = _passes(4, 5)  # every task lives or dies with the same run
+        batch = _batch(*[t for task_id in ids for t in _runs(task_id, shared)])
+
+        gate = evaluate_gate(batch, manager)
+        effect = next(s for s in gate.suite if s.metric_name == "pass_rate")
+        assert effect.tasks == 10
+        assert effect.p_value is not None and effect.p_value < 0.002
+        # One task on its own is no evidence at all, and the ten carry the
+        # same information: nothing here justifies blocking the run.
+        alone = evaluate_gate(
+            _batch(*_runs(ids[0], shared)), manager, task_ids=[ids[0]]
+        )
+        assert alone.suite == []  # one task cannot form the statistic
+        assert gate.status is GateStatus.PASSED and effect.blocking is False
 
     def test_suite_level_criterion_ignores_one_task_among_many(self, tmp_path):
         ids = [f"t{i}" for i in range(10)]
@@ -471,32 +521,44 @@ class TestRunLevelPolicy:
         assert all(not s.is_regression and "no drop" in s.describe() for s in gate.suite)
 
     def test_undetectable_sample_sizes_make_the_gate_unevaluable(self, tmp_path):
-        # One trial against a baseline with no recorded sample size: even a
-        # total failure has p=0.25, so the check could never have blocked.
+        # One trial against a baseline that stored one trial: even a total
+        # failure reads p=0.25 on the honest counts, so the check could
+        # never have blocked whatever the agent did.
         manager = _manager_n(tmp_path, {"a": 1.0, "b": 1.0}, sample_size=1)
         batch = _batch(*_runs("a", [True]), *_runs("b", [True]))
 
         gate = evaluate_gate(batch, manager)
         assert gate.status is GateStatus.UNEVALUABLE and gate.exit_code == 2
-        assert all(task.detectable is False and task.trials_needed == 3 for task in gate.tasks)
+        assert all(task.detectable is False and task.trials_needed == 15 for task in gate.tasks)
         assert gate.reasons == [
             "no checked task has enough trials to detect even a total failure "
             "(0.025 per test, 2 task(s) checked), so the check could not have blocked; "
-            "run at least 3 trials per task and store baselines from at least as many"
+            "run at least 15 trials per task and store baselines from at least as many"
         ]
         assert gate.summary_line().endswith("UNEVALUABLE")
 
     def test_enough_tasks_let_the_suite_criterion_decide_at_one_trial(self, tmp_path):
+        # Only with suite-level blocking switched on: otherwise the suite
+        # statistic cannot rescue a check no task could decide, so the run
+        # is unevaluable rather than passing on evidence it never had.
         ids = [f"t{i}" for i in range(6)]
         manager = _manager_n(tmp_path, dict.fromkeys(ids, 1.0), sample_size=1)
-        passing = evaluate_gate(
+        unrescued = evaluate_gate(
             _batch(*[t for task_id in ids for t in _runs(task_id, [True])]), manager
         )
+        assert unrescued.status is GateStatus.UNEVALUABLE
+
+        def evaluate(results):
+            return evaluate_gate(
+                _batch(*[t for task_id in ids for t in _runs(task_id, results)]),
+                manager,
+                suite_blocking=True,
+            )
+
+        passing = evaluate([True])
         assert passing.status is GateStatus.PASSED
         assert all(task.detectable is False for task in passing.tasks)
-        failing = evaluate_gate(
-            _batch(*[t for task_id in ids for t in _runs(task_id, [False])]), manager
-        )
+        failing = evaluate([False])
         assert failing.status is GateStatus.BLOCKED
         assert all(not task.blocking for task in failing.tasks)
         assert next(s for s in failing.suite if s.metric_name == "pass_rate").blocking
@@ -515,20 +577,20 @@ class TestRunLevelPolicy:
         assert gate.tasks[0].detectable is True and gate.tasks[1].detectable is False
         assert gate.warnings == [
             "1 checked task(s) have too few trials to block on their own at 0.025 per "
-            "test: b; run at least 3 trials per task (and store baselines from at "
+            "test: b; run at least 15 trials per task (and store baselines from at "
             "least as many)"
         ]
 
     def test_bounded_continuous_tests_are_undetectable(self, tmp_path):
-        # A declared score with no recorded spread or sample size, checked
-        # with three identical scores: both sides are constant, so the only
-        # test is the exact permutation one and its p-value is fixed at
+        # A score measured as constant over three trials, checked with
+        # three identical scores: both sides are constant, so the only test
+        # is the exact permutation one and its p-value is fixed at
         # 1/C(6, 3) = 0.05 by the sizes alone. That reaches alpha for a
-        # single task but not the 0.025 two tasks share under Holm.
+        # single task but not the 0.025 two tests share under Holm.
         manager = BaselineManager(tmp_path / "baselines.json")
         for task_id in ("a", "b"):
             baseline = TaskBaseline(task_id=task_id)
-            baseline.add_metric("mean_score", 0.9, std=0.0, sample_size=1)
+            baseline.add_metric("mean_score", 0.9, std=0.0, sample_size=3)
             manager.set_baseline(baseline)
         manager.save()
         batch = _batch(*[
@@ -548,9 +610,11 @@ class TestRunLevelPolicy:
         assert uncorrected.status is GateStatus.PASSED
         assert all(t.detectable is True for t in uncorrected.tasks)
 
-    def test_holm_families_are_sized_per_metric(self, tmp_path):
-        # Task a stores pass_rate and mean_score, task b only pass_rate: the
-        # pass_rate family has two tests, the mean_score family one.
+    def test_the_holm_family_spans_every_compared_task_and_metric(self, tmp_path):
+        # Task a stores pass_rate and mean_score, task b only pass_rate:
+        # three compared (task, metric) pairs, one family, one budget.
+        # Giving each metric its own family would hand a suite that stores
+        # two near-duplicate metrics two independent chances to block.
         manager = _manager(tmp_path, {
             "a": {"pass_rate": 1.0, "mean_score": 1.0},
             "b": {"pass_rate": 1.0},
@@ -558,16 +622,21 @@ class TestRunLevelPolicy:
         batch = _batch(*_runs("a", _passes(2, 5)), *_runs("b", _passes(5, 5)))
 
         gate = evaluate_gate(batch, manager)
-        assert gate.status is GateStatus.BLOCKED and gate.family_size == 2
+        assert gate.status is GateStatus.BLOCKED and gate.family_size == 3
         a, b = gate.tasks
         assert a.compared_metrics == ["mean_score", "pass_rate"]
         assert b.compared_metrics == ["pass_rate"] and b.regressions == []
         by_metric = {r.metric_name: r for r in a.regressions}
-        assert by_metric["pass_rate"].p_value == pytest.approx(0.0068, abs=5e-4)
+        # boschloo_exact([[10, 2], [0, 3]], alternative="greater")
+        assert by_metric["pass_rate"].p_value == pytest.approx(0.0095, abs=5e-4)
+        # Three tests in the family, and the two findings tie, so Holm gives
+        # each of them 3 * p rather than the 2 * p a per-metric family gave.
         assert by_metric["pass_rate"].p_value_adjusted == pytest.approx(
-            2 * by_metric["pass_rate"].p_value
+            3 * by_metric["pass_rate"].p_value
         )
-        assert by_metric["mean_score"].p_value_adjusted == by_metric["mean_score"].p_value
+        assert by_metric["mean_score"].p_value_adjusted == pytest.approx(
+            3 * by_metric["mean_score"].p_value
+        )
         assert all(r.is_significant for r in a.regressions)
 
     def test_summary_line_counts_drops_not_tasks(self, tmp_path):

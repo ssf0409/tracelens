@@ -183,7 +183,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert decision["alignment"]["compared"] == 2 and decision["alignment"]["aligned_by"] == "content"
 
     # 7b. A partial regression (1 of 5 runs passes) is blocked on its evidence:
-    # the exact test on 5/5 -> 1/5 gives p=0.0069, under the level shared by
+    # the exact test on 5/5 -> 1/5 gives p=0.0107, under the level shared by
     # the two checked tasks.
     partial = project / "partial.log"
     adapter.write_text(source.replace(
@@ -200,14 +200,14 @@ def test_documented_user_journey(tmp_path: Path) -> None:
         "run", "--config", "tracelens.yaml", "--max-concurrency", "1", cwd=project, expect=1,
     )
     assert "REGRESSION DETECTED [SEVERE]" in run.stdout
-    assert "pass_rate: 1.0000 -> 0.2000 (-80.0%) [p=0.0069 (adjusted 0.0137), significant]" in run.stdout
+    assert "pass_rate: 1.0000 -> 0.2000 (-80.0%) [p=0.0107 (adjusted 0.0215), significant]" in run.stdout
     gate = load(results)["gate"]
     assert gate["status"] == "blocked" and gate["blocking_regressions"] == 2
     assert gate["multiplicity"] == "holm" and gate["family_size"] == 2
     regression = next(t for t in gate["tasks"] if t["task_id"] == "starter-math")["regressions"][0]
     assert regression["test"] == "boschloo_exact" and regression["is_significant"]
     assert regression["baseline_n"] == 5 and regression["current_n"] == 5
-    assert "| starter-math | pass_rate | 1.0000 | 0.2000 | -80.0% | severe | p=0.0069" in report.read_text()
+    assert "| starter-math | pass_rate | 1.0000 | 0.2000 | -80.0% | severe | p=0.0107" in report.read_text()
     partial.unlink()
 
     # 7c. A smaller drop (3 of 5 runs pass) is reported with the trials it
@@ -219,7 +219,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert "REGRESSION DETECTED" not in run.stdout
     assert (
         "[tracelens] observed drop, not blocking: starter-math pass_rate 1.0000 -> 0.6000 "
-        "(-40.0%), p=0.1031 (adjusted 0.2062), not significant; about"
+        "(-40.0%), p=0.0937 (adjusted 0.1874), not significant; about"
     ) in run.stdout
     assert "trials on each side would decide it" in run.stdout
     assert "2 observed drop(s) not significant" in run.stdout  # 2 tasks x 1 stored metric

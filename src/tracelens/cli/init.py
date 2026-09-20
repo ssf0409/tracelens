@@ -202,7 +202,8 @@ could not have blocked at all exits 2 instead of passing.
        # task_hash lets the gate refuse to compare a task whose content changed
        baseline = TaskBaseline(task_id=task["task_id"], task_hash=task.get("task_hash"))
        baseline.add_metric(
-           "pass_rate", task["pass_rate"], std=0.05, sample_size=task["num_trials"]
+           "pass_rate", task["pass_rate"], std=0.05,
+           sample_size=task["num_trials"], is_rate=True
        )
        manager.set_baseline(baseline)
    manager.save()

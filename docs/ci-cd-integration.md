@@ -293,13 +293,15 @@ key; `tracelens report` renders it without inventing one.
 The gate blocks on evidence, not on the size of a drop alone, so the number
 of trials on each side decides what it can see. Per task, a 0/1 metric such
 as `pass_rate` is tested with Boschloo's exact test on the two counts; the
-baseline's `sample_size` is the other half of the evidence. With `T` checked
-tasks the p-values are Holm-adjusted (`--multiplicity holm`, the default), so
-an unchanged suite blocks by chance on some task at most 5 % of the time no
-matter how many tasks are flaky. A suite-level criterion, the mean of the
-per-task differences with a task bootstrap and sign-flip test, catches a
-broad regression that no single task can show. The procedure and the full
-tables are in the
+baseline's `sample_size` is the other half of the evidence, used exactly as
+recorded. With `T` compared `(task, metric)` pairs the p-values are
+Holm-adjusted as one family (`--multiplicity holm`, the default), so an
+unchanged suite blocks by chance at most 5 % of the time no matter how many
+tasks are flaky. A suite-level statistic, the mean of the per-task
+differences with a task bootstrap and sign-flip test, reports a broad
+regression that no single task can show; it does not block unless you pass
+`--suite-blocking`, because its p-value assumes the per-task differences are
+independent. The procedure and the full tables are in the
 [statistical contract](statistical-contract.md#baseline-regression-detection);
 `scripts/gate_error_rates.py` regenerates them.
 
@@ -310,23 +312,28 @@ Probability that one regressed task blocks, by trials a side and suite size:
 | always passed → fails every run | any | 5 | 100 % | 100 % | 100 % | 100 % |
 | 1.0 → 0.4 | 5 | 5 | 68 % | 34 % | 8 % | 8 % |
 | 1.0 → 0.4 | 20 | 5 | 91 % | 91 % | 68 % | 34 % |
-| 1.0 → 0.4 | 10 | 10 | 99 % | 95 % | 63 % | 38 % |
+| 1.0 → 0.4 | 10 | 10 | 95 % | 95 % | 63 % | 38 % |
 | 1.0 → 0.4 | 20 | 20 | 100 % | 100 % | 100 % | 98 % |
 | 1.0 → 0.6 | 20 | 5 | 66 % | 66 % | 32 % | 9 % |
-| 1.0 → 0.6 | 20 | 20 | 98 % | 98 % | 87 % | 58 % |
+| 1.0 → 0.6 | 20 | 20 | 98 % | 95 % | 87 % | 58 % |
 
 How to read it:
 
 - **Store baselines from ten runs or more.** The baseline is the long-lived
   side; a five-run check against a twenty-run baseline decides a 60-point
   drop on one task 91 % of the time in a small suite.
-- **Check with five runs or more.** Fewer than three runs a side cannot
-  decide even a total failure; a check none of whose tasks could have
-  blocked is `UNEVALUABLE` (exit 2) with the runs it would need, and tasks
-  that cannot block on their own are named in a warning.
+- **Check with five runs or more, and store the baseline from real runs.**
+  Fewer than three runs a side cannot decide even a total failure, and a
+  baseline that stored a single trial is a declared value with no measured
+  spread — it needs seven check runs to decide a total failure on its own
+  and fifteen once two tests share the budget. A check none of whose tasks
+  could have blocked is `UNEVALUABLE` (exit 2) with the runs it would need,
+  and tasks that cannot block on their own are named in a warning.
 - **Large suites need larger checks for single-task drops.** With fifty
-  tasks and five runs a side only a total failure of one task is decidable
-  per task; a broad drop across many tasks is the suite criterion's job.
+  tests and five runs a side only a total failure of one task is decidable
+  per task; a broad drop across many tasks is what the suite statistic
+  reports. Storing several near-duplicate metrics enlarges the family and
+  costs power, so gate on the one you mean.
   `--multiplicity none` restores per-task sensitivity at the price of a
   false-alarm rate that grows with the number of flaky tasks (ten flaky
   tasks at an 80 % pass rate: 18 % of clean runs blocked).
@@ -369,8 +376,14 @@ How to read it:
   regressions under a mismatched infra config are flagged but not
   blocking. Tune the band with `--noise-band` (default 0.03).
 - `--multiplicity holm|none` (config: `run.baseline.multiplicity`) sets
-  how the checked tasks share the 5 % significance level; see
-  [What the gate can detect](#what-the-gate-can-detect).
+  how the compared `(task, metric)` tests share the 5 % significance level;
+  see [What the gate can detect](#what-the-gate-can-detect).
+- `--suite-blocking` (config: `run.baseline.suite_blocking`, default off)
+  lets the suite-level statistic block as well as report. Its sign-flip
+  p-value assumes the per-task differences are independent; when task
+  outcomes move together the false-alarm rate runs well past 5 %, so switch
+  it on only for suites where that assumption holds. Doing so splits the
+  5 % budget evenly between the per-task and suite criteria.
 - `--infra-exceptions builtins.OSError myproject.errors.RateLimitError`
   extends which exception types count as `INFRA_ERROR` instead of agent
   failures — downstream policy, conservative by default.
