@@ -37,6 +37,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **`tracelens inspect` validates task content before attaching context to saved trials.**
+  When `--eval-set` is passed, task content is verified against the provenance hashes
+  recorded in the trials file. Mismatched content for attached tasks raises an actionable
+  error and exits 2, duplicate task IDs in the eval set exit 2, and legacy trial runs
+  lacking provenance hashes render attached context marked as `(unverified)`. (#100)
+
 - **The baseline gate decides on evidence that follows the statistical
   contract.** The per-task test behind `tracelens run --baseline-check` had
   four defects: its fallback for a zero-variance baseline divided the delta
