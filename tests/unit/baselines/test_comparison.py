@@ -246,9 +246,10 @@ class TestRegressionDetector:
     ):
         """Zero-variance samples should not leak scipy precision warnings.
 
-        A decisive drop (1.2 -> 0.2 against std=0.3) is decided by the
-        pooled t-test on the baseline spread — with a real p-value, not
-        the fabricated p=0.0 this path used to produce.
+        A decisive drop (1.2 -> 0.2 against std=0.3) is decided by Welch
+        on the baseline's spread, which stands for the flat current sample
+        too — with a real p-value, not the fabricated p=0.0 this path used
+        to produce.
         """
         detector = RegressionDetector(min_delta_percent=1.0)
         current_results = [{"sharpe_ratio": 0.2}] * 5
@@ -623,6 +624,48 @@ class TestTheTableSciPyExpects:
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
 
+class TestADeclarationCannotSupplyMissingEvidence:
+    """`is_rate` says which family a metric belongs to, nothing more."""
+
+    @staticmethod
+    def _declared(value: float, sample_size: int) -> TaskBaseline:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(
+            metric_name="pass_rate", value=value, std=0.0,
+            sample_size=sample_size, is_rate=True,
+        )
+        return baseline
+
+    def test_a_declared_rate_still_needs_a_whole_count(self) -> None:
+        # 0.9 over five trials is four and a half successes. Rounding it to
+        # a count makes the baseline perfect (5 of 5) and blocks at 0.0309;
+        # truncating makes it 4 of 5 and reads 0.1719. Neither is measured,
+        # so the exact test does not apply and the comparison falls back to
+        # the continuous path.
+        report = RegressionDetector().compare(
+            self._declared(0.9, 5), [{"pass_rate": v} for v in (1.0, 1.0, 0.0, 0.0, 0.0)]
+        )
+        assert report.regressions[0].test != "boschloo_exact"
+
+    def test_a_declared_rate_with_a_real_count_uses_the_exact_test(self) -> None:
+        report = RegressionDetector().compare(
+            self._declared(0.8, 5), [{"pass_rate": v} for v in (1.0, 1.0, 0.0, 0.0, 0.0)]
+        )
+        assert report.regressions[0].test == "boschloo_exact"
+
+    def test_a_declared_rate_with_a_nan_mean_is_no_evidence(self) -> None:
+        # A corrupt value must not reach a test: two "constant" sides, one
+        # of them NaN, land on the permutation value and read as the
+        # strongest evidence the sample sizes allow.
+        report = RegressionDetector().compare(
+            self._declared(float("nan"), 5), [{"pass_rate": 0.0}] * 5
+        )
+        finding = (report.regressions or report.improvements)[0]
+        assert finding.test is None and finding.p_value is None
+        assert finding.is_significant is False and finding.undetectable is True
+        assert report.should_block_ci(RegressionSeverity.MINOR) is False
+
+
 class TestMetricTypeComesFromTheBaseline:
     """The test family must not depend on where the current sample lands."""
 
@@ -679,7 +722,11 @@ class TestMetricTypeComesFromTheBaseline:
 
 
 class TestContinuousMetricTests:
-    """Continuous metrics use the stored summary: Welch, pooled, or exact."""
+    """Continuous metrics use the stored summary: Welch or exact.
+
+    The pooled-variance test is not used at all: a spread measured as zero
+    on one side does not show that the two populations share a variance.
+    """
 
     @staticmethod
     def _baseline(value: float, std: float, sample_size: int) -> TaskBaseline:
@@ -698,32 +745,39 @@ class TestContinuousMetricTests:
         assert reg.baseline_std == pytest.approx(0.05)
         assert reg.current_std == pytest.approx(0.0652, abs=1e-3)
 
-    def test_welch_when_one_measured_spread_is_zero(self) -> None:
+    def test_a_flat_sample_does_not_get_credited_with_zero_uncertainty(self) -> None:
         # A hundred baseline trials with sd 0.3 against five that all read
-        # 1.0. Welch uses each side's own measured spread; pooling them
-        # instead would assume the two populations share a variance, which
-        # nothing here shows -- and that assumption is what let a baseline
-        # recorded with sd 0 read p=6e-34 against three scattered trials.
+        # 1.0. Five trials that happen to agree are not a measurement of
+        # zero variance, and handing that zero to Welch would credit the
+        # current mean with no uncertainty at all. The spread that WAS
+        # informative stands for both sides:
+        # ttest_ind_from_stats(1.2, 0.3, 100, 1.0, 0.3, 5, equal_var=False,
+        # alternative="greater") = 0.10650.
         report = RegressionDetector().compare(self._baseline(1.2, 0.3, 100), [{"mean_score": 1.0}] * 5)
 
         reg = report.regressions[0]
         assert reg.test == "welch_t"
+        # The finding still records what each side actually measured.
         assert reg.baseline_std == pytest.approx(0.3) and reg.current_std == pytest.approx(0.0)
-        assert reg.is_significant and report.has_regression is True
+        assert reg.p_value == pytest.approx(0.1065, abs=5e-4)
+        assert reg.is_significant is False and report.has_regression is False
+        assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
     def test_a_zero_baseline_spread_no_longer_pools(self) -> None:
         # The reported case: baseline mean .5 recorded with sd 0 over 100
         # trials, checked against three scattered values. Pooling gave
-        # p=6e-34 and blocked; Welch on the same numbers gives 0.0608 and
-        # does not. ttest_ind_from_stats(.5, 0, 100, .2, 0.2, 3,
-        # equal_var=False, alternative="greater") = 0.06084.
+        # p=6e-34 and blocked, because a flat side with the larger n
+        # dominates the pooled variance estimate. Using the informative
+        # spread for both sides instead:
+        # ttest_ind_from_stats(.5, 0.2, 100, .2, 0.2, 3, equal_var=False,
+        # alternative="greater") = 0.05880, which does not block.
         report = RegressionDetector().compare(
             self._baseline(0.5, 0.0, 100),
             [{"mean_score": v} for v in (0.0, 0.2, 0.4)],
         )
         reg = report.regressions[0]
         assert reg.test == "welch_t"
-        assert reg.p_value == pytest.approx(0.0608, abs=5e-4)
+        assert reg.p_value == pytest.approx(0.0588, abs=5e-4)
         assert reg.is_significant is False
         assert report.should_block_ci(RegressionSeverity.MINOR) is False
 
@@ -948,6 +1002,25 @@ class TestSmallSampleHonesty:
         decided = detector.compare(measured, [{"error_rate": 1.0}] * 3).regressions[0]
         assert decided.p_value == pytest.approx(0.0050, abs=5e-4)
         assert decided.is_significant is True and decided.undetectable is False
+
+
+class TestTheBaselineIsWhatLimitsTheEvidence:
+    """A baseline of one stored trial must say so, not "more than 200"."""
+
+    def test_a_declared_baseline_gets_the_re_store_advice(self) -> None:
+        # Growing the check alone cannot decide this at the level the gate
+        # uses, so the note has to name the baseline as the limit. The
+        # branch that says so used to be skipped for exactly these findings.
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric(metric_name="pass_rate", value=1.0, std=0.0, sample_size=1)
+        detector = RegressionDetector()
+        finding = detector.compare(baseline, [{"pass_rate": 0.0}] * 2).regressions[0]
+        detector.annotate(finding, 0.05, 0.001)
+
+        assert finding.trials_needed is not None
+        assert finding.trials_needed_on_both_sides is True
+        assert "trials on each side would decide it" in finding.evidence_text()
+        assert "re-store it from more runs" in finding.evidence_text()
 
 
 class TestReportedButNotSignificantPolicy:

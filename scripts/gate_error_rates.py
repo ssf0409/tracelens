@@ -5,7 +5,8 @@ Prints the Markdown tables that ``docs/statistical-contract.md`` ("Baseline
 regression detection") and ``docs/ci-cd-integration.md`` ("What the gate
 can detect") quote. Every number is a sum over the possible outcomes of two
 binomial samples, decided by the real ``RegressionDetector`` at the per-test
-level the gate uses: ``alpha / T`` under Holm over ``T`` checked tasks.
+level the gate uses: ``alpha / T`` under Holm over a family of ``T``
+compared (task, metric) tests.
 
     uv run --no-sync python scripts/gate_error_rates.py            # the tables
     uv run --no-sync python scripts/gate_error_rates.py --simulate # plus a seeded
@@ -102,7 +103,7 @@ def print_tables() -> None:
     print("### Per-task false alarm on an unchanged flaky task\n")
     print(
         "Probability that one task whose true pass rate is `p` on both sides blocks "
-        "by chance, per test level `alpha / T` (Holm over `T` checked tasks).\n"
+        "by chance, per test level `alpha / T` (Holm over a family of `T` compared (task, metric) tests).\n"
     )
     rows = []
     for p in FLAKY_RATES:
@@ -113,7 +114,7 @@ def print_tables() -> None:
     print(table(["p", "baseline n", "check n"] + [f"T={t}" for t, _ in levels], rows))
     print()
     print("### Run-level false alarm with F flaky tasks (p = 0.8, baseline 5, check 5)\n")
-    print("`1 - (1 - q)^F` with `q` from the row above; deterministic tasks add nothing.\n")
+    print("`1 - (1 - q)^F` with `q` from the row above; deterministic tasks add nothing. This is the whole run-level rate: the suite criterion does not block by default.\n")
     rows = []
     for t, level in levels:
         q = block_probability(5, 5, 0.8, 0.8, level)

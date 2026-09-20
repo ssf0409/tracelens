@@ -821,6 +821,31 @@ class TestObservedFindingsReachEveryFormat:
         assert "Baseline Comparison" in html and "NOT SIGNIFICANT" in html
         assert "<th>Evidence</th>" in html and "not significant" in html
 
+    def test_a_summary_only_report_is_not_a_clean_run(self) -> None:
+        # `should_block_ci` acts on a report built from a summary rather
+        # than from findings, so widening the renderers to "has regressions
+        # or improvements" would have dropped it from all three formats --
+        # the issue-#111 failure mode in a new state.
+        report = RegressionReport(
+            has_regression=True, overall_severity=RegressionSeverity.SEVERE,
+            summary="built by a downstream caller from its own summary",
+        )
+        assert report.should_block_ci() is True
+        data = ReportData(regression_report=report)
+        gen = ReportGenerator()
+        assert "## Regression Alert" in gen.render_markdown(data)
+        assert "REGRESSION [SEVERE]" in gen.render_ci_summary(data)
+        assert "Regression Alert" in gen.render_html(data)
+        assert "built by a downstream caller" in gen.render_markdown(data)
+
+    def test_an_improvements_only_report_is_not_called_insignificant(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 0.4, std=0.0, sample_size=5)
+        report = RegressionDetector().compare(baseline, [{"pass_rate": 1.0}] * 5)
+        assert not report.regressions and report.improvements
+        html = ReportGenerator().render_html(ReportData(regression_report=report))
+        assert "IMPROVEMENTS" in html and "NOT SIGNIFICANT" not in html
+
     def test_a_confirmed_regression_still_reads_as_an_alert(self) -> None:
         baseline = TaskBaseline(task_id="t1")
         baseline.add_metric("pass_rate", 1.0, std=0.0, sample_size=5)

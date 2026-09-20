@@ -20,9 +20,11 @@ evidence for it. The procedure is specified in ``docs/statistical-contract.md``
   comparison with no valid test is ``insufficient_data``.
 - Evidence is never invented for the baseline. Its recorded ``sample_size``
   is used as recorded, and a baseline that stored fewer than two trials has
-  no measured spread at all: such a comparison has almost no power, is
-  reported as ``undetectable``, and makes the gate unevaluable rather than
-  borrowing the current sample's evidence to stand in for it.
+  no measured spread at all: rather than borrow the current sample's
+  evidence to stand in for it, such a comparison usually comes out
+  ``undetectable`` and makes the gate unevaluable. It is not powerless --
+  one stored passing trial against seven straight failures is p=0.049 on
+  the honest counts, and that blocks -- but it cannot decide much else.
 - Blocking needs both an effect at or above the severity threshold and a
   significant test. A drop that is reported but not significant is
   ``underpowered`` and carries the number of trials that would decide it;
@@ -104,6 +106,22 @@ def _bernoulli_std(k: int, n: int) -> float:
     return math.sqrt(k * (n - k) / (n * (n - 1)))
 
 
+def _is_a_whole_count(mean_b: float, n_b: int) -> bool:
+    """Whether ``mean_b`` over ``n_b`` trials describes a count of successes.
+
+    A rate has to sit in [0, 1] and its mean times its size has to be the
+    whole number of trials that passed. Half a success over five trials is
+    not a proportion, whatever the baseline calls itself: the exact test
+    would round it to a count nobody measured, and ``_round_half_up`` breaks
+    ties upward, which inflates the baseline and is anti-conservative in the
+    blocking direction specifically.
+    """
+    if n_b < 1 or not math.isfinite(mean_b) or not 0.0 <= mean_b <= 1.0:
+        return False
+    k = mean_b * n_b
+    return abs(k - round(k)) <= _COUNT_TOLERANCE
+
+
 def _summary_is_a_proportion(mean_b: float, n_b: int, std_b: float | None) -> bool:
     """Whether the stored baseline summary is consistent with a 0/1 rate.
 
@@ -121,15 +139,10 @@ def _summary_is_a_proportion(mean_b: float, n_b: int, std_b: float | None) -> bo
     This is an inference for baselines that do not say. A baseline that sets
     ``MetricBaseline.is_rate`` is taken at its word and never reaches here.
     """
-    if n_b < 1 or not 0.0 <= mean_b <= 1.0:
-        return False
-    k = mean_b * n_b
-    if abs(k - round(k)) > _COUNT_TOLERANCE:
+    if not _is_a_whole_count(mean_b, n_b):
         return False
     if std_b is None or std_b <= 0.0:
         return True
-    if n_b < 2:
-        return False  # a positive spread cannot have been measured from one trial
     # The widest spread 0/1 data of this size can show is at a half-and-half
     # split; anything beyond it did not come from a proportion.
     widest = _bernoulli_std(n_b // 2, n_b)
@@ -249,8 +262,15 @@ def _sides(
     is_rate = metric_baseline.is_rate
     if is_rate is None:
         is_rate = _summary_is_a_proportion(mean_b, n_b, std_b)
-    # Counting needs a baseline with trials to count, whatever it declares.
-    binary = bool(is_rate) and n_b >= 1 and _is_binary(current_values)
+    # A declaration says which family the metric belongs to; it cannot supply
+    # a count the summary does not contain, nor turn values that are not 0/1
+    # into successes. Where either is missing the comparison falls back to
+    # the continuous path rather than inventing a table.
+    binary = (
+        bool(is_rate)
+        and _is_a_whole_count(mean_b, n_b)
+        and _is_binary(current_values)
+    )
     return _Sides(
         binary=binary,
         mean_b=mean_b,
@@ -274,6 +294,12 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
         return TEST_BOSCHLOO, _boschloo_p(
             sides.k_b, sides.n_b, sides.k_c, sides.n_c, alternative
         )
+    if not (math.isfinite(sides.mean_b) and math.isfinite(sides.mean_c)):
+        # A corrupt baseline value or a non-finite metric. There is nothing
+        # to compare, and every branch below would happily return a number
+        # for it -- two "constant" sides one of which is NaN reach the
+        # permutation value and read as the strongest evidence available.
+        return None, None
     if sides.mean_b == sides.mean_c:
         # No difference in either direction. Worth stating before the
         # branches below, because the permutation value is the probability
@@ -301,6 +327,10 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
                 if alternative == "greater"
                 else float(stats.t.sf(t_stat, df))
             )
+            if not math.isfinite(p):
+                # Clamping would turn a NaN into 0.0 and fabricate
+                # significance; "no valid test" is the honest reading.
+                return None, None
             return TEST_PREDICTION, min(1.0, max(0.0, p))
         # A constant baseline and one differing observation: the exact
         # permutation value over the pooled values.
@@ -309,10 +339,20 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
         # Both sides constant: only one split of the pooled values puts all
         # the extreme ones on the current side.
         return TEST_PERMUTATION, 1.0 / math.comb(sides.n_b + sides.n_c, sides.n_c)
-    # Welch throughout, including when one measured spread is zero: a sample
-    # that happened to show no variance is not evidence that the two
-    # populations share one, and pooling on that basis divides the delta by
-    # a standard error the data never supported.
+    if std_b == 0.0 or std_c == 0.0:
+        # Exactly one side showed no variation. That is not a measurement of
+        # zero variance, and handing it to Welch as one credits that side's
+        # mean with no uncertainty at all: three flat baseline trials against
+        # twenty scattered current ones rejected 38 % of unchanged runs, and
+        # against fifty, 91 %. Pooling instead fails the other way round --
+        # a flat side with the larger n dominates the pooled estimate, which
+        # is how a baseline recorded with spread 0 over 100 trials read
+        # p=6e-34 against three scattered values. Use the spread that was
+        # actually informative for both sides: conservative in either
+        # direction, and Welch's degrees of freedom still follow the sizes.
+        std_b = std_c = max(std_b, std_c)
+    # Welch throughout: a pooled estimate would assume the two populations
+    # share a variance, which nothing here shows.
     result = stats.ttest_ind_from_stats(
         sides.mean_b, std_b, sides.n_b,
         sides.mean_c, std_c, sides.n_c,
@@ -335,12 +375,18 @@ def _trials_needed(
     both_sides: bool = False,
     cap: int = TRIALS_NEEDED_CAP,
 ) -> int | None:
-    """Smallest current sample size at which these sides would be significant.
+    """About how many current trials would decide the change just observed.
 
     Keeps the observed rates and spreads and grows the current side; the
-    baseline side grows with it when its size was assumed or when
-    ``both_sides`` is set (a re-stored baseline). ``None`` when the cap is
-    reached first, or when no test applies at any size.
+    baseline side grows with it when ``both_sides`` is set (a re-stored
+    baseline). ``None`` when the cap is reached first, or when no test
+    applies at any size.
+
+    The scan probes upward and then bisects, which assumes significance is
+    monotone in the sample size. For a discrete test it is not quite: a
+    rounded count can step the wrong way at a particular size, so this is
+    the first size the scan lands on rather than provably the smallest. It
+    is advice about the order of magnitude to rerun at, not a guarantee.
     """
     if sides.mean_c == sides.mean_b:
         return None
@@ -449,6 +495,10 @@ class MetricRegression(BaseModel):
     # trials: its mean is a declared value rather than a measurement, so it
     # carries no spread and almost no power. The size itself is never
     # inflated to match the check.
+    #
+    # ``undetectable`` means no effect of any size could have been found at
+    # these sample sizes -- for a 0/1 metric because even a total failure
+    # would not reject, and for any metric because no valid test exists.
     test: str | None = None
     baseline_n: int | None = None
     current_n: int | None = None
@@ -621,6 +671,16 @@ class RegressionReport(BaseModel):
                     f"  {reg.metric_name}: {reg.baseline_mean:.4f} -> "
                     f"{reg.current_mean:.4f} ({reg.delta_percent:+.1f}%){notes}"
                 )
+        elif self.has_regression:
+            # A report a caller built from a summary rather than from
+            # findings. It still carries a verdict, and ``should_block_ci``
+            # still acts on it, so it must not read as a clean run.
+            lines.append(
+                f"REGRESSION DETECTED [{self.overall_severity.value.upper()}]"
+            )
+            if self.summary:
+                lines.append("")
+                lines.append(f"  {self.summary}")
         else:
             lines.append("No regressions detected")
 
@@ -833,7 +893,11 @@ class RegressionDetector:
         if not power_notes or sides is None or finding.p_value is None or not finding.underpowered:
             return
         finding.trials_needed = _trials_needed(sides, level)
-        if finding.trials_needed is None and not sides.baseline_n_assumed:
+        if finding.trials_needed is None:
+            # Growing the check alone could not decide it, so the baseline is
+            # what limits the evidence. This is the advice a baseline of one
+            # stored trial needs most, and it used to be skipped for exactly
+            # those findings.
             finding.trials_needed = _trials_needed(sides, level, both_sides=True)
             finding.trials_needed_on_both_sides = finding.trials_needed is not None
         if sides.binary:

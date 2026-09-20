@@ -285,7 +285,9 @@ are skipped with a warning when other tasks can be checked; add
 path.json` / `--max-infra-retries N` for long runs. See
 [CI/CD Integration](ci-cd-integration.md) for the noise-aware flags
 (`--decision-spec`, `--noise-band`, `--infra-exceptions`) and for what the
-gate can detect at a given number of runs (`--multiplicity holm|none`
+gate can detect at a given number of runs (`--multiplicity holm|none` sets
+how the compared `(task, metric)` tests share the significance level, and
+`--suite-blocking` lets the suite-level statistic block as well as report
 chooses how many tasks share the significance level).
 `tracelens report --results results.json --format markdown` re-renders a saved
 run; `--format ci` prints the same one-line summary `run` printed, gate line

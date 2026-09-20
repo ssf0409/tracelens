@@ -201,9 +201,15 @@ could not have blocked at all exits 2 instead of passing.
    for task in results["task_summaries"]:
        # task_hash lets the gate refuse to compare a task whose content changed
        baseline = TaskBaseline(task_id=task["task_id"], task_hash=task.get("task_hash"))
+       # pass_rate is the share of the GRADABLE trials that passed, so the
+       # baseline's sample size has to be that same count: pairing it with
+       # num_trials would credit the baseline with infra-errored runs it
+       # never graded, and the exact test would round the success count up
+       # to match.
+       graded = task.get("gradable_trials") or task["num_trials"]
        baseline.add_metric(
            "pass_rate", task["pass_rate"], std=0.05,
-           sample_size=task["num_trials"], is_rate=True
+           sample_size=graded, is_rate=True
        )
        manager.set_baseline(baseline)
    manager.save()

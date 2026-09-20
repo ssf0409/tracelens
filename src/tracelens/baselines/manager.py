@@ -110,6 +110,10 @@ class MetricBaseline(BaseModel):
     # current values happens to look like. ``None`` (the default, and what
     # every baseline stored before this field existed carries) means "not
     # declared": the comparison infers it from the stored summary instead.
+    # Declaring it cannot supply evidence the summary lacks: a baseline
+    # whose mean times ``sample_size`` is not a whole count of successes is
+    # still compared as a continuous metric, because the exact test would
+    # otherwise round it to a count nobody measured.
     is_rate: bool | None = None
 
 
@@ -374,11 +378,16 @@ class TaskBaseline(BaseModel):
             abs_threshold = None
             rel_threshold = None
             higher_is_better = True
+            is_rate = None
 
             if old_metric:
                 abs_threshold = old_metric.regression_threshold_absolute
                 rel_threshold = old_metric.regression_threshold_relative
                 higher_is_better = old_metric.higher_is_better
+                # Carried forward with the rest of the metric's definition:
+                # it decides which test compares the metric, so dropping it
+                # here would silently change the test family on promotion.
+                is_rate = old_metric.is_rate
 
             self.add_metric(
                 metric_name=metric_name,
@@ -388,6 +397,7 @@ class TaskBaseline(BaseModel):
                 absolute_threshold=abs_threshold,
                 relative_threshold=rel_threshold,
                 higher_is_better=higher_is_better,
+                is_rate=is_rate,
             )
 
         # Update metadata
@@ -579,6 +589,10 @@ class BaselineManager:
             abs_threshold = None
             rel_threshold = None
             higher_is_better = True
+            # The metric's type is part of its definition, not of the
+            # thresholds, so it follows the metric across an update whether
+            # or not the caller asked to keep thresholds.
+            is_rate = old_metric.is_rate if old_metric else None
 
             if keep_thresholds and old_metric:
                 abs_threshold = old_metric.regression_threshold_absolute
@@ -593,6 +607,7 @@ class BaselineManager:
                 absolute_threshold=abs_threshold,
                 relative_threshold=rel_threshold,
                 higher_is_better=higher_is_better,
+                is_rate=is_rate,
             )
 
         if decision_spec is not None:
@@ -717,6 +732,7 @@ class BaselineManager:
         metrics: dict[str, float],
         fingerprint: str | None = None,
         metric_stds: dict[str, float] | None = None,
+        metric_is_rate: dict[str, bool] | None = None,
         sample_size: int = 1,
         task_name: str | None = None,
         decision_spec: DecisionSpec | None = None,
@@ -763,12 +779,14 @@ class BaselineManager:
         )
 
         metric_stds = metric_stds or {}
+        metric_is_rate = metric_is_rate or {}
         for metric_name, value in metrics.items():
             baseline.add_metric(
                 metric_name=metric_name,
                 value=value,
                 std=metric_stds.get(metric_name, 0.0),
                 sample_size=sample_size,
+                is_rate=metric_is_rate.get(metric_name),
             )
 
         self._baselines[task_id] = baseline
@@ -779,6 +797,7 @@ class BaselineManager:
         task_id: str,
         metrics: dict[str, float],
         metric_stds: dict[str, float] | None = None,
+        metric_is_rate: dict[str, bool] | None = None,
         sample_size: int = 1,
         task_name: str | None = None,
         promotion_policy: PromotionPolicy | None = None,
@@ -820,12 +839,14 @@ class BaselineManager:
         )
 
         metric_stds = metric_stds or {}
+        metric_is_rate = metric_is_rate or {}
         for metric_name, value in metrics.items():
             baseline.add_metric(
                 metric_name=metric_name,
                 value=value,
                 std=metric_stds.get(metric_name, 0.0),
                 sample_size=sample_size,
+                is_rate=metric_is_rate.get(metric_name),
             )
 
         self._baselines[task_id] = baseline

@@ -187,6 +187,43 @@ class TestBaselineManager:
         assert "btc_backtest" in tasks
 
 
+class TestMetricTypeSurvivesTheWritePaths:
+    """`is_rate` decides which test compares a metric, so it must not be
+    dropped by the paths that rewrite a baseline in place (issue #111)."""
+
+    def test_promotion_carries_the_declaration(self) -> None:
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("score", 0.6, std=0.2, sample_size=5, is_rate=False)
+        baseline.promote(
+            current_metrics={"score": 0.8}, metric_stds={"score": 0.2},
+            sample_size=5, reason="better",
+        )
+        metric = baseline.get_metric("score")
+        assert metric is not None and metric.is_rate is False
+
+    def test_update_carries_the_declaration(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("score", 0.6, std=0.2, sample_size=5, is_rate=False)
+        manager.set_baseline(baseline)
+        manager.update_baseline(
+            task_id="t1", metrics={"score": 0.8},
+            metric_stds={"score": 0.2}, sample_size=5,
+        )
+        metric = manager.get_baseline("t1").metrics["score"]  # type: ignore[union-attr]
+        assert metric.is_rate is False
+
+    def test_the_create_helpers_can_declare_it(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        manager.create_capability_baseline(
+            task_id="t1", metrics={"pass_rate": 0.8},
+            metric_stds={"pass_rate": 0.4}, sample_size=5,
+            metric_is_rate={"pass_rate": True},
+        )
+        stored = manager.get_baseline("t1")
+        assert stored is not None and stored.metrics["pass_rate"].is_rate is True
+
+
 class TestBaselineDecisionSpecRoundTrip:
     """TaskBaseline must carry the DecisionSpec that produced it, so the
     CLI gate can hand both specs to compare_with_specs() and apply the

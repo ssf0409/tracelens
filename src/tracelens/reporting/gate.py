@@ -288,6 +288,9 @@ class SuiteGateResult:
     # False when the suite criterion is reported but cannot block (the
     # default; see the module docstring on its independence assumption).
     blocking_enabled: bool = False
+    # The p-value after Holm across the suite criteria of this run, so the
+    # suite half of the budget is spent once rather than once per metric.
+    p_value_adjusted: float | None = None
 
     def describe(self) -> str:
         """One line for the reports."""
@@ -302,6 +305,8 @@ class SuiteGateResult:
             )
         if self.p_value is not None:
             text += f"; p={self.p_value:.4f}"
+            if self.p_value_adjusted is not None and self.p_value_adjusted != self.p_value:
+                text += f" (adjusted {self.p_value_adjusted:.4f})"
         if not self.is_regression:
             text += "; no drop"
         elif self.blocking:
@@ -341,6 +346,7 @@ class SuiteGateResult:
             "within_noise_band": self.within_noise_band,
             "blocking": self.blocking,
             "blocking_enabled": self.blocking_enabled,
+            "p_value_adjusted": self.p_value_adjusted,
         }
 
     @classmethod
@@ -364,11 +370,13 @@ class SuiteGateResult:
             is_significant=bool(data.get("is_significant", False)),
             within_noise_band=bool(data.get("within_noise_band", False)),
             blocking=bool(data.get("blocking", False)),
-            # Older gate JSON predates the flag; a recorded ``blocking``
-            # means the criterion did block, so it must have been enabled.
-            blocking_enabled=bool(
-                data.get("blocking_enabled", data.get("blocking", False))
-            ),
+            # Older gate JSON predates the flag, and the suite criterion
+            # always blocked then -- so its absence means enabled, not
+            # disabled. Reading it off ``blocking`` instead would relabel a
+            # result that was significant but below the severity threshold
+            # as "reported only", which is not what that run did.
+            blocking_enabled=bool(data.get("blocking_enabled", True)),
+            p_value_adjusted=data.get("p_value_adjusted"),
         )
 
 
@@ -394,6 +402,11 @@ class GateResult:
     alpha: float | None = None
     multiplicity: str | None = None
     family_size: int = 0
+    # Whether the suite criterion was allowed to block. It decides how the
+    # budget was split, so it is recorded rather than inferred from the
+    # suite entries -- a run with fewer than two tasks per metric produces
+    # no entries at all, and the level it actually used would be lost.
+    suite_blocking: bool = False
     suite: list[SuiteGateResult] = field(default_factory=list)
 
     @classmethod
@@ -425,7 +438,7 @@ class GateResult:
         """
         if self.alpha is None:
             return "significance policy not recorded"
-        suite_blocks = any(s.blocking_enabled for s in self.suite)
+        suite_blocks = self.suite_blocking or any(s.blocking_enabled for s in self.suite)
         budget = self.alpha / 2 if suite_blocks else self.alpha
         share = (
             f"alpha={self.alpha:g} split with the suite criterion, "
@@ -474,6 +487,7 @@ class GateResult:
             "alpha": self.alpha,
             "multiplicity": self.multiplicity,
             "family_size": self.family_size,
+            "suite_blocking": self.suite_blocking,
             "checked": self.checked,
             "skipped_no_baseline": self.skipped_no_baseline,
             "skipped_no_gradable": self.skipped_no_gradable,
@@ -498,6 +512,14 @@ class GateResult:
             alpha=data.get("alpha"),
             multiplicity=data.get("multiplicity"),
             family_size=int(data.get("family_size", 0)),
+            # Older artifacts predate the flag; the suite criterion always
+            # blocked then, so a recorded suite entry means it was enabled.
+            suite_blocking=bool(
+                data.get(
+                    "suite_blocking",
+                    any(s.get("blocking_enabled", True) for s in data.get("suite", [])),
+                )
+            ),
             checked=int(data.get("checked", 0)),
             skipped_no_baseline=int(data.get("skipped_no_baseline", 0)),
             skipped_no_gradable=int(data.get("skipped_no_gradable", 0)),
@@ -578,11 +600,15 @@ def _suite_results(
     false the result is computed and reported but never blocks: the
     sign-flip p-value is only valid when the per-task differences are
     independent, which correlated task outcomes violate.
+
+    One criterion is formed per metric, and they share ``alpha`` through the
+    same Holm adjustment the per-task family uses. Testing each at the full
+    level would spend the suite half of the budget once per stored metric,
+    which is the defect the per-task side was fixed for.
     """
-    results: list[SuiteGateResult] = []
-    for metric, pairs in sorted(per_task_means.items()):
-        if len(pairs) < 2:
-            continue
+    eligible = [(m, pairs) for m, pairs in sorted(per_task_means.items()) if len(pairs) >= 2]
+    draft: list[dict[str, Any]] = []
+    for metric, pairs in eligible:
         diffs = [current - baseline for baseline, current in pairs]
         effect = paired_task_effect(
             diffs, confidence=_SUITE_CONFIDENCE, n_bootstrap=_SUITE_BOOTSTRAP, seed=seed
@@ -599,32 +625,33 @@ def _suite_results(
             p_one = min(1.0, max(0.0, p_one))
         is_regression = delta < 0 and abs(delta_percent) >= min_delta_percent
         severity = severity_for(delta_percent) if is_regression else RegressionSeverity.NONE
-        is_significant = is_regression and p_one is not None and p_one <= alpha
         within_noise = is_regression and any_infra_mismatch and abs(delta) < noise_band
+        draft.append({
+            "metric_name": metric, "tasks": len(pairs),
+            "baseline_mean": baseline_mean, "current_mean": current_mean,
+            "delta": delta, "delta_percent": delta_percent,
+            "ci_lower": effect.ci_lower, "ci_upper": effect.ci_upper,
+            "p_value": p_one, "p_value_exact": effect.p_value_exact,
+            "confidence": effect.confidence, "n_bootstrap": effect.n_bootstrap,
+            "seed": effect.seed, "severity": severity,
+            "is_regression": is_regression, "within_noise_band": within_noise,
+        })
+    adjusted = holm_adjusted([
+        1.0 if d["p_value"] is None else float(d["p_value"]) for d in draft
+    ])
+    results: list[SuiteGateResult] = []
+    for entry, adj in zip(draft, adjusted, strict=True):
+        is_significant = bool(entry["is_regression"]) and entry["p_value"] is not None and adj <= alpha
         blocking = (
             blocking_enabled
             and is_significant
-            and not within_noise
-            and severity_at_least(severity, threshold)
+            and not entry["within_noise_band"]
+            and severity_at_least(entry["severity"], threshold)
         )
         results.append(SuiteGateResult(
-            metric_name=metric,
-            tasks=len(pairs),
-            baseline_mean=baseline_mean,
-            current_mean=current_mean,
-            delta=delta,
-            delta_percent=delta_percent,
-            ci_lower=effect.ci_lower,
-            ci_upper=effect.ci_upper,
-            p_value=p_one,
-            p_value_exact=effect.p_value_exact,
-            confidence=effect.confidence,
-            n_bootstrap=effect.n_bootstrap,
-            seed=effect.seed,
-            severity=severity,
-            is_regression=is_regression,
+            **entry,
+            p_value_adjusted=None if entry["p_value"] is None else adj,
             is_significant=is_significant,
-            within_noise_band=within_noise,
             blocking=blocking,
             blocking_enabled=blocking_enabled,
         ))
@@ -669,10 +696,11 @@ def evaluate_gate(
             independent per-task differences, which correlated task outcomes
             violate; switching it on splits ``alpha`` evenly between the two
             criteria so the run-level budget stays ``alpha``.
-        multiplicity: ``"holm"`` (default) adjusts every compared
-            p-values across the checked tasks so the run's false-alarm rate
-            from chance is at most ``alpha``; ``"none"`` holds every task to
-            ``alpha`` on its own.
+        multiplicity: ``"holm"`` (default) adjusts the p-values of every
+            compared ``(task, metric)`` pair as one family, so the chance
+            that an unchanged run blocks anywhere is at most the level that
+            family is given; ``"none"`` holds every test to that level on
+            its own.
         alpha: Significance level for both criteria.
         seed: Seed of the suite-level bootstrap and sign-flip test.
 
@@ -905,7 +933,8 @@ def evaluate_gate(
             )
             reasons.append(
                 "no checked task has enough trials to detect even a total failure "
-                f"({per_test_level:.4g} per test, {len(checked)} task(s) checked), so the "
+                f"({per_test_level:.4g} per test over {family_size} compared "
+                f"(task, metric) test(s) in {len(checked)} task(s)), so the "
                 "check could not have blocked" + advice
             )
     else:
@@ -962,5 +991,6 @@ def evaluate_gate(
         alpha=alpha,
         multiplicity=multiplicity,
         family_size=family_size,
+        suite_blocking=suite_blocking,
         suite=suite,
     )

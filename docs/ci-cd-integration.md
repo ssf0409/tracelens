@@ -220,6 +220,7 @@ The `gate` object in `results.json` (abridged):
   "alpha": 0.05,
   "multiplicity": "holm",
   "family_size": 2,
+  "suite_blocking": false,
   "checked": 2,
   "skipped_no_baseline": 0,
   "skipped_no_gradable": 0,
@@ -230,8 +231,9 @@ The `gate` object in `results.json` (abridged):
   "suite": [
     {"metric_name": "pass_rate", "tasks": 2, "baseline_mean": 0.95, "current_mean": 0.5,
      "delta": -0.45, "delta_percent": -47.4, "ci_lower": -0.9, "ci_upper": 0.0,
-     "p_value": 0.25, "severity": "severe", "is_regression": true,
-     "is_significant": false, "blocking": false}
+     "p_value": 0.25, "p_value_adjusted": 0.25, "severity": "severe",
+     "is_regression": true, "is_significant": false,
+     "blocking": false, "blocking_enabled": false}
   ],
   "tasks": [
     {
@@ -257,11 +259,14 @@ The `gate` object in `results.json` (abridged):
 Each regression carries its evidence: the `test` that produced `p_value`
 (one-sided, in the observed direction), the Holm-adjusted `p_value_adjusted`
 the decision used, both sample sizes (and `baseline_n_assumed` when the
-baseline recorded none), and for a drop that is not significant,
-`underpowered` with `trials_needed` (`trials_needed_on_both_sides` when the
-stored baseline is too small for any check to decide it). `suite` holds the
-suite-level criterion per metric; `alpha`, `multiplicity`, and `family_size`
-record the policy. The Markdown and HTML tables show the same evidence in an
+baseline stored fewer than two trials), and for a drop that is not
+significant, `underpowered` with `trials_needed`
+(`trials_needed_on_both_sides` when the stored baseline is too small for any
+check to decide it). `suite` holds the suite-level criterion per metric,
+each with its Holm-adjusted `p_value_adjusted` and a `blocking_enabled` that
+says whether it could block at all; `alpha`, `multiplicity`, `family_size`
+and `suite_blocking` record the policy, and `suite_blocking` is what says
+whether `alpha` was split between the two criteria. The Markdown and HTML tables show the same evidence in an
 **Evidence** column.
 
 To see *why* a blocked task regressed, read its trials rather than its

@@ -495,6 +495,38 @@ class TestRunLevelPolicy:
         assert alone.suite == []  # one task cannot form the statistic
         assert gate.status is GateStatus.PASSED and effect.blocking is False
 
+    def test_the_suite_criteria_share_one_budget(self, tmp_path):
+        # Two stored metrics means two suite criteria. Testing each at the
+        # full suite level would spend that half of the budget twice, which
+        # is the defect the per-task family was fixed for.
+        ids = [f"t{i:02d}" for i in range(20)]
+        manager = _manager(tmp_path, {i: {"pass_rate": 1.0, "mean_score": 1.0} for i in ids})
+        batch = _batch(*[t for task_id in ids for t in _runs(task_id, _passes(4, 5))])
+
+        gate = evaluate_gate(batch, manager, suite_blocking=True)
+        by_metric = {s.metric_name: s for s in gate.suite}
+        assert set(by_metric) == {"mean_score", "pass_rate"}
+        for effect in by_metric.values():
+            assert effect.p_value is not None and effect.p_value_adjusted is not None
+            assert effect.p_value_adjusted >= effect.p_value
+        # Holm over the two criteria: the smaller raw p-value pays 2x.
+        smallest = min(s.p_value for s in gate.suite if s.p_value is not None)
+        paid = next(s for s in gate.suite if s.p_value == smallest)
+        assert paid.p_value_adjusted == pytest.approx(min(1.0, 2 * smallest))
+
+    def test_the_budget_split_is_recorded_not_inferred(self, tmp_path):
+        # With fewer than two tasks per metric no suite entry exists, but
+        # the per-task family was still held to half the budget. Inferring
+        # the split from the (empty) suite list said alpha=0.05 for a
+        # decision actually made at 0.025.
+        manager = _manager_n(tmp_path, {"a": 1.0}, sample_size=5)
+        gate = evaluate_gate(_batch(*_runs("a", _passes(2, 5))), manager, suite_blocking=True)
+
+        assert gate.suite == [] and gate.suite_blocking is True
+        assert "split with the suite criterion" in gate.policy_text()
+        assert "0.025 for the per-task family" in gate.policy_text()
+        assert GateResult.from_dict(gate.to_dict()).policy_text() == gate.policy_text()
+
     def test_suite_level_criterion_ignores_one_task_among_many(self, tmp_path):
         ids = [f"t{i}" for i in range(10)]
         manager = _manager_n(tmp_path, dict.fromkeys(ids, 1.0), sample_size=5)
@@ -532,7 +564,8 @@ class TestRunLevelPolicy:
         assert all(task.detectable is False and task.trials_needed == 15 for task in gate.tasks)
         assert gate.reasons == [
             "no checked task has enough trials to detect even a total failure "
-            "(0.025 per test, 2 task(s) checked), so the check could not have blocked; "
+            "(0.025 per test over 2 compared (task, metric) test(s) in 2 task(s)), so "
+            "the check could not have blocked; "
             "run at least 15 trials per task and store baselines from at least as many"
         ]
         assert gate.summary_line().endswith("UNEVALUABLE")
@@ -604,7 +637,7 @@ class TestRunLevelPolicy:
         assert all(t.detectable is False and t.trials_needed is None for t in holm.tasks)
         assert holm.reasons[0].startswith(
             "no checked task has enough trials to detect even a total failure "
-            "(0.025 per test, 2 task(s) checked)"
+            "(0.025 per test over 2 compared (task, metric) test(s) in 2 task(s))"
         )
         uncorrected = evaluate_gate(batch, manager, multiplicity="none")
         assert uncorrected.status is GateStatus.PASSED

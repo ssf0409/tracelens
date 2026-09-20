@@ -169,7 +169,13 @@ The run is blocked when a live criterion rejects at or above
       0/1 data of that size could show. (Reading the family off the current
       values instead made the verdict discontinuous: a continuous score of
       five zeros took the exact test and one of five `1e-8`s took a t-test,
-      with opposite outcomes.) A proportion uses **Boschloo's exact
+      with opposite outcomes.) A declaration cannot supply evidence the
+      summary lacks: a mean that is not a whole count over `n_b` is compared
+      as a continuous metric whatever the baseline calls it, because the
+      exact test would otherwise round it to a count nobody measured.
+      Counting also needs current values that *are* counts, so a rate whose
+      check produced values off 0 and 1 falls back to the continuous test —
+      there the data contradicts the baseline, and no table can be built. A proportion uses **Boschloo's exact
       unconditional test** on the two counts, `round(baseline_value × n_b)`
       of `n_b` against `k_c` of `n_c`, with the two samples as the table's
       **columns**, which is the orientation SciPy's model defines. The test
@@ -178,10 +184,18 @@ The run is blocked when a live criterion rejects at or above
     - A continuous metric uses **Welch's** t-test from the summaries. A
       spread measured as zero on one side is not evidence that the two
       populations share a variance, so the pooled-variance test is not used
-      at all. When both sides are constant the p-value is the exact
-      permutation value `1 / C(n_b + n_c, n_c)`; a single current trial
-      against a measured baseline is a prediction-interval t on `n_b - 1`
-      degrees of freedom.
+      at all — and it is not a measurement of zero variance either, so that
+      side does not get a mean known exactly: the spread that *was*
+      informative stands for both. Treating the zero literally rejected 38 %
+      of unchanged runs with three flat baseline trials against twenty
+      scattered current ones, and 91 % against fifty; pooling instead fails
+      the other way, which is how a baseline recorded with spread 0 over 100
+      trials read `p = 6e-34` against three scattered values. When both
+      sides are constant the p-value is the exact permutation value
+      `1 / C(n_b + n_c, n_c)`, and when they are constant at the *same*
+      value there is no evidence of a difference at all (`p = 1`); a single
+      current trial against a measured baseline is a prediction-interval t
+      on `n_b - 1` degrees of freedom.
     - **No evidence is invented for the baseline.** Its recorded
       `sample_size` is used as recorded, and a baseline that stored fewer
       than two trials carries no measured spread at all
@@ -189,9 +203,12 @@ The run is blocked when a live criterion rejects at or above
       comparison that has to borrow the current sample's evidence to reach a
       verdict has no valid test (`insufficient_data`). Such a check is
       `undetectable`, which makes the gate unevaluable rather than passing
-      or blocking on evidence that was never collected. Store baselines from
-      real runs; a one-trial baseline needs seven check trials to decide
-      even a total failure, and fifteen once two tests share the budget.
+      or blocking on evidence that was never collected. It is not powerless
+      — one stored passing trial against seven straight failures is
+      `p = 0.049` on the honest counts, and that blocks — but it cannot
+      decide much else. Store baselines from real runs; a one-trial baseline
+      needs seven check trials to decide even a total failure, and fifteen
+      once two tests share the budget.
 - Multiplicity: the p-values are Holm-adjusted across **one family** — every
   compared `(task, metric)` pair, a pair with no finding counting as a test
   that did not reject (`--multiplicity holm`, the default) — so the
@@ -221,9 +238,11 @@ The run is blocked when a live criterion rejects at or above
 mean − baseline mean per task, the mean over tasks, and the task bootstrap
 interval and sign-flip p-value of the run-versus-run section below, one-sided
 in the regression direction (half the two-sided value; exact when both sides
-of every task have the same trial count, approximate otherwise). It sees a
-broad regression that no single task can show and does not react to one task
-among many.
+of every task have the same trial count, approximate otherwise). One
+criterion is formed per metric and they share the suite level through the
+same Holm adjustment the per-task family uses, so that half of the budget is
+spent once rather than once per stored metric. It sees a broad regression
+that no single task can show and does not react to one task among many.
 
 It is **reported but not blocking by default.** Sign-flipping is valid only
 when the per-task differences are independent under the null, and task
@@ -242,13 +261,16 @@ and then each criterion is held to `alpha/2`.
 when every checked task is `undetectable`, the gate is unevaluable and names
 the trials per task it would need. The suite criterion can rescue such a
 check only when it is allowed to block at all and enough tasks could move
-together (`2^-T <= alpha`, i.e. five tasks). When only some tasks are
-undetectable the gate decides on the others and warns.
+together: its sign-flip p-value is at best `2^-T`, which has to reach the
+level that criterion is given. Since suite blocking is what splits the
+budget, that level is `alpha/2` and six tasks are needed, not five. When
+only some tasks are undetectable the gate decides on the others and warns.
 
 **Error rates.** Exact enumeration over both binomial samples with the real
 detector (`scripts/gate_error_rates.py` prints the full tables; `T` is the
 size of the Holm family — the number of compared `(task, metric)` pairs —
-and the per-test level is `alpha / T`).
+and the per-test level is `alpha / T`). These are the whole run-level
+rates, because the suite criterion does not block by default.
 
 Probability that one unchanged task with true pass rate `p` blocks by chance:
 

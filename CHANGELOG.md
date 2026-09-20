@@ -35,17 +35,25 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   `sample_size` is used as recorded; a baseline that stored fewer than two
   trials carries no measured spread, and the current sample's spread is
   never borrowed to stand in for it. *Breaking:* a hand-written baseline
-  (the model defaults are `sample_size=1`, `std_deviation=0.0`) can no longer
-  block a run — it is reported as `undetectable` and the gate is unevaluable
-  with the trials it would need, instead of deciding on evidence that was
-  never collected. Store baselines from real runs: one stored trial needs
-  seven check trials to decide even a total failure, and fifteen once two
-  tests share the budget. (#111)
-- **A metric is a 0/1 proportion because its baseline says so**, not because
-  one sample of current values happened to land on 0 and 1. `MetricBaseline`
-  gains `is_rate` (`None`, the default and what every existing baseline
-  carries, means "infer from the stored summary"); `TaskBaseline.add_metric`
-  and `tracelens init`'s scaffold pass it. (#111)
+  (the model defaults are `sample_size=1`, `std_deviation=0.0`) can almost
+  never block a run now — most drops against it are reported as
+  `undetectable` and the gate is unevaluable with the trials it would need,
+  instead of deciding on evidence that was never collected. It is not
+  powerless: one stored passing trial against seven straight failures is
+  p=0.049 on the honest counts, and that blocks. Store baselines from real
+  runs: one stored trial needs seven check trials to decide even a total
+  failure, and fifteen once two tests share the budget. (#111)
+- **A metric belongs to a family because its baseline says so**, not
+  because one sample of current values happened to land on 0 and 1.
+  `MetricBaseline` gains `is_rate` (`None`, the default and what every
+  existing baseline carries, means "infer from the stored summary");
+  `TaskBaseline.add_metric`, `TaskBaseline.promote`,
+  `BaselineManager.update_baseline` and both `create_*_baseline` helpers
+  carry or accept it, and `tracelens init`'s scaffold declares it. A
+  declaration cannot supply evidence the summary lacks: a mean that is not a
+  whole count over its `sample_size` is still compared as a continuous
+  metric, and a rate whose check produced values off 0 and 1 falls back to
+  the continuous test. (#111)
 - The Markdown and HTML gate tables gain an **Evidence** column (the test's
   p-value, adjusted p-value, and the trials that would decide an
   underpowered drop), the Baseline Gate section states the significance
@@ -73,7 +81,9 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   over how many tasks shared the 5 % false-alarm budget. Now a proportion
   gets Boschloo's exact test on the two counts (baseline `sample_size`
   included), continuous metrics get Welch's or exact-permutation tests from
-  the stored summary, p-values are one-sided in the observed direction and
+  the stored summary (a spread measured as zero on one side is not a
+  measurement of zero variance, so the informative spread stands for both),
+  p-values are one-sided in the observed direction and
   never fabricated, and every change above the reporting floor is reported
   with its evidence: `test`, `p_value`, `p_value_adjusted`, the two sample
   sizes, `underpowered`, `trials_needed`, and `undetectable`. A drop that is

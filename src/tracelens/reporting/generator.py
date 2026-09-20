@@ -421,6 +421,9 @@ class ReportGenerator:
             and (
                 report.regression_report.regressions
                 or report.regression_report.improvements
+                # A report built from a summary alone still carries a
+                # verdict that ``should_block_ci`` acts on.
+                or report.regression_report.has_regression
             )
         ):
             lines.append(
@@ -493,7 +496,14 @@ class ReportGenerator:
                 if suite.is_regression:
                     lines.append(f"[tracelens] suite-level {suite.describe()}")
             lines.append(report.gate.summary_line())
-        elif report.regression_report and report.regression_report.regressions:
+        elif report.regression_report and (
+            report.regression_report.regressions
+            or report.regression_report.has_regression
+        ):
+            # Deliberately narrower than the Markdown and HTML sections: the
+            # CI summary is the gating signal, so it speaks up for drops
+            # (confirmed or not) and stays quiet for a run that only
+            # improved.
             # Prefer the noise-aware "blocking" count if specs were provided.
             n_blocking = len(report.regression_report.blocking_regressions)
             n_total = len(report.regression_report.regressions)
@@ -593,15 +603,19 @@ class ReportGenerator:
             and (
                 report.regression_report.regressions
                 or report.regression_report.improvements
+                or report.regression_report.has_regression
             )
         ):
             confirmed = report.regression_report.has_regression
             heading = "Regression Alert" if confirmed else "Baseline Comparison"
-            severity = (
-                report.regression_report.overall_severity.value.upper()
-                if confirmed
-                else "NOT SIGNIFICANT"
-            )
+            if confirmed:
+                severity = report.regression_report.overall_severity.value.upper()
+            elif report.regression_report.regressions:
+                severity = "NOT SIGNIFICANT"
+            else:
+                # Nothing dropped at all: the badge must not call a section
+                # of improvements "not significant".
+                severity = "IMPROVEMENTS"
             sev_color = {"MINOR": "#eab308", "MODERATE": "#f97316", "SEVERE": "#ef4444"}.get(
                 severity, "#6b7280"
             )
