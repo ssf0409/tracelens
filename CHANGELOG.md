@@ -86,7 +86,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   raw floor of `2^-T` against the level, ignoring the Holm adjustment the
   criteria share. Six tasks storing two metrics each, every one collapsing
   from 4/4 to 0/4, reported "no significant regression" and exit 0; it is
-  now unevaluable (exit 2) and says what it would need. (#111)
+  now unevaluable (exit 2) and says what it would need. The documented user
+  journey covers the exit code an operator's CI branches on. (#111)
 - **An observed finding survives being written to disk.** The renderers
   were widened to show drops no test could confirm, but `ReportData.to_dict`
   emitted only counts and `from_dict` discarded the regression block

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -399,3 +400,103 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     calib_fail_data = load(project / "eval/results/calibration-fail.json")
     assert calib_fail_data["is_calibrated"] is False
     assert calib_fail_data["sample_count"] == len(disagreeing_worksheet)
+
+
+BOTH_METRICS = """
+import json
+from pathlib import Path
+
+from tracelens import BaselineManager, TaskBaseline
+
+results = json.loads(Path("eval/results/results.json").read_text())
+manager = BaselineManager("eval/baselines.json")
+for task in results["task_summaries"]:
+    graded = task.get("gradable_trials") or task["num_trials"]
+    baseline = TaskBaseline(task_id=task["task_id"], task_hash=task.get("task_hash"))
+    baseline.add_metric(
+        "pass_rate", task["pass_rate"], std=0.0, sample_size=graded, is_rate=True
+    )
+    baseline.add_metric("mean_score", task["mean_score"], std=0.0, sample_size=graded)
+    manager.set_baseline(baseline)
+manager.save()
+"""
+
+
+def test_a_total_collapse_never_exits_zero(tmp_path: Path) -> None:
+    """``--suite-blocking`` must not turn an undecidable check into a pass.
+
+    The whole point of the gate is that CI acts on its exit code, so the one
+    outcome it may never produce is a silent 0 on a run where every task
+    failed. Switching suite blocking on splits the significance level, which
+    can leave no test able to reject at all -- and the check that decides
+    whether the suite criterion could still rescue the run compared its raw
+    ``2^-T`` floor against that level while ignoring the Holm adjustment the
+    criteria share. Six tasks storing two metrics each, every one collapsing
+    from 4/4 to 0/4, exited 0 and printed "no significant regression".
+
+    A unit test pins the arithmetic; this pins the exit code an operator's CI
+    actually branches on, through the installed console script.
+    """
+    project = tmp_path / "collapse-project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "collapse-project"\nversion = "0.1.0"\n'
+    )
+    config = project / "tracelens.yaml"
+    adapter = project / "eval/adapter.py"
+    results = project / "eval/results/results.json"
+
+    tracelens("init", ".", cwd=project, expect=0)
+
+    # Six tasks: enough for a suite criterion to form at all, and the size at
+    # which the rescue bound differs between one stored metric and two.
+    (project / "eval/tasks.json").write_text(json.dumps({"tasks": [
+        {
+            "task_id": f"t{i}",
+            "name": f"task {i}",
+            "input_data": {"question": f"q{i}", "answer": f"a{i}"},
+            "metadata": {"expected_answer": f"a{i}"},
+            "tags": ["collapse"],
+        }
+        for i in range(6)
+    ]}, indent=2))
+    config.write_text(re.sub(r"num_runs:\s*\d+", "num_runs: 4", config.read_text()))
+
+    # A clean run, then baselines from it -- the README's snippet, storing the
+    # second metric the gate also compares.
+    run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
+    assert "6 tasks, 24 trials, pass_rate=100.0%" in run.stdout
+    stored = subprocess.run(
+        [sys.executable, "-"], input=BOTH_METRICS,
+        cwd=project, capture_output=True, text=True, timeout=120,
+    )
+    assert stored.returncode == 0, stored.stderr
+    baselines = load(project / "eval/baselines.json")
+    assert len(baselines) == 6
+    assert all(len(entry["metrics"]) == 2 for entry in baselines.values())
+
+    enable_gate(config)
+
+    # Now the agent fails every trial of every task: the largest regression
+    # that can exist.
+    source = adapter.read_text()
+    assert TRUSTED in source
+    adapter.write_text(source.replace(TRUSTED, 'return {"answer": "wrong"}'))
+
+    # The default policy spends the whole budget on the per-task family, which
+    # can decide it: the collapse blocks.
+    blocked = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=1)
+    assert "6 blocking regression(s)" in blocked.stdout
+    assert load(results)["gate"]["status"] == "blocked"
+
+    # Splitting the budget leaves no test able to reject. The honest answer is
+    # "could not evaluate" (exit 2), never "no significant regression" (0).
+    unevaluable = tracelens(
+        "run", "--config", "tracelens.yaml", "--suite-blocking", cwd=project, expect=2
+    )
+    assert "UNEVALUABLE" in unevaluable.stdout
+    gate = load(results)["gate"]
+    assert gate["status"] == "unevaluable" and gate["exit_code"] == 2
+    # ...and it says what it would take, rather than only recording it in JSON.
+    assert "could not have blocked" in unevaluable.stderr
+    assert "run at least" in unevaluable.stderr
