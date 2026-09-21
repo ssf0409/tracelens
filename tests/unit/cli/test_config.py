@@ -46,6 +46,8 @@ run:
     fail_on_regression: severe
     require_baselines: true
     noise_band: 0.05
+    multiplicity: none
+    suite_blocking: true
 """
 
 MINIMAL = "run:\n  eval_set: t.json\n  adapter: a.A\n  graders: [g.G]\n"
@@ -97,6 +99,8 @@ class TestLoadRunConfig:
             "fail_on_regression": "severe",
             "require_baselines": True,
             "noise_band": 0.05,
+            "multiplicity": "none",
+            "suite_blocking": True,
         }
         # Every config value lands on a real run setting, and the file covers
         # every setting the CLI has (import_root is config-only).
@@ -334,3 +338,22 @@ class TestRunParser:
         assert "(default: 300)" in (actions["timeout"].help or "")
         for action in run_parser._actions:
             assert "%(default)" not in (action.help or ""), action.dest
+
+
+class TestMultiplicity:
+    def test_flag_and_config_key(self, tmp_path: Path) -> None:
+        assert _parse("--multiplicity", "none").multiplicity == "none"
+        config = _write(tmp_path, MINIMAL + "  baseline:\n    multiplicity: none\n")
+        resolved, _ = resolve_run_settings(_parse("--config", str(config)))
+        assert resolved.multiplicity == "none"
+        overridden, _ = resolve_run_settings(
+            _parse("--config", str(config), "--multiplicity", "holm")
+        )
+        assert overridden.multiplicity == "holm"
+        default, _ = resolve_run_settings(_parse("--eval-set", "t.json", "--adapter", "a.A", "--graders", "g.G"))
+        assert default.multiplicity == "holm"
+
+    def test_invalid_value_is_a_config_error(self, tmp_path: Path) -> None:
+        config = _write(tmp_path, MINIMAL + "  baseline:\n    multiplicity: bonferroni\n")
+        with pytest.raises(ConfigError, match="run.baseline.multiplicity must be one of holm, none"):
+            load_run_config(config)

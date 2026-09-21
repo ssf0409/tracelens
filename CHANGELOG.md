@@ -8,6 +8,158 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Changed
+
+- **One run, one error budget.** `evaluate_gate` Holm-adjusts the p-values of
+  every compared `(task, metric)` pair as a single family by default
+  (`--multiplicity holm`; `run.baseline.multiplicity` in `tracelens.yaml`),
+  so an unchanged suite blocks by chance at most 5 % of the time however many
+  tasks are flaky and however many metrics each stores; `--multiplicity none`
+  holds every test to 5 % on its own. Adjusting each metric separately, as
+  the first cut of this work did, gave a suite storing both `pass_rate` and
+  `mean_score` two independent chances to block. The suite-level statistic
+  (the mean of the per-task differences with the contract's task bootstrap
+  and sign-flip test) is **reported but no longer blocks by default**: its
+  p-value assumes the per-task differences are independent, and an unchanged
+  suite of 40 deterministic and 10 correlated flaky tasks blocked 11.6 % of
+  the time in simulation. `--suite-blocking`
+  (`run.baseline.suite_blocking`) opts in and splits the 5 % budget evenly
+  between the two criteria -- but only when a suite criterion can actually
+  form, so a run that could never have one keeps the whole budget for its
+  per-task tests, and the suite criteria share their half through the same
+  Holm adjustment rather than spending it once per stored metric.
+  A check none of whose tasks could have blocked at
+  their sample sizes is `UNEVALUABLE` (exit 2) with the trials per task it
+  would need, and tasks that cannot block on their own are named in a
+  warning. The gate JSON records `alpha`, `multiplicity`, `family_size` and
+  `suite` (each suite entry now carries `blocking_enabled`); each task records
+  `detectable` and `trials_needed`. Blocking requires a significant test as
+  well as the severity threshold. (#111)
+- **The baseline is taken at its word, and no further.** Its recorded
+  `sample_size` is used as recorded; a baseline that stored fewer than two
+  trials carries no measured spread, and the current sample's spread is
+  never borrowed to stand in for it. *Breaking:* a hand-written baseline
+  (the model defaults are `sample_size=1`, `std_deviation=0.0`) can almost
+  never block a run now — most drops against it are reported as
+  `undetectable` and the gate is unevaluable with the trials it would need,
+  instead of deciding on evidence that was never collected. It is not
+  powerless: one stored passing trial against seven straight failures is
+  p=0.049 on the honest counts, and that blocks. Store baselines from real
+  runs: one stored trial needs seven check trials to decide even a total
+  failure, and fifteen once two tests share the budget. (#111)
+- **A metric belongs to a family because its baseline says so**, not
+  because one sample of current values happened to land on 0 and 1.
+  `MetricBaseline` gains `is_rate` (`None`, the default and what every
+  existing baseline carries, means "infer from the stored summary");
+  `TaskBaseline.add_metric`, `TaskBaseline.promote`,
+  `BaselineManager.update_baseline` and both `create_*_baseline` helpers
+  carry or accept it, and `tracelens init`'s scaffold declares it. A
+  declaration cannot supply evidence the summary lacks: a mean that is not a
+  whole count over its `sample_size` is still compared as a continuous
+  metric, and a rate whose check produced values off 0 and 1 falls back to
+  the continuous test. (#111)
+- The Markdown and HTML gate tables gain an **Evidence** column (the test's
+  p-value, adjusted p-value, and the trials that would decide an
+  underpowered drop), the Baseline Gate section states the significance
+  policy, and the CI summary lists observed drops that did not block. (#111)
+- `tracelens init` scaffolds `num_runs: 5` instead of 1 so the generated
+  gate can decide anything, and the generated README says what five runs can
+  show. (#111)
+
+### Fixed
+
+- **A spread of zero is recognised whatever value the sample repeats.**
+  `numpy` returns a standard deviation of exactly `0.0` for a constant
+  sample only when the repeated value is a dyadic rational: five `0.5`s
+  give `0.0`, three `0.7`s give `1.36e-16`. The guard that keeps a flat
+  side from being credited with no uncertainty at all tested `== 0.0`, so
+  it fired for some stored numbers and not others and Welch ran with a
+  spread of ~1e-16 instead. A drop from 0.70 to 0.60 over three flat trials
+  read p=0.119 and passed at one value and p=0.045 and blocked at another,
+  which in the field looks like flakiness. The comparison now treats
+  anything at or below `1e-12` as no variation, which also routes the
+  corrupt records -- a negative or `NaN` spread -- away from a test that
+  would divide by them. (#111)
+- **`--suite-blocking` no longer cancels an unevaluable verdict on a bound
+  the suite criterion cannot meet.** The check that decides whether the
+  suite criterion could rescue an otherwise undecidable run compared its
+  raw floor of `2^-T` against the level, ignoring the Holm adjustment the
+  criteria share. Six tasks storing two metrics each, every one collapsing
+  from 4/4 to 0/4, reported "no significant regression" and exit 0; it is
+  now unevaluable (exit 2) and says what it would need. The documented user
+  journey covers the exit code an operator's CI branches on. (#111)
+- **An observed finding survives being written to disk.** The renderers
+  were widened to show drops no test could confirm, but `ReportData.to_dict`
+  emitted only counts and `from_dict` discarded the regression block
+  outright, so a finding attached by a library caller vanished the moment
+  the run was saved: `tracelens report --results results.json` re-rendered
+  it as a clean run in Markdown, HTML, JSON and the CI summary alike. The
+  findings and improvements are serialized with their evidence and read
+  back; artifacts written before this still load with what they recorded.
+  A report carrying a summary and no findings also renders its summary in
+  HTML rather than a heading and a badge over an empty section. (#111)
+- **The rerun advice no longer overstates what a thin baseline needs.**
+  When the advice is to re-store the baseline as well, both sides grow, so
+  the current size is not a floor on the answer -- the scan started there
+  anyway and could only ever return more than it. A one-trial baseline
+  against 80 of 100 was told to rerun about 101 trials per side where 18
+  settles it. (#111)
+- **A finding no longer claims a power analysis nobody ran.** "More than
+  200 trials would be needed" was printed whenever `trials_needed` was
+  unset, which is also the state of every finding written before these
+  fields existed and of every run with `power_notes=False`. It is now
+  stated only when a scan ran and came back empty-handed
+  (`MetricRegression.trials_needed_exceeds_cap`). (#111)
+- **The baseline gate decides on evidence that follows the statistical
+  contract.** The per-task test behind `tracelens run --baseline-check` had
+  four defects: its fallback for a zero-variance baseline divided the delta
+  by the sample SD instead of the standard error, so a drop from 1.0 to 0.4
+  read p ≈ 0.22 over 5, 10, or 100 trials alike; a drop that was not
+  significant vanished from stdout, JSON, Markdown, and HTML, so an
+  underpowered check looked like a clean pass; the baseline's `sample_size`
+  was never used; and a run blocked whenever any task did, with no control
+  over how many tasks shared the 5 % false-alarm budget. Now a proportion
+  gets Boschloo's exact test on the two counts (baseline `sample_size`
+  included), continuous metrics get Welch's or exact-permutation tests from
+  the stored summary (a spread measured as zero on one side is not a
+  measurement of zero variance, so the informative spread stands for both),
+  p-values are one-sided in the observed direction and
+  never fabricated, and every change above the reporting floor is reported
+  with its evidence: `test`, `p_value`, `p_value_adjusted`, the two sample
+  sizes, `underpowered`, `trials_needed`, and `undetectable`. A drop that is
+  not significant is printed (`observed drop, not blocking`) with the trials
+  that would decide it, and never blocks. The contract page states the
+  decision procedure and its exact false-alarm and power tables
+  (`scripts/gate_error_rates.py` regenerates them). (#111)
+- **Boschloo's contingency table was transposed.** SciPy's model puts one
+  binomial sample in each column and the implementation passed them as rows,
+  which fixes the wrong margin and answers a different question. At unequal
+  sample sizes the two orientations disagree enough to change a verdict: a
+  baseline of 7 passes in 7 against 2 of 4 now read 0.0420 and blocked where
+  the documented orientation gives 0.0538 and does not. Every published 0/1
+  p-value and every error-rate and power table moves with the fix. (#111)
+- **A zero measured spread no longer switches to a pooled-variance
+  t-test.** One sample showing no variance is not evidence that the two
+  populations share one: a baseline recorded as mean 0.5 with spread 0 over
+  100 trials, checked against three scattered values, read p ≈ 6e-34 and
+  blocked, where Welch on the same numbers gives 0.0608 and does not. Welch
+  is now used throughout, and a single current trial against a measured
+  baseline is a prediction-interval t rather than a t-test against a
+  fabricated spread of zero. (#111)
+- **An underpowered drop no longer disappears through the library API.**
+  The Markdown, HTML and CI-summary renderers gated the whole section on
+  "a significant drop was observed", so a caller attaching a
+  `RegressionReport` of drops that no test could confirm saw nothing at all
+  — the failure this issue is about, surviving on the path the CLI does not
+  take. Every observed finding is now rendered with its evidence, under a
+  heading that says whether it was confirmed. (#111)
+- **Report rows read off the recorded decision.** A gate recorded as blocked
+  whose findings carry no evidence (an artifact written before the evidence
+  fields existed) no longer renders rows labelled "not blocking" under a
+  `BLOCKED` header; the note says what the run recorded. `tracelens run`
+  also prints the recorded reasons on an unevaluable gate, so the trials it
+  needs reach CLI-only users instead of only the JSON. (#111)
+
 ## [0.6.1] - 2026-09-19
 
 ### Fixed

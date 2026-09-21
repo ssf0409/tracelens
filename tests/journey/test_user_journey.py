@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -102,7 +103,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
 
     # 2. The one documented command: outputs land where the config says.
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
-    assert run.stdout.startswith("TraceLens: 2 tasks, 2 trials, pass_rate=100.0%")
+    assert run.stdout.startswith("TraceLens: 2 tasks, 10 trials, pass_rate=100.0%")
     assert f"[tracelens] wrote results: {results}" in run.stderr
     assert trials.is_file() and report.is_file() and (project / "eval/results/report.html").is_file()
     data = load(results)
@@ -164,7 +165,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
         "inspect", "eval/results/trials.json", "--failures", "--eval-set", "eval/tasks.json",
         "--html", "eval/results/failures.html", cwd=project, expect=0,
     )
-    assert "passed 0, agent failure 2, infra error 0, grader error 0, not run 0" in inspect.stdout
+    assert "passed 0, agent failure 10, infra error 0, grader error 0, not run 0" in inspect.stdout
     assert "starter-capital run 0  agent failure  status=completed" in inspect.stdout
     assert 'actual:   {"answer": "wrong"}' in inspect.stdout
     assert "task:     Answer a simple geography question" in inspect.stdout
@@ -181,6 +182,54 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     decision = load(project / "eval/results/compare.json")
     assert decision["verdict"] == "regression" and decision["delta"] == -1.0
     assert decision["alignment"]["compared"] == 2 and decision["alignment"]["aligned_by"] == "content"
+
+    # 7b. A partial regression (1 of 5 runs passes) is blocked on its evidence:
+    # the exact test on 5/5 -> 1/5 gives p=0.0107, under the level shared by
+    # the two checked tasks.
+    partial = project / "partial.log"
+    adapter.write_text(source.replace(
+        TRUSTED,
+        "from pathlib import Path\n"
+        '    seen = Path("partial.log")\n'
+        '    calls = seen.read_text().splitlines() if seen.exists() else []\n'
+        '    seen.write_text("\\n".join([*calls, input_data["question"]]) + "\\n")\n'
+        '    if calls.count(input_data["question"]) >= PASSING_RUNS:\n'
+        '        return {"answer": "wrong"}\n'
+        f"    {TRUSTED}",
+    ).replace("PASSING_RUNS", "1"))
+    run = tracelens(
+        "run", "--config", "tracelens.yaml", "--max-concurrency", "1", cwd=project, expect=1,
+    )
+    assert "REGRESSION DETECTED [SEVERE]" in run.stdout
+    assert "pass_rate: 1.0000 -> 0.2000 (-80.0%) [p=0.0107 (adjusted 0.0215), significant]" in run.stdout
+    gate = load(results)["gate"]
+    assert gate["status"] == "blocked" and gate["blocking_regressions"] == 2
+    assert gate["multiplicity"] == "holm" and gate["family_size"] == 2
+    regression = next(t for t in gate["tasks"] if t["task_id"] == "starter-math")["regressions"][0]
+    assert regression["test"] == "boschloo_exact" and regression["is_significant"]
+    assert regression["baseline_n"] == 5 and regression["current_n"] == 5
+    assert "| starter-math | pass_rate | 1.0000 | 0.2000 | -80.0% | severe | p=0.0107" in report.read_text()
+    partial.unlink()
+
+    # 7c. A smaller drop (3 of 5 runs pass) is reported with the trials it
+    # would take to decide it, and does not block.
+    adapter.write_text(adapter.read_text().replace(">= 1:", ">= 3:"))
+    run = tracelens(
+        "run", "--config", "tracelens.yaml", "--max-concurrency", "1", cwd=project, expect=0,
+    )
+    assert "REGRESSION DETECTED" not in run.stdout
+    assert (
+        "[tracelens] observed drop, not blocking: starter-math pass_rate 1.0000 -> 0.6000 "
+        "(-40.0%), p=0.0937 (adjusted 0.1874), not significant; about"
+    ) in run.stdout
+    assert "trials on each side would decide it" in run.stdout
+    assert "2 observed drop(s) not significant" in run.stdout  # 2 tasks x 1 stored metric
+    gate = load(results)["gate"]
+    assert gate["status"] == "passed" and gate["blocking_regressions"] == 0
+    regression = next(t for t in gate["tasks"] if t["task_id"] == "starter-math")["regressions"][0]
+    assert regression["underpowered"] is True and regression["trials_needed_on_both_sides"] is True
+    assert "not blocking: not significant" in report.read_text()
+    partial.unlink()
 
     # 8. Fix it and rerun only the affected task; the gate checks just that task.
     adapter.write_text(source)
@@ -220,9 +269,9 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     ))
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=2)
     assert load(results)["gate"]["status"] == "unevaluable"
-    assert load(results)["grader_error_count"] == 2
+    assert load(results)["grader_error_count"] == 10
     inspect = tracelens("inspect", "eval/results/trials.json", "--kind", "grader", cwd=project, expect=0)
-    assert "grader error 2" in inspect.stdout and "starter CRASHED score=0.00" in inspect.stdout
+    assert "grader error 10" in inspect.stdout and "starter CRASHED score=0.00" in inspect.stdout
     assert "rubric missing" in inspect.stdout
     grader.write_text(grader_source)
 
@@ -233,7 +282,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert "tasks.json" in run.stderr and run.stdout == ""
     tasks.write_text(task_source)
     bad_config = project / "bad.yaml"
-    bad_config.write_text(config.read_text().replace("  num_runs: 1\n", "  num_run: 1\n"))
+    bad_config.write_text(config.read_text().replace("  num_runs: 5\n", "  num_run: 5\n"))
     run = tracelens("run", "--config", "bad.yaml", cwd=project, expect=2)
     assert "unknown key(s) under run: num_run" in run.stderr and run.stdout == ""
 
@@ -351,3 +400,103 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     calib_fail_data = load(project / "eval/results/calibration-fail.json")
     assert calib_fail_data["is_calibrated"] is False
     assert calib_fail_data["sample_count"] == len(disagreeing_worksheet)
+
+
+BOTH_METRICS = """
+import json
+from pathlib import Path
+
+from tracelens import BaselineManager, TaskBaseline
+
+results = json.loads(Path("eval/results/results.json").read_text())
+manager = BaselineManager("eval/baselines.json")
+for task in results["task_summaries"]:
+    graded = task.get("gradable_trials") or task["num_trials"]
+    baseline = TaskBaseline(task_id=task["task_id"], task_hash=task.get("task_hash"))
+    baseline.add_metric(
+        "pass_rate", task["pass_rate"], std=0.0, sample_size=graded, is_rate=True
+    )
+    baseline.add_metric("mean_score", task["mean_score"], std=0.0, sample_size=graded)
+    manager.set_baseline(baseline)
+manager.save()
+"""
+
+
+def test_a_total_collapse_never_exits_zero(tmp_path: Path) -> None:
+    """``--suite-blocking`` must not turn an undecidable check into a pass.
+
+    The whole point of the gate is that CI acts on its exit code, so the one
+    outcome it may never produce is a silent 0 on a run where every task
+    failed. Switching suite blocking on splits the significance level, which
+    can leave no test able to reject at all -- and the check that decides
+    whether the suite criterion could still rescue the run compared its raw
+    ``2^-T`` floor against that level while ignoring the Holm adjustment the
+    criteria share. Six tasks storing two metrics each, every one collapsing
+    from 4/4 to 0/4, exited 0 and printed "no significant regression".
+
+    A unit test pins the arithmetic; this pins the exit code an operator's CI
+    actually branches on, through the installed console script.
+    """
+    project = tmp_path / "collapse-project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "collapse-project"\nversion = "0.1.0"\n'
+    )
+    config = project / "tracelens.yaml"
+    adapter = project / "eval/adapter.py"
+    results = project / "eval/results/results.json"
+
+    tracelens("init", ".", cwd=project, expect=0)
+
+    # Six tasks: enough for a suite criterion to form at all, and the size at
+    # which the rescue bound differs between one stored metric and two.
+    (project / "eval/tasks.json").write_text(json.dumps({"tasks": [
+        {
+            "task_id": f"t{i}",
+            "name": f"task {i}",
+            "input_data": {"question": f"q{i}", "answer": f"a{i}"},
+            "metadata": {"expected_answer": f"a{i}"},
+            "tags": ["collapse"],
+        }
+        for i in range(6)
+    ]}, indent=2))
+    config.write_text(re.sub(r"num_runs:\s*\d+", "num_runs: 4", config.read_text()))
+
+    # A clean run, then baselines from it -- the README's snippet, storing the
+    # second metric the gate also compares.
+    run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
+    assert "6 tasks, 24 trials, pass_rate=100.0%" in run.stdout
+    stored = subprocess.run(
+        [sys.executable, "-"], input=BOTH_METRICS,
+        cwd=project, capture_output=True, text=True, timeout=120,
+    )
+    assert stored.returncode == 0, stored.stderr
+    baselines = load(project / "eval/baselines.json")
+    assert len(baselines) == 6
+    assert all(len(entry["metrics"]) == 2 for entry in baselines.values())
+
+    enable_gate(config)
+
+    # Now the agent fails every trial of every task: the largest regression
+    # that can exist.
+    source = adapter.read_text()
+    assert TRUSTED in source
+    adapter.write_text(source.replace(TRUSTED, 'return {"answer": "wrong"}'))
+
+    # The default policy spends the whole budget on the per-task family, which
+    # can decide it: the collapse blocks.
+    blocked = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=1)
+    assert "6 blocking regression(s)" in blocked.stdout
+    assert load(results)["gate"]["status"] == "blocked"
+
+    # Splitting the budget leaves no test able to reject. The honest answer is
+    # "could not evaluate" (exit 2), never "no significant regression" (0).
+    unevaluable = tracelens(
+        "run", "--config", "tracelens.yaml", "--suite-blocking", cwd=project, expect=2
+    )
+    assert "UNEVALUABLE" in unevaluable.stdout
+    gate = load(results)["gate"]
+    assert gate["status"] == "unevaluable" and gate["exit_code"] == 2
+    # ...and it says what it would take, rather than only recording it in JSON.
+    assert "could not have blocked" in unevaluable.stderr
+    assert "run at least" in unevaluable.stderr

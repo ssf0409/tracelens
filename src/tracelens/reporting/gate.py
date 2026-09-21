@@ -14,10 +14,30 @@ Statuses:
 - ``passed`` -- at least one task was compared and nothing blocked (exit 0).
 - ``blocked`` -- a regression at or above the threshold, or
   ``--require-baselines`` with a task that has no baseline (exit 1).
-- ``unevaluable`` -- no task could be compared, or a baseline-backed task
-  had no gradable trials or no comparable metric. Missing evidence never
-  authorizes a passing gate (exit 2), and it takes precedence over
-  ``blocked``.
+- ``unevaluable`` -- no task could be compared, a baseline-backed task had
+  no gradable trials or no comparable metric, or no test in the run could
+  have rejected at these sample sizes. Missing evidence never authorizes a
+  passing gate (exit 2), and it takes precedence over ``blocked``.
+
+The decision procedure (``docs/statistical-contract.md``, "Baseline
+regression detection") spends one run-level error budget ``alpha``:
+
+1. **Per task.** :class:`~tracelens.baselines.comparison.RegressionDetector`
+   tests every metric, and the p-values are Holm-adjusted across **one
+   family**: every (task, metric) pair the run compared
+   (``multiplicity="holm"``), so the chance of any false block among them is
+   at most the level that family is given. A task blocks when a significant
+   regression reaches the severity threshold.
+2. **Suite.** The mean of the per-task differences (current minus baseline
+   mean, one per checked task) with the contract's task bootstrap and
+   sign-flip test. It catches a broad regression that no single task can
+   show. It is **reported but not blocking by default**: sign-flipping
+   assumes the per-task differences are independent, and correlated task
+   outcomes (one shared infra wobble, one shared sampling seed) break that
+   assumption badly -- an unchanged suite of 40 deterministic and 10
+   perfectly correlated flaky tasks blocked 11.6 % of the time in
+   simulation. ``suite_blocking=True`` opts in, and then the budget is split
+   ``alpha/2`` to each criterion so the run-level total stays ``alpha``.
 
 Trial validity follows ``docs/statistical-contract.md``: only gradable
 trials (``Trial.is_gradable``) enter a comparison; harness failures are
@@ -26,22 +46,28 @@ counted as excluded.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from tracelens.baselines.comparison import (
     DEFAULT_NOISE_BAND_ABSOLUTE,
+    DEFAULT_SIGNIFICANCE_LEVEL,
     MetricRegression,
     RegressionDetector,
     RegressionReport,
     RegressionSeverity,
+    holm_adjusted,
+    relative_change,
+    severity_at_least,
+    severity_for,
 )
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.provenance import short_hash
 from tracelens.core.trial import Trial, TrialBatch
+from tracelens.statistics.run_comparison import paired_task_effect
 
 
 class GateStatus(StrEnum):
@@ -73,15 +99,22 @@ EXIT_CODES: dict[GateStatus, int] = {
 # The task-level metrics the CLI compares against stored baselines.
 CLI_METRICS = ("pass_rate", "mean_score")
 
+# Multiplicity control across the checked tasks.
+MULTIPLICITY_CHOICES = ("holm", "none")
+
+# Suite-level bootstrap settings (the contract's run-versus-run defaults).
+_SUITE_CONFIDENCE = 0.95
+_SUITE_BOOTSTRAP = 10000
+
 
 def per_trial_results(trials: Sequence[Trial]) -> list[dict[str, float]]:
     """One metric sample per gradable trial for regression detection.
 
-    ``RegressionDetector.compare()`` runs a t-test over the sample
-    distribution, so it needs per-trial values; a pre-aggregated single dict
-    would collapse it to a one-sample z-test. The sample mean of the
-    per-trial ``pass_rate`` indicators equals the task's pass rate, so
-    baseline metric names stay unchanged.
+    ``RegressionDetector.compare()`` tests the sample distribution, so it
+    needs per-trial values; a pre-aggregated single dict would collapse it
+    to a single observation. The sample mean of the per-trial ``pass_rate``
+    indicators equals the task's pass rate, so baseline metric names stay
+    unchanged.
 
     Only gradable trials contribute (statistical contract): harness
     failures and trials that never ran are excluded and surfaced separately.
@@ -146,6 +179,8 @@ class TaskGateResult:
     compared_trials: int = 0
     excluded_trials: int = 0
     available_metrics: list[str] = field(default_factory=list)
+    # The metrics the baseline and the run share: what was actually tested.
+    compared_metrics: list[str] = field(default_factory=list)
     blocking: bool = False
     has_regression: bool = False
     overall_severity: RegressionSeverity = RegressionSeverity.NONE
@@ -153,6 +188,11 @@ class TaskGateResult:
     infra_config_diff: dict[str, tuple[Any, Any]] = field(default_factory=dict)
     regressions: list[MetricRegression] = field(default_factory=list)
     improvements: list[MetricRegression] = field(default_factory=list)
+    # Whether a total failure of this task could have blocked at these
+    # sample sizes, and if not, the trials per task that would let it.
+    # ``None`` for tasks that were not checked.
+    detectable: bool | None = None
+    trials_needed: int | None = None
 
     def regression_report(self) -> RegressionReport:
         """Rebuild the detector's report so all text comes from one formatter."""
@@ -165,6 +205,11 @@ class TaskGateResult:
             infra_config_diff=dict(self.infra_config_diff),
         )
 
+    @property
+    def underpowered_regressions(self) -> list[MetricRegression]:
+        """Observed drops the evidence could not confirm."""
+        return [r for r in self.regressions if not r.is_significant]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
@@ -173,6 +218,7 @@ class TaskGateResult:
             "compared_trials": self.compared_trials,
             "excluded_trials": self.excluded_trials,
             "available_metrics": list(self.available_metrics),
+            "compared_metrics": list(self.compared_metrics),
             "blocking": self.blocking,
             "has_regression": self.has_regression,
             "overall_severity": self.overall_severity.value,
@@ -180,10 +226,14 @@ class TaskGateResult:
             "infra_config_diff": _diff_to_json(self.infra_config_diff),
             "regressions": [r.model_dump(mode="json") for r in self.regressions],
             "improvements": [r.model_dump(mode="json") for r in self.improvements],
+            "detectable": self.detectable,
+            "trials_needed": self.trials_needed,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TaskGateResult:
+        detectable = data.get("detectable")
+        trials_needed = data.get("trials_needed")
         return cls(
             task_id=str(data["task_id"]),
             outcome=TaskGateOutcome(data["outcome"]),
@@ -191,6 +241,7 @@ class TaskGateResult:
             compared_trials=int(data.get("compared_trials", 0)),
             excluded_trials=int(data.get("excluded_trials", 0)),
             available_metrics=list(data.get("available_metrics", [])),
+            compared_metrics=list(data.get("compared_metrics", [])),
             blocking=bool(data.get("blocking", False)),
             has_regression=bool(data.get("has_regression", False)),
             overall_severity=RegressionSeverity(data.get("overall_severity", "none")),
@@ -202,6 +253,130 @@ class TaskGateResult:
             improvements=[
                 MetricRegression.model_validate(r) for r in data.get("improvements", [])
             ],
+            detectable=None if detectable is None else bool(detectable),
+            trials_needed=None if trials_needed is None else int(trials_needed),
+        )
+
+
+@dataclass
+class SuiteGateResult:
+    """The suite-level criterion for one metric.
+
+    ``delta`` is the mean over checked tasks of (current mean - baseline
+    mean); ``p_value`` is one-sided in the regression direction from the
+    contract's sign-flip test, with a task-bootstrap interval on the mean.
+    """
+
+    metric_name: str
+    tasks: int
+    baseline_mean: float
+    current_mean: float
+    delta: float
+    delta_percent: float
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    p_value: float | None = None
+    p_value_exact: bool = False
+    confidence: float = _SUITE_CONFIDENCE
+    n_bootstrap: int = _SUITE_BOOTSTRAP
+    seed: int | None = 0
+    severity: RegressionSeverity = RegressionSeverity.NONE
+    is_regression: bool = False
+    is_significant: bool = False
+    within_noise_band: bool = False
+    blocking: bool = False
+    # False when the suite criterion is reported but cannot block (the
+    # default; see the module docstring on its independence assumption).
+    blocking_enabled: bool = False
+    # The p-value after Holm across the suite criteria of this run, so the
+    # suite half of the budget is spent once rather than once per metric.
+    p_value_adjusted: float | None = None
+
+    def describe(self) -> str:
+        """One line for the reports."""
+        text = (
+            f"{self.metric_name}: {self.baseline_mean:.4f} -> {self.current_mean:.4f} "
+            f"({self.delta_percent:+.1f}%) over {self.tasks} task(s)"
+        )
+        if self.ci_lower is not None and self.ci_upper is not None:
+            text += (
+                f"; {self.confidence:.0%} CI of the mean difference "
+                f"[{self.ci_lower:+.4f}, {self.ci_upper:+.4f}]"
+            )
+        if self.p_value is not None:
+            text += f"; p={self.p_value:.4f}"
+            if self.p_value_adjusted is not None and self.p_value_adjusted != self.p_value:
+                text += f" (adjusted {self.p_value_adjusted:.4f})"
+        if not self.is_regression:
+            text += "; no drop"
+        elif self.blocking:
+            text += f"; significant, {self.severity.value}: blocking"
+        elif self.within_noise_band:
+            text += "; within infra-noise band; not blocking"
+        elif self.is_significant and not self.blocking_enabled:
+            text += (
+                f"; significant, {self.severity.value}: reported only "
+                "(suite-level blocking is off by default; its level assumes "
+                "independent per-task outcomes)"
+            )
+        elif self.is_significant:
+            text += f"; significant, {self.severity.value}: below the threshold"
+        else:
+            text += "; not significant"
+        return text
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "metric_name": self.metric_name,
+            "tasks": self.tasks,
+            "baseline_mean": self.baseline_mean,
+            "current_mean": self.current_mean,
+            "delta": self.delta,
+            "delta_percent": self.delta_percent,
+            "ci_lower": self.ci_lower,
+            "ci_upper": self.ci_upper,
+            "p_value": self.p_value,
+            "p_value_exact": self.p_value_exact,
+            "confidence": self.confidence,
+            "n_bootstrap": self.n_bootstrap,
+            "seed": self.seed,
+            "severity": self.severity.value,
+            "is_regression": self.is_regression,
+            "is_significant": self.is_significant,
+            "within_noise_band": self.within_noise_band,
+            "blocking": self.blocking,
+            "blocking_enabled": self.blocking_enabled,
+            "p_value_adjusted": self.p_value_adjusted,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SuiteGateResult:
+        return cls(
+            metric_name=str(data["metric_name"]),
+            tasks=int(data.get("tasks", 0)),
+            baseline_mean=float(data.get("baseline_mean", 0.0)),
+            current_mean=float(data.get("current_mean", 0.0)),
+            delta=float(data.get("delta", 0.0)),
+            delta_percent=float(data.get("delta_percent", 0.0)),
+            ci_lower=data.get("ci_lower"),
+            ci_upper=data.get("ci_upper"),
+            p_value=data.get("p_value"),
+            p_value_exact=bool(data.get("p_value_exact", False)),
+            confidence=float(data.get("confidence", _SUITE_CONFIDENCE)),
+            n_bootstrap=int(data.get("n_bootstrap", _SUITE_BOOTSTRAP)),
+            seed=data.get("seed"),
+            severity=RegressionSeverity(data.get("severity", "none")),
+            is_regression=bool(data.get("is_regression", False)),
+            is_significant=bool(data.get("is_significant", False)),
+            within_noise_band=bool(data.get("within_noise_band", False)),
+            blocking=bool(data.get("blocking", False)),
+            # Older gate JSON predates the flag, and the suite criterion
+            # always blocked then -- so its absence means enabled, not
+            # disabled. Reading it off ``blocking`` instead would relabel a
+            # result that was significant but below the severity threshold
+            # as "reported only", which is not what that run did.
+            blocking_enabled=bool(data.get("blocking_enabled", True)),
+            p_value_adjusted=data.get("p_value_adjusted"),
         )
 
 
@@ -223,6 +398,16 @@ class GateResult:
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     tasks: list[TaskGateResult] = field(default_factory=list)
+    # The statistical policy the decision used (see the module docstring).
+    alpha: float | None = None
+    multiplicity: str | None = None
+    family_size: int = 0
+    # Whether the suite criterion was allowed to block. It decides how the
+    # budget was split, so it is recorded rather than inferred from the
+    # suite entries -- a run with fewer than two tasks per metric produces
+    # no entries at all, and the level it actually used would be lost.
+    suite_blocking: bool = False
+    suite: list[SuiteGateResult] = field(default_factory=list)
 
     @classmethod
     def not_requested(cls) -> GateResult:
@@ -235,6 +420,38 @@ class GateResult:
 
     def tasks_with(self, outcome: TaskGateOutcome) -> list[TaskGateResult]:
         return [t for t in self.tasks if t.outcome is outcome]
+
+    @property
+    def underpowered_tasks(self) -> list[TaskGateResult]:
+        """Checked tasks with an observed drop the evidence could not confirm."""
+        return [
+            t for t in self.tasks
+            if t.outcome is TaskGateOutcome.CHECKED and t.underpowered_regressions
+        ]
+
+    def policy_text(self) -> str:
+        """The significance policy in one phrase.
+
+        ``alpha`` is the whole run's budget. When the suite criterion is
+        allowed to block it takes half, so the per-task family is held to
+        ``alpha / 2``; otherwise the family owns the budget outright.
+        """
+        if self.alpha is None:
+            return "significance policy not recorded"
+        suite_blocks = self.suite_blocking or any(s.blocking_enabled for s in self.suite)
+        budget = self.alpha / 2 if suite_blocks else self.alpha
+        share = (
+            f"alpha={self.alpha:g} split with the suite criterion, "
+            f"{budget:g} for the per-task family"
+            if suite_blocks
+            else f"alpha={self.alpha:g}"
+        )
+        if self.multiplicity == "holm":
+            return (
+                f"{share}, Holm-adjusted across {self.family_size} "
+                "compared (task, metric) test(s)"
+            )
+        return f"{share} per test, no multiplicity correction"
 
     def summary_line(self) -> str:
         """The one-line gate summary printed by the CLI and in every format."""
@@ -253,6 +470,9 @@ class GateResult:
                 f"{self.skipped_task_content_changed} skipped (task content changed)"
             )
         parts.append(f"{self.blocking_regressions} blocking regression(s)")
+        underpowered = sum(len(t.underpowered_regressions) for t in self.underpowered_tasks)
+        if underpowered:
+            parts.append(f"{underpowered} observed drop(s) not significant")
         if self.status is GateStatus.UNEVALUABLE:
             parts.append("UNEVALUABLE")
         return f"[tracelens] Baseline check: {', '.join(parts)}"
@@ -264,6 +484,10 @@ class GateResult:
             "threshold": self.threshold.value if self.threshold else None,
             "noise_band": self.noise_band,
             "require_baselines": self.require_baselines,
+            "alpha": self.alpha,
+            "multiplicity": self.multiplicity,
+            "family_size": self.family_size,
+            "suite_blocking": self.suite_blocking,
             "checked": self.checked,
             "skipped_no_baseline": self.skipped_no_baseline,
             "skipped_no_gradable": self.skipped_no_gradable,
@@ -272,6 +496,7 @@ class GateResult:
             "blocking_regressions": self.blocking_regressions,
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
+            "suite": [s.to_dict() for s in self.suite],
             "tasks": [t.to_dict() for t in self.tasks],
         }
 
@@ -284,6 +509,17 @@ class GateResult:
             threshold=RegressionSeverity(threshold) if threshold else None,
             noise_band=data.get("noise_band"),
             require_baselines=bool(data.get("require_baselines", False)),
+            alpha=data.get("alpha"),
+            multiplicity=data.get("multiplicity"),
+            family_size=int(data.get("family_size", 0)),
+            # Older artifacts predate the flag; the suite criterion always
+            # blocked then, so a recorded suite entry means it was enabled.
+            suite_blocking=bool(
+                data.get(
+                    "suite_blocking",
+                    any(s.get("blocking_enabled", True) for s in data.get("suite", [])),
+                )
+            ),
             checked=int(data.get("checked", 0)),
             skipped_no_baseline=int(data.get("skipped_no_baseline", 0)),
             skipped_no_gradable=int(data.get("skipped_no_gradable", 0)),
@@ -292,8 +528,164 @@ class GateResult:
             blocking_regressions=int(data.get("blocking_regressions", 0)),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),
+            suite=[SuiteGateResult.from_dict(s) for s in data.get("suite", [])],
             tasks=[TaskGateResult.from_dict(t) for t in data.get("tasks", [])],
         )
+
+
+def _apply_multiplicity(
+    tasks: Sequence[TaskGateResult],
+    detector: RegressionDetector,
+    *,
+    alpha: float,
+    multiplicity: str,
+) -> dict[str, float]:
+    """Hold every checked task's findings to the run-level policy.
+
+    Under ``holm`` the regression p-values are adjusted across **one
+    family**: every (task, metric) pair the run compared, where a pair that
+    produced no finding counts as a test that did not reject (``p = 1``).
+    One family means one error budget. Adjusting each metric's tasks
+    separately, as an earlier version did, hands every extra stored metric a
+    fresh ``alpha``: a suite storing both ``pass_rate`` and ``mean_score``
+    would get two independent chances to block instead of one, and the
+    run-level rate would grow with the number of metrics rather than stay at
+    ``alpha``. The price is power -- near-duplicate metrics now cost the
+    budget they actually spend -- so store the metric you gate on.
+
+    Returns, per metric, the raw level one test must reach to be
+    significant: ``alpha / m`` over a family of ``m`` tests, or ``alpha``
+    without a correction.
+    """
+    checked = [t for t in tasks if t.outcome is TaskGateOutcome.CHECKED]
+    pairs = [(t, m) for t in checked for m in sorted(t.compared_metrics)]
+    metrics = sorted({m for _task, m in pairs})
+    levels: dict[str, float] = {}
+    if multiplicity == "holm" and pairs:
+        level = alpha / len(pairs)
+        levels = {metric: level for metric in metrics}
+        findings: list[MetricRegression | None] = []
+        for task, metric in pairs:
+            found = [r for r in task.regressions if r.metric_name == metric]
+            findings.append(found[0] if found else None)
+        raw = [1.0 if f is None or f.p_value is None else f.p_value for f in findings]
+        for finding, adjusted in zip(findings, holm_adjusted(raw), strict=True):
+            if finding is not None and finding.p_value is not None:
+                finding.p_value_adjusted = adjusted
+    else:
+        levels = dict.fromkeys(metrics, alpha)
+    for task in checked:
+        for finding in task.regressions:
+            detector.annotate(finding, alpha, levels.get(finding.metric_name, alpha))
+        for finding in task.improvements:
+            detector.annotate(finding, alpha)
+    return levels
+
+
+def _thin_advice(
+    needed: Sequence[int],
+    undetectable_ids: Sequence[str],
+    thin_baselines: Collection[str],
+    *,
+    parenthetical: bool = False,
+) -> str:
+    """What to change so the check could decide something next time.
+
+    More check trials only help when the baselines carry evidence to compare
+    them against. When every undecidable task is held back by a baseline
+    that stored fewer than two trials, telling the operator to run more
+    trials is advice that provably cannot work.
+    """
+    if needed:
+        tail = (
+            " (and store baselines from at least as many)"
+            if parenthetical
+            else " and store baselines from at least as many"
+        )
+        return f"; run at least {max(needed)} trials per task{tail}"
+    if thin_baselines and all(task_id in thin_baselines for task_id in undetectable_ids):
+        return (
+            "; their baselines stored fewer than two trials, so they carry no "
+            "measured spread -- re-store them from several runs, as more check "
+            "trials alone cannot decide them"
+        )
+    return ""
+
+
+def _suite_results(
+    per_task_means: Mapping[str, list[tuple[float, float]]],
+    *,
+    alpha: float,
+    min_delta_percent: float,
+    threshold: RegressionSeverity,
+    noise_band: float,
+    any_infra_mismatch: bool,
+    seed: int,
+    blocking_enabled: bool,
+) -> list[SuiteGateResult]:
+    """The suite-level criterion per metric.
+
+    ``per_task_means`` maps a metric to ``(baseline_mean, current_mean)``
+    pairs, one per checked task that carries it. With ``blocking_enabled``
+    false the result is computed and reported but never blocks: the
+    sign-flip p-value is only valid when the per-task differences are
+    independent, which correlated task outcomes violate.
+
+    One criterion is formed per metric, and they share ``alpha`` through the
+    same Holm adjustment the per-task family uses. Testing each at the full
+    level would spend the suite half of the budget once per stored metric,
+    which is the defect the per-task side was fixed for.
+    """
+    eligible = [(m, pairs) for m, pairs in sorted(per_task_means.items()) if len(pairs) >= 2]
+    draft: list[dict[str, Any]] = []
+    for metric, pairs in eligible:
+        diffs = [current - baseline for baseline, current in pairs]
+        effect = paired_task_effect(
+            diffs, confidence=_SUITE_CONFIDENCE, n_bootstrap=_SUITE_BOOTSTRAP, seed=seed
+        )
+        baseline_mean = sum(b for b, _ in pairs) / len(pairs)
+        current_mean = sum(c for _, c in pairs) / len(pairs)
+        delta = effect.delta if effect.delta is not None else current_mean - baseline_mean
+        delta_percent = relative_change(delta, baseline_mean)
+        # The sign-flip distribution is symmetric, so the one-sided p-value
+        # in the regression direction is half the two-sided one.
+        p_one: float | None = None
+        if effect.p_value is not None:
+            p_one = effect.p_value / 2 if delta < 0 else 1.0 - effect.p_value / 2
+            p_one = min(1.0, max(0.0, p_one))
+        is_regression = delta < 0 and abs(delta_percent) >= min_delta_percent
+        severity = severity_for(delta_percent) if is_regression else RegressionSeverity.NONE
+        within_noise = is_regression and any_infra_mismatch and abs(delta) < noise_band
+        draft.append({
+            "metric_name": metric, "tasks": len(pairs),
+            "baseline_mean": baseline_mean, "current_mean": current_mean,
+            "delta": delta, "delta_percent": delta_percent,
+            "ci_lower": effect.ci_lower, "ci_upper": effect.ci_upper,
+            "p_value": p_one, "p_value_exact": effect.p_value_exact,
+            "confidence": effect.confidence, "n_bootstrap": effect.n_bootstrap,
+            "seed": effect.seed, "severity": severity,
+            "is_regression": is_regression, "within_noise_band": within_noise,
+        })
+    adjusted = holm_adjusted([
+        1.0 if d["p_value"] is None else float(d["p_value"]) for d in draft
+    ])
+    results: list[SuiteGateResult] = []
+    for entry, adj in zip(draft, adjusted, strict=True):
+        is_significant = bool(entry["is_regression"]) and entry["p_value"] is not None and adj <= alpha
+        blocking = (
+            blocking_enabled
+            and is_significant
+            and not entry["within_noise_band"]
+            and severity_at_least(entry["severity"], threshold)
+        )
+        results.append(SuiteGateResult(
+            **entry,
+            p_value_adjusted=None if entry["p_value"] is None else adj,
+            is_significant=is_significant,
+            blocking=blocking,
+            blocking_enabled=blocking_enabled,
+        ))
+    return results
 
 
 def evaluate_gate(
@@ -306,6 +698,10 @@ def evaluate_gate(
     decision_spec: DecisionSpec | None = None,
     task_ids: Sequence[str] | None = None,
     task_hashes: Mapping[str, str] | None = None,
+    multiplicity: str = "holm",
+    alpha: float = DEFAULT_SIGNIFICANCE_LEVEL,
+    suite_blocking: bool = False,
+    seed: int = 0,
 ) -> GateResult:
     """Compare a run against stored baselines and decide the gate.
 
@@ -325,11 +721,37 @@ def evaluate_gate(
             ``task_hash`` is compared only when it matches; a task whose
             content changed since its baseline is never silently compared
             by id, it makes the gate unevaluable until re-baselined.
+        suite_blocking: Let the suite-level criterion block as well as
+            report. Off by default because its sign-flip p-value assumes
+            independent per-task differences, which correlated task outcomes
+            violate; switching it on splits ``alpha`` evenly between the two
+            criteria so the run-level budget stays ``alpha``.
+        multiplicity: ``"holm"`` (default) adjusts the p-values of every
+            compared ``(task, metric)`` pair as one family, so the chance
+            that an unchanged run blocks anywhere is at most the level that
+            family is given; ``"none"`` holds every test to that level on
+            its own.
+        alpha: Significance level for both criteria.
+        seed: Seed of the suite-level bootstrap and sign-flip test.
 
     Returns:
-        A :class:`GateResult` with one :class:`TaskGateResult` per task.
+        A :class:`GateResult` with one :class:`TaskGateResult` per task and
+        one :class:`SuiteGateResult` per metric with two or more tasks.
     """
-    detector = RegressionDetector(noise_band_absolute=noise_band)
+    if multiplicity not in MULTIPLICITY_CHOICES:
+        raise ValueError(
+            f"multiplicity must be one of {', '.join(MULTIPLICITY_CHOICES)}; got {multiplicity!r}"
+        )
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be strictly between 0 and 1, got {alpha!r}")
+    # Power notes are computed once, after the run-level correction.
+    # One run-level budget, split once it is known whether both criteria are
+    # actually live (below). ``_apply_multiplicity`` re-annotates every
+    # finding at the level the run settles on, so the detector's own level
+    # only governs the first pass.
+    detector = RegressionDetector(
+        significance_level=alpha, noise_band_absolute=noise_band, power_notes=False
+    )
     trials_by_task: dict[str, list[Trial]] = {}
     for trial in batch.trials:
         trials_by_task.setdefault(trial.task_id, []).append(trial)
@@ -339,6 +761,8 @@ def evaluate_gate(
             batch.provenance.measurement.task_hashes if batch.provenance is not None else {}
         )
     unhashed_baselines: list[str] = []
+    per_task_means: dict[str, list[tuple[float, float]]] = {}
+    checked_inputs: dict[str, tuple[Any, list[dict[str, float]]]] = {}
 
     tasks: list[TaskGateResult] = []
     warnings: list[str] = []
@@ -404,22 +828,87 @@ def evaluate_gate(
             baseline_spec=baseline.decision_spec,
             current_spec=current_spec,
         )
+        for metric in current_metrics:
+            metric_baseline = baseline.get_metric(metric)
+            if metric_baseline is None:
+                continue
+            values = [r[metric] for r in current_results if metric in r]
+            per_task_means.setdefault(metric, []).append(
+                (float(metric_baseline.baseline_value), sum(values) / len(values))
+            )
+        checked_inputs[task_id] = (baseline, current_results)
         tasks.append(TaskGateResult(
             task_id=task_id,
             outcome=TaskGateOutcome.CHECKED,
             compared_trials=len(current_results),
             excluded_trials=excluded,
             available_metrics=current_metrics,
-            blocking=report.should_block_ci(threshold),
-            has_regression=report.has_regression,
-            overall_severity=report.overall_severity,
+            compared_metrics=[m for m in current_metrics if m in baseline.metrics],
             infra_config_mismatch=report.infra_config_mismatch,
             infra_config_diff=dict(report.infra_config_diff),
             regressions=list(report.regressions),
             improvements=list(report.improvements),
         ))
 
+    # Split the budget only when the suite criterion can really take a share:
+    # it needs at least two checked tasks carrying the same metric, and
+    # charging the per-task family half the level for a criterion that never
+    # forms would halve the run's sensitivity for nothing.
+    suite_is_live = suite_blocking and any(
+        len(pairs) >= 2 for pairs in per_task_means.values()
+    )
+    task_alpha = alpha / 2 if suite_is_live else alpha
+    suite_alpha = alpha / 2 if suite_is_live else alpha
+
+    # Run-level policy: adjust for multiplicity, then decide each task from
+    # its significant findings and record what its sample sizes can show.
+    levels = _apply_multiplicity(
+        tasks, detector, alpha=task_alpha, multiplicity=multiplicity
+    )
     checked = [t for t in tasks if t.outcome is TaskGateOutcome.CHECKED]
+    thin_baselines: set[str] = set()
+    # One family over every (task, metric) pair the run compared.
+    family_size = sum(len(t.compared_metrics) for t in checked)
+    # The strictest level any test in the run is held to, for the messages.
+    per_test_level = min(levels.values(), default=task_alpha)
+    for task in checked:
+        report = task.regression_report()
+        report.recompute()
+        task.has_regression = report.has_regression
+        task.overall_severity = report.overall_severity
+        task.blocking = report.should_block_ci(threshold)
+        baseline, current_results = checked_inputs[task.task_id]
+        detectable = False
+        needed: list[int] = []
+        for metric in task.compared_metrics:
+            metric_baseline = baseline.get_metric(metric)
+            if metric_baseline is None:
+                continue
+            values = [r[metric] for r in current_results if metric in r]
+            ok, trials = detector.detectability(
+                metric_baseline, values, levels.get(metric, task_alpha)
+            )
+            detectable = detectable or ok
+            if trials is not None:
+                needed.append(trials)
+            if not ok and metric_baseline.sample_size < 2:
+                # More check trials cannot decide a baseline that stored no
+                # measured spread, so the advice has to name the baseline.
+                thin_baselines.add(task.task_id)
+        task.detectable = detectable
+        task.trials_needed = None if detectable or not needed else min(needed)
+
+    suite = _suite_results(
+        per_task_means,
+        alpha=suite_alpha,
+        min_delta_percent=detector.min_delta_percent,
+        threshold=threshold,
+        noise_band=noise_band,
+        any_infra_mismatch=any(t.infra_config_mismatch for t in checked),
+        seed=seed,
+        blocking_enabled=suite_blocking,
+    )
+
     no_baseline = [t for t in tasks if t.outcome is TaskGateOutcome.NO_BASELINE]
     no_gradable = [t for t in tasks if t.outcome is TaskGateOutcome.NO_GRADABLE_TRIALS]
     no_comparable = [t for t in tasks if t.outcome is TaskGateOutcome.NO_COMPARABLE_METRICS]
@@ -427,15 +916,48 @@ def evaluate_gate(
         t for t in tasks if t.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
     ]
     blocking = [t for t in checked if t.blocking]
+    blocking_suite = [s for s in suite if s.blocking]
+    undetectable = [t for t in checked if not t.detectable]
+    # The suite criterion can reject only when it is allowed to block at all
+    # and enough tasks could move the same way: its sign-flip p-value is at
+    # best 2^-T. With blocking off it can never rescue an otherwise
+    # undecidable check, so it must not count towards evaluability.
+    #
+    # The criteria also share the suite budget through the same Holm
+    # adjustment ``_suite_results`` applies, so the best a criterion can
+    # reach is that floor times the number of criteria -- exactly what Holm
+    # awards the smallest p-value of the family. Comparing the raw floor
+    # instead declared a check evaluable that no test could have rejected:
+    # six tasks storing two metrics each, every one of them collapsing from
+    # 4/4 to 0/4, reported `passed` and exit 0.
+    suite_can_reject = suite_blocking and any(
+        len(suite) * 2.0 ** -s.tasks <= suite_alpha for s in suite
+    )
     if unhashed_baselines:
         warnings.append(
             f"{len(unhashed_baselines)} baseline(s) carry no task_hash, so a change to "
             "their task content cannot be detected: " + ", ".join(unhashed_baselines)
             + "; re-store them from a results file that records provenance"
         )
+    if undetectable and len(undetectable) < len(checked):
+        needed = [t.trials_needed for t in undetectable if t.trials_needed is not None]
+        advice = _thin_advice(
+            needed, [t.task_id for t in undetectable], thin_baselines, parenthetical=True
+        )
+        warnings.append(
+            f"{len(undetectable)} checked task(s) have too few trials to block on their "
+            f"own at {per_test_level:.4g} per test: "
+            + ", ".join(t.task_id for t in undetectable) + advice
+        )
 
     reasons: list[str] = []
-    if not checked or no_gradable or no_comparable or content_changed:
+    if (
+        not checked
+        or no_gradable
+        or no_comparable
+        or content_changed
+        or (undetectable and len(undetectable) == len(checked) and not suite_can_reject)
+    ):
         status = GateStatus.UNEVALUABLE
         if not checked:
             reasons.append("no task could be compared against a baseline")
@@ -454,6 +976,17 @@ def evaluate_gate(
                 f"{len(no_comparable)} task(s) with no comparable metrics: "
                 + ", ".join(t.task_id for t in no_comparable)
             )
+        if checked and undetectable and len(undetectable) == len(checked) and not suite_can_reject:
+            needed = [t.trials_needed for t in undetectable if t.trials_needed is not None]
+            advice = _thin_advice(
+                needed, [t.task_id for t in undetectable], thin_baselines
+            )
+            reasons.append(
+                "no checked task has enough trials to detect even a total failure "
+                f"({per_test_level:.4g} per test over {family_size} compared "
+                f"(task, metric) test(s) in {len(checked)} task(s)), so the "
+                "check could not have blocked" + advice
+            )
     else:
         status = GateStatus.PASSED
         if require_baselines and no_baseline:
@@ -471,11 +1004,24 @@ def evaluate_gate(
                     f"{t.task_id} ({t.overall_severity.value})" for t in blocking
                 )
             )
+        if blocking_suite:
+            status = GateStatus.BLOCKED
+            reasons.append(
+                f"{len(blocking_suite)} suite-level regression(s) at threshold "
+                f"'{threshold.value}': " + "; ".join(s.describe() for s in blocking_suite)
+            )
         if status is GateStatus.PASSED:
             reasons.append(
-                f"{len(checked)} task(s) compared; no regression at or above "
-                f"'{threshold.value}'"
+                f"{len(checked)} task(s) compared; no significant regression at or "
+                f"above '{threshold.value}'"
             )
+            underpowered = [t for t in checked if t.underpowered_regressions]
+            if underpowered:
+                reasons.append(
+                    f"{len(underpowered)} task(s) show a drop the evidence could not "
+                    "confirm: " + ", ".join(t.task_id for t in underpowered)
+                    + "; see their notes for the trials needed"
+                )
 
     return GateResult(
         status=status,
@@ -488,8 +1034,13 @@ def evaluate_gate(
         skipped_no_gradable=len(no_gradable),
         skipped_no_comparable_metrics=len(no_comparable),
         skipped_task_content_changed=len(content_changed),
-        blocking_regressions=len(blocking),
+        blocking_regressions=len(blocking) + len(blocking_suite),
         reasons=reasons,
         warnings=warnings,
         tasks=tasks,
+        alpha=alpha,
+        multiplicity=multiplicity,
+        family_size=family_size,
+        suite_blocking=suite_is_live,
+        suite=suite,
     )

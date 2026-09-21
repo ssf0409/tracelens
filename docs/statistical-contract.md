@@ -142,23 +142,201 @@ de-duplication.
 
 ### Baseline regression detection
 
-`RegressionDetector` compares, per task and per metric, the mean of the
-current trials against the stored baseline mean:
+The gate behind `tracelens run --baseline-check` (issue #111) decides one run. Its inputs are, per task and per metric, the stored
+baseline summary (`baseline_value`, `std_deviation`, `sample_size`) and the
+current gradable trials, one sample per trial (`TIMEOUT` counts as a
+failure). The run spends **one** error budget `alpha = 0.05`. By default the
+per-task criterion owns all of it and the suite criterion is reported but
+cannot block; `--suite-blocking` lets the suite criterion block too, and the
+budget is then split `alpha/2` to each so the run-level total stays `alpha`.
+The run is blocked when a live criterion rejects at or above
+`--fail-on-regression`. `RegressionDetector` implements the per-task part and
+`tracelens.reporting.gate.evaluate_gate` the run-level part.
 
-- `delta` and `delta_percent` come from means; a finding below
-  `min_delta_percent` (default 5 %) is not reported.
-- Significance uses a one-sample t-test against the baseline mean when the
-  current sample has `n >= 2` and the baseline has a standard deviation, with
-  z-test fallbacks for degenerate cases. A test that cannot be run is
-  reported as `insufficient_data`, never as "not significant".
-- **Severity is derived from `|delta_percent|` alone** (minor below 5 %,
-  moderate 5–15 %, severe above 15 %) and is reported next to significance,
-  not combined with it.
+**Per task.**
+
+- Effect: `delta` = current mean − baseline mean and `delta_percent` relative
+  to `|baseline mean|`. A change below `min_delta_percent` (default 5 %) is
+  not reported. **Severity is derived from `|delta_percent|` alone** (minor
+  below 5 %, moderate 5–15 %, severe from 15 %) and is reported next to the
+  evidence, never combined with it.
+- Evidence: a one-sided p-value in the observed direction.
+    - Whether a metric *is* a 0/1 proportion is decided by **the baseline**
+      alone: a current sample can never promote a continuous score to a
+      count. A baseline may declare it (`MetricBaseline.is_rate`);
+      otherwise it is inferred from the stored summary — the mean is in
+      `[0, 1]`, `baseline_value × n_b` is a whole count of successes, and
+      any positive recorded spread is one 0/1 data of that size could show.
+      (Reading the family off the current values instead made the verdict
+      discontinuous in the *upward* direction too: a continuous score of
+      five zeros took the exact test and one of five `1e-8`s took a t-test,
+      with opposite outcomes.) A declaration cannot supply evidence the
+      summary lacks: a mean that is not a whole count over `n_b` is compared
+      as a continuous metric whatever the baseline calls it, because the
+      exact test would otherwise round it to a count nobody measured.
+      Counting the two sides additionally needs current values that *are*
+      counts, so a rate whose check produced values off 0 and 1 falls back
+      to the continuous test — the data contradicts the baseline and no
+      table can be built. **That fallback can change the verdict**, because
+      the two tests read the same drop differently; `MetricRegression.test`
+      records which one ran, so a rate reported as `welch_t` is a rate whose
+      check did not produce counts. A proportion uses **Boschloo's exact
+      unconditional test** on the two counts, `round(baseline_value × n_b)`
+      of `n_b` against `k_c` of `n_c`, with the two samples as the table's
+      **columns**, which is the orientation SciPy's model defines. The test
+      is exact: its false-rejection probability is at most the level for
+      every true pass rate.
+    - A continuous metric uses **Welch's** t-test from the summaries. A
+      spread measured as zero on one side is not evidence that the two
+      populations share a variance, so the pooled-variance test is not used
+      at all — and it is not a measurement of zero variance either, so that
+      side does not get a mean known exactly: the spread that *was*
+      informative stands for both. Treating the zero literally rejected 38 %
+      of unchanged runs with three flat baseline trials against twenty
+      scattered current ones, and 91 % against fifty; pooling instead fails
+      the other way, which is how a baseline recorded with spread 0 over 100
+      trials read `p = 6e-34` against three scattered values. When both
+      sides are constant the p-value is the exact permutation value
+      `1 / C(n_b + n_c, n_c)`, and when they are constant at the *same*
+      value there is no evidence of a difference at all (`p = 1`); a single
+      current trial against a measured baseline is a prediction-interval t
+      on `n_b - 1` degrees of freedom.
+    - **No evidence is invented for the baseline.** Its recorded
+      `sample_size` is used as recorded, and a baseline that stored fewer
+      than two trials carries no measured spread at all
+      (`baseline_n_assumed`): its mean is a declared value, and a
+      comparison that has to borrow the current sample's evidence to reach a
+      verdict has no valid test (`insufficient_data`). Such a check is
+      `undetectable`, which makes the gate unevaluable rather than passing
+      or blocking on evidence that was never collected. It is not powerless
+      — one stored passing trial against seven straight failures is
+      `p = 0.049` on the honest counts, and that blocks — but it cannot
+      decide much else. Store baselines from real runs; a one-trial baseline
+      needs seven check trials to decide even a total failure, and fifteen
+      once two tests share the budget.
+- Multiplicity: the p-values are Holm-adjusted across **one family** — every
+  compared `(task, metric)` pair, a pair with no finding counting as a test
+  that did not reject (`--multiplicity holm`, the default) — so the
+  probability that an unchanged suite blocks anywhere is at most the level
+  that family is given. Over `m` tests the smallest p-value must reach
+  `alpha / m`. One family means one budget: giving each metric its own
+  family, as an earlier version did, handed a suite storing both
+  `pass_rate` and `mean_score` two independent chances to block, so the
+  run-level rate grew with the number of stored metrics instead of staying
+  at `alpha`. The price is power, paid where it is actually spent — store
+  the metric you gate on. `--multiplicity none` holds every test to `alpha`
+  on its own.
+- Decision: a task blocks when a finding is significant (adjusted p-value at
+  or below `alpha`), not `within_noise_band`, and at or above the severity
+  threshold. Every change above the floor is reported with its evidence. A
+  drop that is not significant is `underpowered` and carries
+  `trials_needed`: the check size at which the observed rates would decide
+  it, or, when the stored baseline is too small for any check to decide it,
+  the size on each side (`trials_needed_on_both_sides`). A 0/1 comparison
+  whose sizes cannot reject even a total failure is `undetectable`.
 - With a `DecisionSpec` on both sides, an absolute delta smaller than the
   noise band (default 0.03 on a 0–1 metric) is marked `within_noise_band` and
   does not block; a changed infrastructure configuration is reported as
   `infra_config_mismatch`.
-- Samples are gradable trials only; `TIMEOUT` is included as a failure.
+
+**Suite.** For each metric with two or more checked tasks: `d_t` = current
+mean − baseline mean per task, the mean over tasks, and the task bootstrap
+interval and sign-flip p-value of the run-versus-run section below, one-sided
+in the regression direction (half the two-sided value; exact when both sides
+of every task have the same trial count, approximate otherwise). One
+criterion is formed per metric and they share the suite level through the
+same Holm adjustment the per-task family uses, so that half of the budget is
+spent once rather than once per stored metric. It sees a broad regression
+that no single task can show and does not react to one task among many.
+
+It is **reported but not blocking by default.** Sign-flipping is valid only
+when the per-task differences are independent under the null, and task
+outcomes in one run frequently are not: one shared infrastructure wobble,
+one shared sampling seed, one bad deploy moves many tasks together. Under
+dependence the null distribution is too narrow and the p-value is
+anti-conservative. Simulating an unchanged agent over 2000 runs of a suite
+with 40 deterministic tasks and 10 flaky ones at `p = 0.8`, five trials a
+side: with the flaky tasks independent the suite criterion blocked 0.0 % of
+runs; with them sharing one run-level outcome it blocked 11.6 %. TraceLens
+therefore does not let an unvalidated level gate a merge. `--suite-blocking`
+switches it on for suites whose task outcomes are known to be independent,
+and then each criterion is held to `alpha/2`.
+
+**Unevaluable.** A check that could not have blocked authorizes nothing:
+when every checked task is `undetectable`, the gate is unevaluable and names
+the trials per task it would need. The suite criterion can rescue such a
+check only when it is allowed to block at all and enough tasks could move
+together: its sign-flip p-value is at best `2^-T`, and the criteria share
+their half of the budget through the same Holm adjustment, so the best any
+one of them can reach is `m × 2^-T` over `m` criteria. That has to meet
+`alpha/2`, the level suite blocking leaves: six tasks for a suite storing
+one metric (not five), seven for two. Bounding the raw `2^-T` instead
+declared a check evaluable that no test could have rejected — six tasks
+storing two metrics each, every one collapsing from 4/4 to 0/4, reported
+`passed`. When only some tasks are undetectable the gate decides on the
+others and warns.
+
+**Error rates.** Exact enumeration over both binomial samples with the real
+detector (`scripts/gate_error_rates.py` prints the full tables; `T` is the
+size of the Holm family — the number of compared `(task, metric)` pairs —
+and the per-test level is `alpha / T`). These are the whole run-level
+rates, because the suite criterion does not block by default.
+
+Probability that one unchanged task with true pass rate `p` blocks by chance:
+
+| p | baseline n | check n | T=1 | T=2 | T=10 | T=50 |
+|---|---|---|---|---|---|---|
+| 0.8 | 5 | 5 | 1.9 % | 0.2 % | 0.0 % | 0.0 % |
+| 0.8 | 20 | 5 | 4.2 % | 1.8 % | 0.4 % | 0.1 % |
+| 0.8 | 20 | 20 | 3.7 % | 2.2 % | 0.5 % | 0.1 % |
+| 0.5 | 5 | 5 | 3.0 % | 1.1 % | 0.1 % | 0.1 % |
+| 0.5 | 20 | 20 | 4.1 % | 2.0 % | 0.4 % | 0.1 % |
+
+Deterministic tasks add nothing; a suite with `F` flaky tasks blocks by
+chance on some task with probability `1 − (1 − q)^F`. Without the correction
+(`T=1` column, `--multiplicity none`) ten flaky tasks at `p = 0.8` with five
+trials a side give 17.6 % false alarms per run and fifty give 62 %; under
+Holm over fifty tests the same suites give 0.1 % and 0.5 %. These are the
+whole run-level rate, because the suite criterion does not block by default.
+With `--suite-blocking` each criterion is held to `alpha/2`, and the suite
+criterion's own level holds only under the independence assumption stated
+above.
+
+Probability that one regressed task blocks while the others are unchanged:
+
+| drop | baseline n | check n | T=1 | T=2 | T=10 | T=50 |
+|---|---|---|---|---|---|---|
+| 1.0 → 0.4 | 5 | 5 | 68.3 % | 33.7 % | 7.8 % | 7.8 % |
+| 1.0 → 0.4 | 10 | 5 | 91.3 % | 68.3 % | 33.7 % | 7.8 % |
+| 1.0 → 0.4 | 20 | 5 | 91.3 % | 91.3 % | 68.3 % | 33.7 % |
+| 1.0 → 0.4 | 10 | 10 | 94.5 % | 94.5 % | 63.3 % | 38.2 % |
+| 1.0 → 0.4 | 20 | 20 | 100 % | 100 % | 99.8 % | 97.9 % |
+| 1.0 → 0.6 | 5 | 5 | 31.7 % | 8.7 % | 1.0 % | 1.0 % |
+| 1.0 → 0.6 | 20 | 5 | 66.3 % | 66.3 % | 31.7 % | 8.7 % |
+| 1.0 → 0.6 | 20 | 20 | 98.4 % | 94.9 % | 87.4 % | 58.4 % |
+| 1.0 → 0.0 | any | 5 | 100 % | 100 % | 100 % | 100 % |
+
+Check trials needed to decide a total failure after a perfect baseline:
+
+| baseline n | T=1 | T=2 | T=10 | T=50 |
+|---|---|---|---|---|
+| 1 | 7 | 15 | >60 | >60 |
+| 2 | 3 | 4 | 10 | 23 |
+| 5 | 2 | 2 | 4 | 5 |
+| 10 | 1 | 2 | 2 | 3 |
+| 20 | 1 | 1 | 2 | 3 |
+
+What this means in practice: the baseline is the long-lived side, so store
+it from ten runs or more; five-trial checks then decide a 60-point drop on a
+single task in a small suite most of the time, and any total failure. A
+baseline of one stored trial can decide almost nothing, and says so rather
+than borrowing the check's evidence to look decisive. In a fifty-test family
+with five trials a side, only a total failure of one task is decidable per
+task; a broad drop across many tasks is what the suite statistic reports,
+though acting on it is a decision the maintainer opts into. The `trials_needed` note on every underpowered finding says
+what would decide the drop that was actually observed. A regression that
+the run reports as not significant is a reason to rerun with more trials,
+not a clean pass.
 
 ### Run-versus-run comparison (`tracelens compare`, issue #28)
 
@@ -304,6 +482,15 @@ are never compared across silently different populations.
 | A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
 | The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
 | No run-versus-run command; `compare_metrics` resampled two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 (fixed) |
+| The gate's fallback for a zero-variance baseline divided the delta by the sample SD, not the standard error, so a drop's p-value never tightened with `n` (1.0 → 0.4 over 5, 10, or 100 trials all read p ≈ 0.22) | exact test on the two counts for 0/1 metrics; SE-based t-tests otherwise | #111 (fixed) |
+| A drop that was not significant was dropped from stdout, JSON, Markdown, and HTML, so an underpowered check read like a clean pass | every change above the floor is reported with its evidence, `underpowered`, and `trials_needed` | #111 (fixed) |
+| The baseline's `sample_size` was never read; the stored mean was treated as exact | two-sample tests on both sample sizes, used as recorded | #111 (fixed) |
+| The run blocked when any task blocked, with no multiplicity control and no suite-level criterion; a check that could not have blocked passed | one Holm family over every compared (task, metric) pair, a reported suite-level statistic, and unevaluable when nothing could have blocked | #111 (fixed) |
+| Boschloo's table was built with the two samples as rows, which fixes the wrong margin; at unequal sizes it changed the verdict (7/7 vs 2/4 read 0.0420 instead of 0.0538) | the two samples are the table's columns, as SciPy's model defines | #111 (fixed) |
+| A baseline with fewer than two stored trials was credited with as many trials as the check, and its missing spread was taken from the current sample | recorded sizes are used as recorded; a baseline with no measured spread yields no test, and the check is unevaluable | #111 (fixed) |
+| A spread measured as zero on one side switched the comparison to a pooled-variance t-test, assuming a shared population variance nothing showed | Welch throughout; the pooled test is not used | #111 (fixed) |
+| Whether a metric was a proportion was read off the current sample's endpoints, so an infinitesimal change flipped the test family and the verdict | the baseline decides, by declaration or from its stored summary | #111 (fixed) |
+| Each metric received its own Holm family and the suite criterion its own `alpha`, so the run-level rate grew with the number of stored metrics | one family, one budget; the suite criterion reports by default and splits the budget when switched on | #111 (fixed) |
 
 ## Related pages
 

@@ -13,7 +13,12 @@ from typing import Any
 import numpy as np
 
 from tracelens._version import __version__
-from tracelens.baselines.comparison import RegressionReport
+from tracelens.baselines.comparison import (
+    MetricRegression,
+    RegressionReport,
+    RegressionSeverity,
+    severity_at_least,
+)
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.provenance import RunProvenance
 from tracelens.core.trial import TrialBatch
@@ -156,6 +161,17 @@ class ReportData:
                 "summary": self.regression_report.summary,
                 "infra_config_mismatch": self.regression_report.infra_config_mismatch,
                 "blocking_regressions": len(self.regression_report.blocking_regressions),
+                # Every observed finding with its evidence, not just the
+                # counts. Emitting only the summary meant a drop no test
+                # could confirm survived in memory and then vanished the
+                # moment the run was written to disk: `tracelens report`
+                # re-rendered the file as a clean run in every format.
+                "regressions": [
+                    r.model_dump(mode="json") for r in self.regression_report.regressions
+                ],
+                "improvements": [
+                    r.model_dump(mode="json") for r in self.regression_report.improvements
+                ],
             }
         if self.gate is not None:
             result["gate"] = self.gate.to_dict()
@@ -199,6 +215,32 @@ class ReportData:
                 provenance = RunProvenance.model_validate(data["provenance"])
             except ValueError as exc:  # pydantic ValidationError is a ValueError
                 raise ValueError(f"invalid provenance: {exc}") from exc
+        # Artifacts written before the findings were serialized carry only
+        # the summary block; they still load, with whatever they recorded.
+        regression_report: RegressionReport | None = None
+        regression_data = data.get("regression")
+        if isinstance(regression_data, dict):
+            try:
+                regression_report = RegressionReport(
+                    has_regression=bool(regression_data.get("has_regression", False)),
+                    overall_severity=RegressionSeverity(
+                        regression_data.get("severity", RegressionSeverity.NONE.value)
+                    ),
+                    summary=str(regression_data.get("summary", "")),
+                    infra_config_mismatch=bool(
+                        regression_data.get("infra_config_mismatch", False)
+                    ),
+                    regressions=[
+                        MetricRegression.model_validate(r)
+                        for r in regression_data.get("regressions", [])
+                    ],
+                    improvements=[
+                        MetricRegression.model_validate(r)
+                        for r in regression_data.get("improvements", [])
+                    ],
+                )
+            except ValueError as exc:  # pydantic ValidationError is a ValueError
+                raise ValueError(f"invalid regression report: {exc}") from exc
         pass_at_k: dict[str, float | None] = dict(data.get("pass_at_k", {}))
         reliability: dict[str, float | None] = dict(data.get("reliability", {}))
         recorded = "metric_availability" in data
@@ -233,6 +275,7 @@ class ReportData:
             availability_recorded=recorded,
             gate=gate,
             provenance=provenance,
+            regression_report=regression_report,
         )
 
 
@@ -407,13 +450,26 @@ class ReportGenerator:
                 lines.append("| " + " | ".join(row) + " |")
             lines.append("")
 
-        # Legacy hand-attached regression report (CLI runs use ``gate``)
+        # Legacy hand-attached regression report (CLI runs use ``gate``).
+        # Rendered whenever anything was observed, significant or not: an
+        # underpowered drop that no test could confirm is still a finding,
+        # and hiding it reads as a clean run (issue #111).
         if (
             report.gate is None
             and report.regression_report
-            and report.regression_report.has_regression
+            and (
+                report.regression_report.regressions
+                or report.regression_report.improvements
+                # A report built from a summary alone still carries a
+                # verdict that ``should_block_ci`` acts on.
+                or report.regression_report.has_regression
+            )
         ):
-            lines.append("## Regression Alert")
+            lines.append(
+                "## Regression Alert"
+                if report.regression_report.has_regression
+                else "## Baseline Comparison"
+            )
             lines.append("")
             lines.append(report.regression_report.to_ci_output())
             lines.append("")
@@ -458,18 +514,47 @@ class ReportGenerator:
             lines[0] += f", grader_errors={report.grader_error_rate:.1%}"
 
         if report.gate is not None and report.gate.requested:
-            # Blocking tasks print the detector's own text, then the one-line
-            # gate summary -- the same lines the CLI used to assemble itself.
+            # Blocking tasks print the detector's own text; observed drops
+            # that did not block get one line each with their evidence; then
+            # the suite criterion when it found a drop and the one-line gate
+            # summary -- the same lines the CLI used to assemble itself.
             for task in report.gate.tasks:
-                if task.outcome is TaskGateOutcome.CHECKED and task.blocking:
+                if task.outcome is not TaskGateOutcome.CHECKED:
+                    continue
+                if task.blocking:
                     lines.append(task.regression_report().to_ci_output())
+                    continue
+                for regression in task.regressions:
+                    lines.append(
+                        f"[tracelens] observed drop, not blocking: {task.task_id} "
+                        f"{regression.metric_name} {regression.baseline_mean:.4f} -> "
+                        f"{regression.current_mean:.4f} ({regression.delta_percent:+.1f}%), "
+                        f"{regression.evidence_text()}"
+                    )
+            for suite in report.gate.suite:
+                if suite.is_regression:
+                    lines.append(f"[tracelens] suite-level {suite.describe()}")
             lines.append(report.gate.summary_line())
-        elif report.regression_report and report.regression_report.has_regression:
+        elif report.regression_report and (
+            report.regression_report.regressions
+            or report.regression_report.has_regression
+        ):
+            # Deliberately narrower than the Markdown and HTML sections: the
+            # CI summary is the gating signal, so it speaks up for drops
+            # (confirmed or not) and stays quiet for a run that only
+            # improved.
             # Prefer the noise-aware "blocking" count if specs were provided.
             n_blocking = len(report.regression_report.blocking_regressions)
             n_total = len(report.regression_report.regressions)
             severity = report.regression_report.overall_severity.value.upper()
-            if report.regression_report.infra_config_mismatch and n_blocking < n_total:
+            if not report.regression_report.has_regression:
+                # Observed but not significant: say so rather than nothing,
+                # so an underpowered check cannot read as a clean run.
+                lines.append(
+                    f"No significant regression ({n_total} observed drop(s) "
+                    "not significant at these sample sizes)"
+                )
+            elif report.regression_report.infra_config_mismatch and n_blocking < n_total:
                 lines.append(
                     f"REGRESSION [{severity}] — {n_blocking}/{n_total} blocking "
                     f"({n_total - n_blocking} within infra-noise band; configs differ)"
@@ -554,9 +639,22 @@ class ReportGenerator:
         if (
             report.gate is None
             and report.regression_report
-            and report.regression_report.has_regression
+            and (
+                report.regression_report.regressions
+                or report.regression_report.improvements
+                or report.regression_report.has_regression
+            )
         ):
-            severity = report.regression_report.overall_severity.value.upper()
+            confirmed = report.regression_report.has_regression
+            heading = "Regression Alert" if confirmed else "Baseline Comparison"
+            if confirmed:
+                severity = report.regression_report.overall_severity.value.upper()
+            elif report.regression_report.regressions:
+                severity = "NOT SIGNIFICANT"
+            else:
+                # Nothing dropped at all: the badge must not call a section
+                # of improvements "not significant".
+                severity = "IMPROVEMENTS"
             sev_color = {"MINOR": "#eab308", "MODERATE": "#f97316", "SEVERE": "#ef4444"}.get(
                 severity, "#6b7280"
             )
@@ -567,7 +665,8 @@ class ReportGenerator:
                     f"<td>{r.baseline_mean:.4f}</td>"
                     f"<td>{r.current_mean:.4f}</td>"
                     f"<td>{r.delta_percent:+.1f}%</td>"
-                    f"<td>{r.severity.value}</td></tr>\n"
+                    f"<td>{r.severity.value}</td>"
+                    f"<td>{escape(r.evidence_text())}</td></tr>\n"
                 )
             imp_rows = ""
             for i in report.regression_report.improvements:
@@ -577,15 +676,28 @@ class ReportGenerator:
                     f"<td>{i.current_mean:.4f}</td>"
                     f"<td>{i.delta_percent:+.1f}%</td></tr>\n"
                 )
+            # A report built from a summary rather than from findings has no
+            # rows at all. Without this the section is a heading and a
+            # severity badge over an empty body -- the state ``should_block_ci``
+            # acts on, rendered as though nothing had been recorded.
+            summary_html = ""
+            if report.regression_report.summary and not (reg_rows or imp_rows):
+                summary_html = f"<p>{escape(report.regression_report.summary)}</p>"
+            elif not (reg_rows or imp_rows):
+                summary_html = (
+                    "<p>A regression was recorded, but this report carries no "
+                    "per-metric findings.</p>"
+                )
             regression_html = f"""
     <section>
-      <h2>Regression Alert
+      <h2>{heading}
         <span style="background:{sev_color};color:#fff;padding:2px 10px;
           border-radius:12px;font-size:0.75em;margin-left:8px">{severity}</span>
       </h2>
-      <table><thead><tr>
-        <th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th><th>Severity</th>
-      </tr></thead><tbody>{reg_rows}</tbody></table>
+      {summary_html}
+      {'<table><thead><tr><th>Metric</th><th>Baseline</th><th>Current</th>'
+        '<th>Change</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>'
+        + reg_rows + "</tbody></table>" if reg_rows else ""}
       {"<h3>Improvements</h3><table><thead><tr><th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th></tr></thead><tbody>" + imp_rows + "</tbody></table>" if imp_rows else ""}
     </section>"""
 
@@ -712,14 +824,43 @@ def _provenance_section_html(report: ReportData) -> str:
     )
 
 
-def _regression_notes(task: Any, regression: Any) -> str:
+def _finding_blocks(regression: Any, threshold: RegressionSeverity) -> bool:
+    """Whether this finding, read on its own, meets the blocking policy."""
+    return bool(
+        not regression.within_noise_band
+        and regression.is_significant
+        and severity_at_least(regression.severity, threshold)
+    )
+
+
+def _regression_notes(
+    task: Any,
+    regression: Any,
+    threshold: RegressionSeverity,
+    *,
+    contradicts_record: bool = False,
+) -> str:
+    """The note beside one finding, read off what the run recorded.
+
+    ``contradicts_record`` is set when the run recorded the task as blocking
+    but none of its findings still reproduce that -- an artifact written
+    before the evidence fields existed, or re-rendered against a different
+    threshold. Saying only "not blocking" there would contradict the
+    verdict printed at the top of the same report.
+    """
     notes: list[str] = []
     if regression.within_noise_band:
         notes.append("within infra-noise band; not blocking")
-    elif task.blocking:
+    elif _finding_blocks(regression, threshold):
         notes.append("blocking")
-    if regression.insufficient_data:
-        notes.append("insufficient samples; severity from thresholds")
+    elif regression.is_significant:
+        notes.append("significant; below the blocking threshold")
+    elif regression.p_value is None:
+        notes.append("not blocking: no valid test")
+    else:
+        notes.append("not blocking: not significant")
+    if contradicts_record:
+        notes.append("the run recorded this task as blocking")
     if task.infra_config_mismatch:
         notes.append("infra config differs from baseline")
     return "; ".join(notes)
@@ -738,9 +879,21 @@ def _md_cell(text: str) -> str:
     return escape(text, quote=False)
 
 
-def _gate_rows(gate: GateResult) -> list[tuple[str, str, str, str, str, str, str]]:
-    rows = []
+_GATE_TABLE_HEADER = (
+    "Task", "Metric", "Baseline", "Current", "Change", "Severity", "Evidence", "Notes",
+)
+
+
+def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
+    rows: list[tuple[str, ...]] = []
+    threshold = gate.threshold or RegressionSeverity.MODERATE
     for task in gate.tasks:
+        # A task the run recorded as blocking whose findings no longer
+        # reproduce that: the rows must not read as a clean task under a
+        # header that says BLOCKED.
+        contradicts = bool(task.blocking) and not any(
+            _finding_blocks(r, threshold) for r in task.regressions
+        )
         for regression in task.regressions:
             rows.append((
                 task.task_id,
@@ -749,9 +902,16 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, str, str, str, str, str, str
                 f"{regression.current_mean:.4f}",
                 f"{regression.delta_percent:+.1f}%",
                 regression.severity.value,
-                _regression_notes(task, regression),
+                regression.evidence_text(),
+                _regression_notes(
+                    task, regression, threshold, contradicts_record=contradicts
+                ),
             ))
     return rows
+
+
+def _gate_suite_lines(gate: GateResult) -> list[str]:
+    return [suite.describe() for suite in gate.suite]
 
 
 def _gate_skipped_lines(gate: GateResult) -> list[str]:
@@ -769,21 +929,20 @@ def _gate_section_md(report: ReportData) -> list[str]:
     lines = ["## Baseline Gate", "", f"- **Status**: {_gate_status_text(gate)}"]
     if gate.requested:
         lines.append(f"- **Policy**: {_gate_policy_text(gate)}")
+        lines.append(f"- **Significance**: {gate.policy_text()}")
         lines.append(f"- **Tasks**: {_gate_task_counts(gate)}")
         lines.append(f"- **Blocking regressions**: {gate.blocking_regressions}")
         for reason in gate.reasons:
             lines.append(f"- **Why**: {reason}")
         for warning in gate.warnings:
             lines.append(f"- **Warning**: {warning}")
+        for suite_line in _gate_suite_lines(gate):
+            lines.append(f"- **Suite**: {suite_line}")
         rows = _gate_rows(gate)
         if rows:
             lines.append("")
-            lines.append(
-                "| Task | Metric | Baseline | Current | Change | Severity | Notes |"
-            )
-            lines.append(
-                "|------|--------|----------|---------|--------|----------|-------|"
-            )
+            lines.append("| " + " | ".join(_GATE_TABLE_HEADER) + " |")
+            lines.append("|" + "|".join("-" * (len(h) + 2) for h in _GATE_TABLE_HEADER) + "|")
             for row in rows:
                 lines.append("| " + " | ".join(_md_cell(cell) for cell in row) + " |")
         skipped = _gate_skipped_lines(gate)
@@ -806,6 +965,7 @@ def _gate_section_html(report: ReportData) -> str:
     body = f"<p><strong>Status</strong>: {escape(_gate_status_text(gate))}</p>"
     if gate.requested:
         body += f"<p><strong>Policy</strong>: {escape(_gate_policy_text(gate))}</p>"
+        body += f"<p><strong>Significance</strong>: {escape(gate.policy_text())}</p>"
         body += f"<p><strong>Tasks</strong>: {escape(_gate_task_counts(gate))}</p>"
         body += (
             f"<p><strong>Blocking regressions</strong>: {gate.blocking_regressions}</p>"
@@ -814,12 +974,14 @@ def _gate_section_html(report: ReportData) -> str:
             body += f"<p><strong>Why</strong>: {escape(reason)}</p>"
         for warning in gate.warnings:
             body += f'<p class="na"><strong>Warning</strong>: {escape(warning)}</p>'
+        for suite_line in _gate_suite_lines(gate):
+            body += f"<p><strong>Suite</strong>: {escape(suite_line)}</p>"
         rows = _gate_rows(gate)
         if rows:
             body += (
-                "<table><thead><tr><th>Task</th><th>Metric</th><th>Baseline</th>"
-                "<th>Current</th><th>Change</th><th>Severity</th><th>Notes</th>"
-                "</tr></thead><tbody>"
+                "<table><thead><tr>"
+                + "".join(f"<th>{escape(h)}</th>" for h in _GATE_TABLE_HEADER)
+                + "</tr></thead><tbody>"
             )
             for row in rows:
                 body += "<tr>" + "".join(f"<td>{escape(cell)}</td>" for cell in row) + "</tr>"

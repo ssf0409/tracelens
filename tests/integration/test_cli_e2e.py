@@ -333,6 +333,35 @@ def _write_pass_baseline(tmp_path: Path, task_ids: dict[str, float]) -> Path:
     return baselines
 
 
+def test_a_declared_baseline_makes_the_gate_unevaluable_and_says_so(
+    tasks_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A baseline of one stored trial cannot decide anything, and the CLI
+    says how many trials would -- the advice used to reach the JSON only."""
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    baseline = TaskBaseline(task_id="t-pass")
+    baseline.add_metric(metric_name="pass_rate", value=1.0, sample_size=1)
+    manager.set_baseline(baseline)
+    manager.save()
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(tasks_file),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+        "--baseline-check",
+        "--baselines-file", str(baselines),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "unevaluable" in captured.out.lower()
+    assert "could not have blocked" in captured.err
+    assert "run at least" in captured.err and "trials per task" in captured.err
+    assert "This is not a passing gate." in captured.err
+
+
 def test_baseline_check_without_baselines_file_errors_before_running(
     tasks_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -781,7 +810,7 @@ def test_agent_execution_failures_remain_regression_observations(
 
     assert _run_cli(
         "run", "--eval-set", str(tasks_file), "--adapter", adapter,
-        "--graders", GRADER, "--timeout", "0.01",
+        "--graders", GRADER, "--timeout", "0.01", "--num-runs", "2",
         "--baseline-check", "--baselines-file", str(baselines),
     ) == 1
 
