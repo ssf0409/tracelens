@@ -8,6 +8,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-19
+
 ### Fixed
 
 - **`tracelens inspect` validates task content before attaching context to saved trials.**
