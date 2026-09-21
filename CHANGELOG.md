@@ -8,6 +8,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unified `mean_score` definition across reporting and regression gating.**
+  Gradable trials without an `aggregate_score` (e.g. timeouts before grading or
+  unscored trials) are now excluded from `mean_score` in baseline gate
+  evaluations rather than imputing a synthetic `0.0`. This aligns
+  `per_trial_results` in gate decisions with report generation and run
+  comparison (#114).
+
 ## [0.6.1] - 2026-09-19
 
 ### Fixed

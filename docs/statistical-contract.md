@@ -110,10 +110,14 @@ unweighted mean over eligible tasks, with eligible/total counts.
 - **Pass rate** = passed gradable trials / gradable trials. Harness failures
   are not in the denominator.
 - **Mean score** = mean over gradable trials of the trial's
-  `aggregate_score`, which is the mean of its outcomes' scores.
+  `aggregate_score`, which is the mean of its outcomes' scores. Gradable
+  trials without an `aggregate_score` (such as `TIMEOUT` trials before
+  grading, or score-less trials) are excluded from `mean_score` and counted
+  as excluded/no-value trials, never imputed as 0.0.
 
 Both are trial-level descriptive numbers. Use them for reading a run; use
 pass@k and pass^k with intervals for decisions.
+
 
 ### Bootstrap confidence intervals (suite level)
 
