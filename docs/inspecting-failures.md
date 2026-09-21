@@ -43,7 +43,11 @@ The first two lines of each trial answer the two questions that matter:
   looking at are always in proportion.
 - **Expected versus actual.** With `--eval-set` each trial shows the task's
   name, input, and declared expected output next to what came back. Without
-  it the line says so explicitly; nothing is ever left blank.
+  it the line says so explicitly; nothing is ever left blank. When `--eval-set`
+  is supplied, `inspect` validates task content against the provenance hashes
+  recorded when the trials were run. A mismatched task content raises an error
+  and exits 2, preventing accidental pairing with altered tasks. Trials from legacy
+  runs without recorded task hashes display task context marked as `(unverified)`.
 
 Then come the grader lines (verdict, score, metrics, feedback) and the
 transcript (steps, tokens, tool calls, errors). Anything the trial did not
