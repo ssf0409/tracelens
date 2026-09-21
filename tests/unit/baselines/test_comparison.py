@@ -882,8 +882,16 @@ class TestBlockingPolicy:
             "would decide it"
         )
         assert self._finding(p_value=None).evidence_text() == "no valid test (insufficient data)"
-        assert self._finding(trials_needed=None).evidence_text().endswith(
-            "more than 200 trials would be needed"
+        # "More than the cap" is a result of the power scan, so it is stated
+        # only when the scan actually ran and came back empty-handed.
+        assert self._finding(
+            trials_needed=None, trials_needed_exceeds_cap=True
+        ).evidence_text().endswith("more than 200 trials would be needed")
+        # A finding that carries no power analysis at all -- every artifact
+        # written before these fields existed, and every run with
+        # power_notes=False -- must not assert one it never performed.
+        assert self._finding(trials_needed=None).evidence_text() == (
+            "p=0.1000, not significant"
         )
 
     def test_power_notes_can_be_switched_off(self) -> None:
@@ -1080,3 +1088,89 @@ class TestNoiseAwareSeverityConsistency:
         assert "noise band" in report.summary.lower()
         # Still surfaced — has_regression reports what was observed.
         assert report.has_regression is True
+
+
+class TestAZeroSpreadIsRecognisedWhateverTheValue:
+    """``np.std`` of a constant sample is exactly 0.0 only for some values.
+
+    Five 0.5s give 0.0; three 0.7s give 1.36e-16. An exact ``== 0.0`` test
+    therefore fired for some stored numbers and not others, so the
+    substitution that keeps a flat side from being credited with zero
+    uncertainty silently did not happen and Welch ran with a spread of
+    ~1e-16. The verdict then turned on the sixteenth decimal of an
+    arbitrary value, which reads as flakiness in the field.
+    """
+
+    @staticmethod
+    def _sides(mean_c: float, std_c: float, n_c: int = 3):
+        from tracelens.baselines.comparison import _Sides
+
+        return _Sides(
+            binary=False, mean_b=0.70, n_b=5, std_b=0.10,
+            mean_c=mean_c, n_c=n_c, std_c=std_c,
+            baseline_n_assumed=False, higher_is_better=True,
+        )
+
+    def test_a_constant_sample_is_flat_whatever_value_it_repeats(self) -> None:
+        import numpy as np
+
+        from tracelens.baselines.comparison import _is_flat
+
+        # Not a hypothetical: these are what numpy actually returns.
+        assert float(np.std([0.5] * 3, ddof=1)) == 0.0
+        assert float(np.std([0.7] * 3, ddof=1)) > 0.0
+        for value in (0.5, 0.25, 0.7, 0.2, 0.1, 0.3, 0.6):
+            for n in (3, 5, 20):
+                assert _is_flat(float(np.std([value] * n, ddof=1)))
+
+    def test_the_verdict_does_not_turn_on_the_sixteenth_decimal(self) -> None:
+        import numpy as np
+
+        from tracelens.baselines.comparison import _p_value
+
+        dust = float(np.std([0.7] * 3, ddof=1))
+        assert dust > 0.0  # the value that used to slip past the guard
+        for mean_c in (0.65, 0.60, 0.55, 0.50):
+            _, p_clean = _p_value(self._sides(mean_c, 0.0), "greater")
+            _, p_dusty = _p_value(self._sides(mean_c, dust), "greater")
+            assert p_clean == pytest.approx(p_dusty, rel=1e-6)
+
+    def test_a_corrupt_spread_takes_the_no_variation_path(self) -> None:
+        from tracelens.baselines.comparison import _is_flat
+
+        # Neither a negative nor a NaN spread is a measurement; both must
+        # reach the no-variation branch rather than a test that divides by
+        # them, which returned p=0.0 for a constant check sample.
+        assert _is_flat(-5.0) and _is_flat(float("nan"))
+
+
+class TestRerunAdviceIsNotFlooredByTheCurrentSize:
+    """When the baseline is re-stored too, a smaller size can decide it.
+
+    The scan's floor at the current size is justified only while the
+    baseline is held fixed. With both sides growing it put a floor of
+    ``n_c + 1`` on the answer, so a one-trial baseline against 80 of 100
+    was told to rerun about 101 trials per side where 18 settles it.
+    """
+
+    def test_both_sides_advice_matches_an_independent_scan(self) -> None:
+        from scipy import stats
+
+        from tracelens.baselines.comparison import _Sides, _trials_needed
+
+        sides = _Sides(
+            binary=True, mean_b=1.0, n_b=1, std_b=None,
+            mean_c=0.8, n_c=100, std_c=0.4020151,
+            baseline_n_assumed=True, higher_is_better=True,
+        )
+        # Derived from scipy, not from the implementation: the smallest n
+        # where an n-of-n baseline against round(0.8n)-of-n is significant.
+        expected = next(
+            n for n in range(2, 60)
+            if float(stats.boschloo_exact(
+                [[n, int(0.8 * n + 0.5)], [0, n - int(0.8 * n + 0.5)]],
+                alternative="greater",
+            ).pvalue) <= 0.05
+        )
+        assert expected == 18
+        assert _trials_needed(sides, 0.05, both_sides=True) == expected

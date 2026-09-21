@@ -922,8 +922,16 @@ def evaluate_gate(
     # and enough tasks could move the same way: its sign-flip p-value is at
     # best 2^-T. With blocking off it can never rescue an otherwise
     # undecidable check, so it must not count towards evaluability.
+    #
+    # The criteria also share the suite budget through the same Holm
+    # adjustment ``_suite_results`` applies, so the best a criterion can
+    # reach is that floor times the number of criteria -- exactly what Holm
+    # awards the smallest p-value of the family. Comparing the raw floor
+    # instead declared a check evaluable that no test could have rejected:
+    # six tasks storing two metrics each, every one of them collapsing from
+    # 4/4 to 0/4, reported `passed` and exit 0.
     suite_can_reject = suite_blocking and any(
-        2.0 ** -s.tasks <= suite_alpha for s in suite
+        len(suite) * 2.0 ** -s.tasks <= suite_alpha for s in suite
     )
     if unhashed_baselines:
         warnings.append(

@@ -803,3 +803,59 @@ class TestGateErrorRates:
             for i in range(60)
         )
         assert 25 <= caught <= 55  # 68 % +/- generous binomial slack over 60 runs
+
+
+class TestTheSuiteCriterionCannotRescueWhatItCannotReject:
+    """``--suite-blocking`` must not cancel UNEVALUABLE on a bound it cannot meet.
+
+    The suite criterion's sign-flip p-value is at best ``2**-T``, but the
+    criteria also share the suite budget through the same Holm adjustment
+    ``_suite_results`` applies. Comparing the raw floor against the level
+    declared a check evaluable that no test could possibly have rejected.
+    """
+
+    @staticmethod
+    def _collapse(tmp_path: Path, tasks: int = 6, trials: int = 4):
+        manager = BaselineManager(tmp_path / "baselines.json")
+        for i in range(tasks):
+            baseline = TaskBaseline(task_id=f"t{i}")
+            baseline.add_metric("pass_rate", 1.0, std=0.0, sample_size=trials, is_rate=True)
+            baseline.add_metric("mean_score", 1.0, std=0.0, sample_size=trials)
+            manager.set_baseline(baseline)
+        manager.save()
+        batch = _batch(*[
+            t for i in range(tasks) for t in _runs(f"t{i}", [False] * trials)
+        ])
+        return batch, manager
+
+    def test_a_total_collapse_is_never_reported_as_passing(self, tmp_path: Path) -> None:
+        batch, manager = self._collapse(tmp_path)
+        # Every task falls from 4/4 to 0/4 -- the largest drop that exists.
+        # With the budget split, no per-task test and no suite criterion can
+        # reach its level, so the honest answer is "could not evaluate".
+        result = evaluate_gate(batch, manager, suite_blocking=True)
+        assert result.status is GateStatus.UNEVALUABLE
+        assert EXIT_CODES[result.status] == 2
+        assert result.status is not GateStatus.PASSED
+
+    def test_the_same_collapse_blocks_under_the_default_policy(
+        self, tmp_path: Path
+    ) -> None:
+        # Without the split the whole budget goes to the per-task family,
+        # which can decide it; the collapse blocks rather than going quiet.
+        batch, manager = self._collapse(tmp_path)
+        result = evaluate_gate(batch, manager)
+        assert result.status is GateStatus.BLOCKED
+        assert EXIT_CODES[result.status] == 1
+
+    def test_the_bound_counts_every_criterion_sharing_the_budget(
+        self, tmp_path: Path
+    ) -> None:
+        # Six tasks put the raw floor at 2**-6 = 0.015625, under the 0.025
+        # the split leaves. Holm across the two stored metrics doubles the
+        # best attainable value to 0.03125, which is over it.
+        batch, manager = self._collapse(tmp_path)
+        result = evaluate_gate(batch, manager, suite_blocking=True)
+        assert len(result.suite) == 2  # pass_rate and mean_score
+        assert all(2.0 ** -s.tasks <= 0.025 for s in result.suite)
+        assert all(len(result.suite) * 2.0 ** -s.tasks > 0.025 for s in result.suite)

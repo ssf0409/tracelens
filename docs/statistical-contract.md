@@ -161,21 +161,26 @@ The run is blocked when a live criterion rejects at or above
   below 5 %, moderate 5–15 %, severe from 15 %) and is reported next to the
   evidence, never combined with it.
 - Evidence: a one-sided p-value in the observed direction.
-    - Whether a metric is a 0/1 proportion is decided by **the baseline**,
-      never by where one current sample happens to land. A baseline may
-      declare it (`MetricBaseline.is_rate`); otherwise it is inferred from
-      the stored summary — the mean is in `[0, 1]`, `baseline_value × n_b`
-      is a whole count of successes, and any positive recorded spread is one
-      0/1 data of that size could show. (Reading the family off the current
-      values instead made the verdict discontinuous: a continuous score of
+    - Whether a metric *is* a 0/1 proportion is decided by **the baseline**
+      alone: a current sample can never promote a continuous score to a
+      count. A baseline may declare it (`MetricBaseline.is_rate`);
+      otherwise it is inferred from the stored summary — the mean is in
+      `[0, 1]`, `baseline_value × n_b` is a whole count of successes, and
+      any positive recorded spread is one 0/1 data of that size could show.
+      (Reading the family off the current values instead made the verdict
+      discontinuous in the *upward* direction too: a continuous score of
       five zeros took the exact test and one of five `1e-8`s took a t-test,
       with opposite outcomes.) A declaration cannot supply evidence the
       summary lacks: a mean that is not a whole count over `n_b` is compared
       as a continuous metric whatever the baseline calls it, because the
       exact test would otherwise round it to a count nobody measured.
-      Counting also needs current values that *are* counts, so a rate whose
-      check produced values off 0 and 1 falls back to the continuous test —
-      there the data contradicts the baseline, and no table can be built. A proportion uses **Boschloo's exact
+      Counting the two sides additionally needs current values that *are*
+      counts, so a rate whose check produced values off 0 and 1 falls back
+      to the continuous test — the data contradicts the baseline and no
+      table can be built. **That fallback can change the verdict**, because
+      the two tests read the same drop differently; `MetricRegression.test`
+      records which one ran, so a rate reported as `welch_t` is a rate whose
+      check did not produce counts. A proportion uses **Boschloo's exact
       unconditional test** on the two counts, `round(baseline_value × n_b)`
       of `n_b` against `k_c` of `n_c`, with the two samples as the table's
       **columns**, which is the orientation SciPy's model defines. The test
@@ -261,10 +266,15 @@ and then each criterion is held to `alpha/2`.
 when every checked task is `undetectable`, the gate is unevaluable and names
 the trials per task it would need. The suite criterion can rescue such a
 check only when it is allowed to block at all and enough tasks could move
-together: its sign-flip p-value is at best `2^-T`, which has to reach the
-level that criterion is given. Since suite blocking is what splits the
-budget, that level is `alpha/2` and six tasks are needed, not five. When
-only some tasks are undetectable the gate decides on the others and warns.
+together: its sign-flip p-value is at best `2^-T`, and the criteria share
+their half of the budget through the same Holm adjustment, so the best any
+one of them can reach is `m × 2^-T` over `m` criteria. That has to meet
+`alpha/2`, the level suite blocking leaves: six tasks for a suite storing
+one metric (not five), seven for two. Bounding the raw `2^-T` instead
+declared a check evaluable that no test could have rejected — six tasks
+storing two metrics each, every one collapsing from 4/4 to 0/4, reported
+`passed`. When only some tasks are undetectable the gate decides on the
+others and warns.
 
 **Error rates.** Exact enumeration over both binomial samples with the real
 detector (`scripts/gate_error_rates.py` prints the full tables; `T` is the

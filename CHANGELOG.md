@@ -68,6 +68,47 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **A spread of zero is recognised whatever value the sample repeats.**
+  `numpy` returns a standard deviation of exactly `0.0` for a constant
+  sample only when the repeated value is a dyadic rational: five `0.5`s
+  give `0.0`, three `0.7`s give `1.36e-16`. The guard that keeps a flat
+  side from being credited with no uncertainty at all tested `== 0.0`, so
+  it fired for some stored numbers and not others and Welch ran with a
+  spread of ~1e-16 instead. A drop from 0.70 to 0.60 over three flat trials
+  read p=0.119 and passed at one value and p=0.045 and blocked at another,
+  which in the field looks like flakiness. The comparison now treats
+  anything at or below `1e-12` as no variation, which also routes the
+  corrupt records -- a negative or `NaN` spread -- away from a test that
+  would divide by them. (#111)
+- **`--suite-blocking` no longer cancels an unevaluable verdict on a bound
+  the suite criterion cannot meet.** The check that decides whether the
+  suite criterion could rescue an otherwise undecidable run compared its
+  raw floor of `2^-T` against the level, ignoring the Holm adjustment the
+  criteria share. Six tasks storing two metrics each, every one collapsing
+  from 4/4 to 0/4, reported "no significant regression" and exit 0; it is
+  now unevaluable (exit 2) and says what it would need. (#111)
+- **An observed finding survives being written to disk.** The renderers
+  were widened to show drops no test could confirm, but `ReportData.to_dict`
+  emitted only counts and `from_dict` discarded the regression block
+  outright, so a finding attached by a library caller vanished the moment
+  the run was saved: `tracelens report --results results.json` re-rendered
+  it as a clean run in Markdown, HTML, JSON and the CI summary alike. The
+  findings and improvements are serialized with their evidence and read
+  back; artifacts written before this still load with what they recorded.
+  A report carrying a summary and no findings also renders its summary in
+  HTML rather than a heading and a badge over an empty section. (#111)
+- **The rerun advice no longer overstates what a thin baseline needs.**
+  When the advice is to re-store the baseline as well, both sides grow, so
+  the current size is not a floor on the answer -- the scan started there
+  anyway and could only ever return more than it. A one-trial baseline
+  against 80 of 100 was told to rerun about 101 trials per side where 18
+  settles it. (#111)
+- **A finding no longer claims a power analysis nobody ran.** "More than
+  200 trials would be needed" was printed whenever `trials_needed` was
+  unset, which is also the state of every finding written before these
+  fields existed and of every run with `power_notes=False`. It is now
+  stated only when a scan ran and came back empty-handed
+  (`MetricRegression.trials_needed_exceeds_cap`). (#111)
 - **The baseline gate decides on evidence that follows the statistical
   contract.** The per-task test behind `tracelens run --baseline-check` had
   four defects: its fallback for a zero-variance baseline divided the delta

@@ -14,6 +14,7 @@ import numpy as np
 
 from tracelens._version import __version__
 from tracelens.baselines.comparison import (
+    MetricRegression,
     RegressionReport,
     RegressionSeverity,
     severity_at_least,
@@ -160,6 +161,17 @@ class ReportData:
                 "summary": self.regression_report.summary,
                 "infra_config_mismatch": self.regression_report.infra_config_mismatch,
                 "blocking_regressions": len(self.regression_report.blocking_regressions),
+                # Every observed finding with its evidence, not just the
+                # counts. Emitting only the summary meant a drop no test
+                # could confirm survived in memory and then vanished the
+                # moment the run was written to disk: `tracelens report`
+                # re-rendered the file as a clean run in every format.
+                "regressions": [
+                    r.model_dump(mode="json") for r in self.regression_report.regressions
+                ],
+                "improvements": [
+                    r.model_dump(mode="json") for r in self.regression_report.improvements
+                ],
             }
         if self.gate is not None:
             result["gate"] = self.gate.to_dict()
@@ -203,6 +215,32 @@ class ReportData:
                 provenance = RunProvenance.model_validate(data["provenance"])
             except ValueError as exc:  # pydantic ValidationError is a ValueError
                 raise ValueError(f"invalid provenance: {exc}") from exc
+        # Artifacts written before the findings were serialized carry only
+        # the summary block; they still load, with whatever they recorded.
+        regression_report: RegressionReport | None = None
+        regression_data = data.get("regression")
+        if isinstance(regression_data, dict):
+            try:
+                regression_report = RegressionReport(
+                    has_regression=bool(regression_data.get("has_regression", False)),
+                    overall_severity=RegressionSeverity(
+                        regression_data.get("severity", RegressionSeverity.NONE.value)
+                    ),
+                    summary=str(regression_data.get("summary", "")),
+                    infra_config_mismatch=bool(
+                        regression_data.get("infra_config_mismatch", False)
+                    ),
+                    regressions=[
+                        MetricRegression.model_validate(r)
+                        for r in regression_data.get("regressions", [])
+                    ],
+                    improvements=[
+                        MetricRegression.model_validate(r)
+                        for r in regression_data.get("improvements", [])
+                    ],
+                )
+            except ValueError as exc:  # pydantic ValidationError is a ValueError
+                raise ValueError(f"invalid regression report: {exc}") from exc
         pass_at_k: dict[str, float | None] = dict(data.get("pass_at_k", {}))
         reliability: dict[str, float | None] = dict(data.get("reliability", {}))
         recorded = "metric_availability" in data
@@ -237,6 +275,7 @@ class ReportData:
             availability_recorded=recorded,
             gate=gate,
             provenance=provenance,
+            regression_report=regression_report,
         )
 
 
@@ -637,12 +676,25 @@ class ReportGenerator:
                     f"<td>{i.current_mean:.4f}</td>"
                     f"<td>{i.delta_percent:+.1f}%</td></tr>\n"
                 )
+            # A report built from a summary rather than from findings has no
+            # rows at all. Without this the section is a heading and a
+            # severity badge over an empty body -- the state ``should_block_ci``
+            # acts on, rendered as though nothing had been recorded.
+            summary_html = ""
+            if report.regression_report.summary and not (reg_rows or imp_rows):
+                summary_html = f"<p>{escape(report.regression_report.summary)}</p>"
+            elif not (reg_rows or imp_rows):
+                summary_html = (
+                    "<p>A regression was recorded, but this report carries no "
+                    "per-metric findings.</p>"
+                )
             regression_html = f"""
     <section>
       <h2>{heading}
         <span style="background:{sev_color};color:#fff;padding:2px 10px;
           border-radius:12px;font-size:0.75em;margin-left:8px">{severity}</span>
       </h2>
+      {summary_html}
       {'<table><thead><tr><th>Metric</th><th>Baseline</th><th>Current</th>'
         '<th>Change</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>'
         + reg_rows + "</tbody></table>" if reg_rows else ""}

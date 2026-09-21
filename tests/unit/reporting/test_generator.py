@@ -1018,3 +1018,86 @@ class TestProvenanceReporting:
         assert "Skipped tasks: t (task content changed since the baseline was stored" in md
         assert "task content changed" in gen.render_html(report)
         assert "1 skipped (task content changed)" in gen.render_ci_summary(report)
+
+
+class TestObservedFindingsSurvivePersistence:
+    """A finding attached by a library caller must survive the JSON round trip.
+
+    The renderers were widened to show drops no test could confirm, but
+    ``to_dict`` still emitted only counts and ``from_dict`` discarded the
+    block outright. So the finding lived in memory and vanished the moment
+    the run was written: ``tracelens report --results results.json``
+    re-rendered it as a clean run in every format, which is the failure
+    this work exists to prevent, one step further down the pipeline.
+    """
+
+    @staticmethod
+    def _report_of_an_unconfirmable_drop() -> RegressionReport:
+        baseline = TaskBaseline(task_id="t")
+        baseline.add_metric("pass_rate", 1.0, std=0.0, sample_size=5, is_rate=True)
+        trials = [{"pass_rate": v} for v in (1.0, 1.0, 1.0, 0.0, 0.0)]
+        report = RegressionDetector().compare(baseline, trials)
+        # The premise: a real 5/5 -> 3/5 drop that the sizes cannot confirm.
+        assert len(report.regressions) == 1
+        assert report.regressions[0].is_significant is False
+        assert report.has_regression is False
+        return report
+
+    def _round_trip(self, report: RegressionReport) -> ReportData:
+        data = ReportData(
+            total_trials=5, total_tasks=1, gradable_trials=5,
+            overall_pass_rate=0.6, overall_mean_score=0.6,
+            regression_report=report,
+        )
+        return ReportData.from_dict(json.loads(json.dumps(data.to_dict())))
+
+    def test_the_finding_is_still_there_after_a_round_trip(self) -> None:
+        reloaded = self._round_trip(self._report_of_an_unconfirmable_drop())
+        assert reloaded.regression_report is not None
+        assert len(reloaded.regression_report.regressions) == 1
+        finding = reloaded.regression_report.regressions[0]
+        assert finding.metric_name == "pass_rate"
+        assert finding.is_significant is False
+        assert finding.p_value is not None
+
+    def test_every_format_renders_it_after_a_round_trip(self) -> None:
+        reloaded = self._round_trip(self._report_of_an_unconfirmable_drop())
+        generator = ReportGenerator()
+        for rendered in (
+            generator.render_markdown(reloaded),
+            generator.render_html(reloaded),
+            generator.render_ci_summary(reloaded),
+        ):
+            assert "pass_rate" in rendered
+        assert "regressions" in reloaded.to_dict()["regression"]
+
+    def test_an_artifact_without_the_findings_still_loads(self) -> None:
+        # Written before the findings were serialized: it carries only the
+        # summary block, and must load with exactly what it recorded.
+        legacy = {
+            "total_trials": 5, "total_tasks": 1, "task_summaries": [],
+            "regression": {
+                "has_regression": True, "severity": "severe",
+                "summary": "pass_rate fell", "blocking_regressions": 1,
+            },
+        }
+        loaded = ReportData.from_dict(legacy)
+        assert loaded.regression_report is not None
+        assert loaded.regression_report.has_regression is True
+        assert loaded.regression_report.overall_severity is RegressionSeverity.SEVERE
+        assert loaded.regression_report.regressions == []
+
+    def test_a_summary_only_report_renders_a_body_not_an_empty_section(self) -> None:
+        # has_regression with no findings is the state ``should_block_ci``
+        # acts on; HTML rendered a heading and a severity badge over nothing.
+        data = ReportData(
+            total_trials=5, total_tasks=1, gradable_trials=5,
+            regression_report=RegressionReport(
+                has_regression=True,
+                overall_severity=RegressionSeverity.SEVERE,
+                summary="pass_rate fell from 1.00 to 0.60",
+            ),
+        )
+        html = ReportGenerator().render_html(data)
+        assert "Regression Alert" in html
+        assert "pass_rate fell from 1.00 to 0.60" in html

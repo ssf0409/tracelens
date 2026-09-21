@@ -91,6 +91,22 @@ _BERNOULLI_TOLERANCE = 0.02
 _ROUNDED_RATE_TOLERANCE = 5e-4
 # ``trials_needed`` scans stop here; beyond it the advice is "more than".
 TRIALS_NEEDED_CAP = 200
+# A spread at or below this counts as "this side showed no variation".
+# ``np.std`` of a constant sample is exactly 0.0 only when the repeated value
+# is a dyadic rational: five 0.5s give 0.0, but three 0.7s give 1.36e-16. An
+# exact ``== 0.0`` test therefore fires for some stored values and not others,
+# which decides verdicts on the sixteenth decimal of an arbitrary number.
+_SPREAD_ZERO_ATOL = 1e-12
+
+
+def _is_flat(std: float) -> bool:
+    """Whether ``std`` is a spread of zero up to floating-point noise.
+
+    Also true for the corrupt records -- negative, NaN -- that carry no
+    spread at all, so they take the no-variation path instead of reaching a
+    test that would divide by them.
+    """
+    return not (std > _SPREAD_ZERO_ATOL)
 
 
 def _is_binary(values: Sequence[float]) -> bool:
@@ -150,7 +166,7 @@ def _summary_is_a_proportion(mean_b: float, n_b: int, std_b: float | None) -> bo
     """
     if not _is_a_whole_count(mean_b, n_b):
         return False
-    if std_b is None or std_b <= 0.0:
+    if std_b is None or _is_flat(std_b):
         return True
     # The widest spread 0/1 data of this size can show is at a half-and-half
     # split; anything beyond it did not come from a proportion.
@@ -327,7 +343,7 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
         # One current trial against a measured baseline: the question is
         # whether a single new observation is consistent with the baseline
         # sample, which is a prediction interval, not a two-sample t-test.
-        if std_b > 0.0:
+        if not _is_flat(std_b):
             se = std_b * math.sqrt(1.0 + 1.0 / sides.n_b)
             t_stat = (sides.mean_c - sides.mean_b) / se
             df = sides.n_b - 1
@@ -344,11 +360,11 @@ def _p_value(sides: _Sides, alternative: Alternative) -> tuple[str | None, float
         # A constant baseline and one differing observation: the exact
         # permutation value over the pooled values.
         return TEST_PERMUTATION, 1.0 / math.comb(sides.n_b + 1, 1)
-    if std_b == 0.0 and std_c == 0.0:
+    if _is_flat(std_b) and _is_flat(std_c):
         # Both sides constant: only one split of the pooled values puts all
         # the extreme ones on the current side.
         return TEST_PERMUTATION, 1.0 / math.comb(sides.n_b + sides.n_c, sides.n_c)
-    if std_b == 0.0 or std_c == 0.0:
+    if _is_flat(std_b) or _is_flat(std_c):
         # Exactly one side showed no variation. That is not a measurement of
         # zero variance, and handing it to Welch as one credits that side's
         # mean with no uncertainty at all: three flat baseline trials against
@@ -405,7 +421,13 @@ def _trials_needed(
         _test, p = _p_value(sides.scaled(n, grow_baseline=both_sides), alternative)
         return p is not None and p <= alpha
 
-    low = sides.n_c  # known not significant (or the caller would not ask)
+    # The current size is known not significant (or the caller would not
+    # ask), so it is a valid floor only while the baseline is held fixed.
+    # When the baseline grows too, a smaller size on both sides can already
+    # decide it, and starting at ``n_c`` puts a floor of ``n_c + 1`` on the
+    # answer: a one-trial baseline against 80 of 100 was told to rerun about
+    # 101 trials per side where 18 settles it.
+    low = 1 if both_sides else sides.n_c
     high = low + 1
     while high <= cap and not significant(high):
         low = high
@@ -527,6 +549,12 @@ class MetricRegression(BaseModel):
     trials_needed: int | None = None
     trials_needed_on_both_sides: bool = False
     undetectable: bool = False
+    # True only when a power scan ran and found no size at or below the cap.
+    # ``trials_needed is None`` alone cannot carry that: it is also the state
+    # of every finding written before these fields existed and of every run
+    # with ``power_notes=False``, and claiming "more than 200 trials would be
+    # needed" for those asserts a power analysis nobody performed.
+    trials_needed_exceeds_cap: bool = False
 
     def evidence_text(self) -> str:
         """Short human-readable evidence note for reports."""
@@ -538,16 +566,19 @@ class MetricRegression(BaseModel):
         if self.is_significant:
             return f"{p_text}, significant"
         text = f"{p_text}, not significant"
-        if self.trials_needed is None:
+        if self.trials_needed is not None:
+            if self.trials_needed_on_both_sides:
+                text += (
+                    f"; about {self.trials_needed} trials on each side would decide it "
+                    f"(the baseline's {self.baseline_n} limit the evidence; re-store it "
+                    "from more runs)"
+                )
+            else:
+                text += f"; about {self.trials_needed} current trials would decide it"
+        elif self.trials_needed_exceeds_cap:
             text += f"; more than {TRIALS_NEEDED_CAP} trials would be needed"
-        elif self.trials_needed_on_both_sides:
-            text += (
-                f"; about {self.trials_needed} trials on each side would decide it "
-                f"(the baseline's {self.baseline_n} limit the evidence; re-store it "
-                "from more runs)"
-            )
-        else:
-            text += f"; about {self.trials_needed} current trials would decide it"
+        # Otherwise no power analysis was performed for this finding, and
+        # the note says nothing rather than asserting a size nobody computed.
         return text
 
 
@@ -892,6 +923,7 @@ class RegressionDetector:
         finding.underpowered = not finding.is_significant
         finding.trials_needed = None
         finding.trials_needed_on_both_sides = False
+        finding.trials_needed_exceeds_cap = False
         finding.undetectable = False
         if finding.p_value is None:
             # No valid test exists for this comparison, so no effect of any
@@ -909,6 +941,7 @@ class RegressionDetector:
             # those findings.
             finding.trials_needed = _trials_needed(sides, level, both_sides=True)
             finding.trials_needed_on_both_sides = finding.trials_needed is not None
+            finding.trials_needed_exceeds_cap = finding.trials_needed is None
         if sides.binary:
             worst = sides.worst_case()
             _test, worst_p = _p_value(worst, _alternative(worst))
