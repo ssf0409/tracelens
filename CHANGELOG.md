@@ -8,8 +8,33 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **Provenance records what an adapter or grader *is*, not only what it is
+  called.** `ComponentIdentity` gains `source_hash`, the SHA-256 of the file
+  that defines the class — the candidate-side counterpart of the per-task
+  `task_hash`. A class path says where a component lives, not what it does,
+  so two runs of entirely different code under the same class path were
+  indistinguishable unless someone bumped the optional `provenance_version`
+  (which the scaffold ships commented out). `tracelens compare` now reports
+  `What changed: adapter` for an edit that kept the class path, where it said
+  `nothing declared`. Additive: artifacts written before this load with
+  `source_hash: null`, and a comparison with an unknown side says so rather
+  than calling the component unchanged. Only the defining file is hashed;
+  declare run-time inputs through `DecisionSpec`. Hashing rule and semantics:
+  `docs/reproducibility.md`, "Run provenance".
+
 ### Changed
 
+- **A grader whose source changed is a different measurement, declared or
+  not.** `check_compatibility` (and so `tracelens compare`) treats two runs
+  as incompatible when a grader's source hash differs under the same class
+  path and version — the rule the scaffold already stated for
+  `provenance_version`, now enforced by content. *Behaviour change:* any
+  edit to a grader file, including a comment, makes runs graded before and
+  after it incomparable until the baseline is re-run. The baseline gate does
+  not consult grader identity and is unaffected; so is checkpoint identity,
+  which still keys on class paths.
 - **One run, one error budget.** `evaluate_gate` Holm-adjusts the p-values of
   every compared `(task, metric)` pair as a single family by default
   (`--multiplicity holm`; `run.baseline.multiplicity` in `tracelens.yaml`),
@@ -68,6 +93,18 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **Plugins are loaded from the source on disk, not from stale bytecode.**
+  Python treats a cached `.pyc` as valid while the source file's size and
+  its modification time in whole seconds are unchanged. An adapter edited to
+  the same length within a second of the previous run therefore executed
+  the *previous* adapter's bytecode, and the run reported its outcomes as
+  the current adapter's — the documented user journey did exactly this on
+  `main` and blocked a step that must pass. `registry.load_class` now
+  rewrites a plugin's cache as a checked-hash pyc (PEP 552) before importing
+  it, so the interpreter validates it against the source's content; a
+  source that no longer compiles raises its real error instead of running
+  the old code. Every module along the dotted path is covered; modules the
+  process already imported are never swapped underneath.
 - **A spread of zero is recognised whatever value the sample repeats.**
   `numpy` returns a standard deviation of exactly `0.0` for a constant
   sample only when the repeated value is a dyadic rational: five `0.5`s

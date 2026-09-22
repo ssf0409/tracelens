@@ -256,12 +256,14 @@ and the Markdown and HTML reports ("Run Provenance"). Illustrative shape:
     "eval_set_name": "tasks",
     "eval_set_hash": "…",
     "task_hashes": {"math-add": "…", "math-divide": "…"},
-    "graders": [{"class_path": "eval.grader.MyGrader", "name": "quality", "version": "rubric-v4"}],
+    "graders": [{"class_path": "eval.grader.MyGrader", "name": "quality", "version": "rubric-v4",
+                 "source_hash": "…"}],
     "runner": {"num_runs": 3, "max_concurrency": 5, "timeout_seconds": 300.0,
                "max_infra_retries": 0, "infra_exception_types": ["…"]}
   },
   "candidate": {
-    "adapter": {"class_path": "eval.adapter.MyAdapter", "name": null, "version": null},
+    "adapter": {"class_path": "eval.adapter.MyAdapter", "name": null, "version": null,
+                "source_hash": "…"},
     "decision_spec_fingerprint": "…",
     "decision_spec": {"…": "…"}
   }
@@ -282,13 +284,38 @@ SHA-256. A task's hash covers every `Task` field, so a task whose input,
 expectation, metadata, tags, difficulty, category, or timeout changed gets a
 new hash even if its id did not; the eval-set hash covers the tasks sorted by
 id, so task order never matters. Checkpoint identity uses the same hash.
-Identities are declared class paths plus an optional `provenance_version`
-string attribute an adapter or grader class may define:
+Identities have a declared half and a content half. The declared half is the
+class path plus an optional `provenance_version` string attribute an adapter
+or grader class may define:
 
 ```python
 class MyGrader(CodeGrader):
     provenance_version = "rubric-v4"   # bump when the rubric changes
 ```
+
+The content half is `source_hash`: the SHA-256 of the file that defines the
+class. A class path says *where* a component lives, not *what* it does, so
+without it two runs of entirely different code under the same class path were
+indistinguishable unless someone remembered to bump the version. With it, an
+edit that keeps the class path is still a visible change: `compare` reports
+"adapter" under *what changed*, and a grader whose source changed under the
+same declared identity makes two runs **incompatible** — a changed grader is a
+different measurement whether or not its version was bumped. Only the defining
+file is hashed: helpers imported from elsewhere in the project are not, and
+neither is anything read at run time (a model name from the environment, a
+prompt file) — declare those through the `DecisionSpec`. `source_hash` is
+`null` when there is no file to hash (a class built in the REPL or by `exec`,
+or implemented in C) and in artifacts written before it was recorded; `null`
+means *unknown*, and a comparison with an unknown side says so rather than
+calling the component unchanged.
+
+What is hashed is the source on disk, and that is what ran: plugins named by
+dotted path are loaded from source. Python otherwise trusts a cached `.pyc`
+while the file's size and its modification time in whole seconds are
+unchanged, so an edit that kept a file's length and landed within a second of
+the previous run could execute the previous plugin. TraceLens rewrites a
+plugin's cache as a checked-hash pyc before importing it, so the interpreter
+validates it against the source's content instead.
 
 Nothing else is serialized: no object state, no credentials, and no prompt
 text unless the `DecisionSpec` itself stores it.
