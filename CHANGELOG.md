@@ -190,6 +190,26 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **Built-in grader correctness pass.** Resolves several edge cases and correctness
+  issues across the built-in grader suite:
+  - `JsonSchemaGrader` now selects the validator class via `validator_for(schema, default=Draft7Validator)`,
+    preventing `SchemaError` crashes on valid Draft 7 schemas (e.g. tuple-form `items`),
+    and validates schemas once at construction time.
+  - `ConstraintGrader` strictly validates constraint definitions at construction time
+    (`must_include`/`must_not_include` require string values; `numeric_range` requires
+    numeric `min`/`max` where `min <= max`; `enum` requires a list of allowed values).
+  - Output string matching in `ContainsGrader`, `RegexMatchGrader`, and `ConstraintGrader`
+    safely handles `None` outputs (`output_present=0.0`) and serializes dict/list outputs
+    to deterministic JSON rather than Python `str()` repr. `ContainsGrader` and
+    `RegexMatchGrader` also support an optional `field` selector for dict outputs.
+  - Tool call graders (`ToolCallGrader`, `TraceConsistencyGrader`) read
+    `transcript.all_tool_calls` so tool calls recorded in either `tool_calls` or `steps`
+    are evaluated consistently.
+  - `EventChainVerifier` validates regex patterns and DAG `after` references at construction,
+    supports an optional `step_type` filter on `CONTENT_REGEX`, and respects `score_per_event`.
+  - `LatencyAnalyzer` sorts token events chronologically and handles explicit zero token counts.
+  - `LLMGrader` safely coerces non-string provider responses before parsing.
+  (#126)
 - **Markdown reports render hostile table cells safely.** Task ids or gate
   values containing `|`, line breaks, or HTML metacharacters (`&`, `<`, `>`)
   no longer break the per-task and baseline-gate tables piped into

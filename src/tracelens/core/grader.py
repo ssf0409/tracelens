@@ -385,6 +385,9 @@ class LLMGrader(Grader):
                 last_exc = exc
                 continue
 
+            if not isinstance(response, str):
+                response = str(response)
+
             try:
                 passed, score, metrics, feedback = self.parse_llm_response(response, task)
             except Exception as exc:

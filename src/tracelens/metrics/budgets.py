@@ -132,7 +132,8 @@ class ToolCallGrader(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
-        called_names = {tc.tool_name for tc in transcript.tool_calls}
+        tool_calls = transcript.all_tool_calls
+        called_names = {tc.tool_name for tc in tool_calls}
 
         # Required: fraction of required tools that were actually called
         if self.required_tools:
@@ -147,7 +148,7 @@ class ToolCallGrader(CodeGrader):
         if self.allowed_tools is not None:
             allowed_set = set(self.allowed_tools)
             unauthorized = sum(
-                1 for tc in transcript.tool_calls
+                1 for tc in tool_calls
                 if tc.tool_name not in allowed_set
             )
         else:
@@ -156,7 +157,7 @@ class ToolCallGrader(CodeGrader):
         # Forbidden: tools called that are in the forbidden list
         forbidden_set = set(self.forbidden_tools)
         forbidden = sum(
-            1 for tc in transcript.tool_calls
+            1 for tc in tool_calls
             if tc.tool_name in forbidden_set
         )
 
@@ -210,7 +211,7 @@ class TraceConsistencyGrader(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
-        tool_calls = transcript.tool_calls
+        tool_calls = transcript.all_tool_calls
 
         # Tool error rate
         if tool_calls:

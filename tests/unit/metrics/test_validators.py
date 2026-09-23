@@ -511,3 +511,97 @@ class TestConstraintGrader:
                 "constraint",
                 constraints=[{"type": "unknown_type", "value": "x"}],
             )
+
+    def test_constraint_validation_rules(self) -> None:
+        # must_include requires str value
+        with pytest.raises(ValueError, match="requires 'value' of type str"):
+            ConstraintGrader("c1", constraints=[{"type": "must_include"}])
+        with pytest.raises(ValueError, match="requires 'value' of type str"):
+            ConstraintGrader("c1", constraints=[{"type": "must_include", "value": 123}])
+
+        # must_not_include requires str value
+        with pytest.raises(ValueError, match="requires 'value' of type str"):
+            ConstraintGrader("c2", constraints=[{"type": "must_not_include"}])
+
+        # numeric_range requires field and valid numbers
+        with pytest.raises(ValueError, match="requires 'field' of type str"):
+            ConstraintGrader("c3", constraints=[{"type": "numeric_range"}])
+        with pytest.raises(ValueError, match="'min' must be numeric"):
+            ConstraintGrader("c3", constraints=[{"type": "numeric_range", "field": "f", "min": True}])
+        with pytest.raises(ValueError, match="'max' must be numeric"):
+            ConstraintGrader("c3", constraints=[{"type": "numeric_range", "field": "f", "max": "high"}])
+        with pytest.raises(ValueError, match="'min' \\(10\\) > 'max' \\(5\\)"):
+            ConstraintGrader("c3", constraints=[{"type": "numeric_range", "field": "f", "min": 10, "max": 5}])
+
+        # enum requires field and list values
+        with pytest.raises(ValueError, match="requires 'field' of type str"):
+            ConstraintGrader("c4", constraints=[{"type": "enum"}])
+        with pytest.raises(ValueError, match="requires 'values' of type list"):
+            ConstraintGrader("c4", constraints=[{"type": "enum", "field": "f", "values": "not-a-list"}])
+
+    def test_none_output_handling(self) -> None:
+        grader = ConstraintGrader(
+            "c_none",
+            constraints=[{"type": "must_include", "value": "hello"}],
+        )
+        outcome = _run(grader.grade(_make_transcript(None), _make_task()))
+        assert outcome.passed is False
+        assert outcome.metrics["constraints_met"] == 0.0
+        assert outcome.metrics["violations"] == 1.0
+
+
+class TestGraderFieldAndSerialization:
+    """Tests for field extraction, json serialization, and None handling in Contains/Regex."""
+
+    def test_json_schema_draft7_tuple_items(self) -> None:
+        # In Draft 7, items can be a list of schemas (tuple validation).
+        # In Draft 2020-12, items must be a schema (object/bool) and prefixItems is used instead.
+        schema = {
+            "type": "array",
+            "items": [{"type": "string"}, {"type": "number"}],
+        }
+        grader = JsonSchemaGrader("tuple-schema", schema=schema)
+        valid = _make_transcript(["hello", 42])
+        outcome = _run(grader.grade(valid, _make_task()))
+        assert outcome.passed is True
+
+    def test_contains_grader_none_output(self) -> None:
+        grader = ContainsGrader("contains_none", required=["hello"])
+        outcome = _run(grader.grade(_make_transcript(None), _make_task()))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics["output_present"] == 0.0
+        assert outcome.metrics["required_found"] == 0.0
+
+    def test_contains_grader_field_extraction(self) -> None:
+        grader = ContainsGrader("contains_field", required=["needle"], field="summary")
+        transcript = _make_transcript({"summary": "here is the needle", "other": "irrelevant"})
+        outcome = _run(grader.grade(transcript, _make_task()))
+        assert outcome.passed is True
+        assert outcome.metrics["output_present"] == 1.0
+
+        # Missing field fails
+        transcript_missing = _make_transcript({"other": "irrelevant"})
+        outcome_missing = _run(grader.grade(transcript_missing, _make_task()))
+        assert outcome_missing.passed is False
+        assert outcome_missing.metrics["output_present"] == 0.0
+
+    def test_contains_grader_dict_json_serialization(self) -> None:
+        grader = ContainsGrader("contains_json", required=['"a": 1', '"b": 2'])
+        transcript = _make_transcript({"b": 2, "a": 1})
+        outcome = _run(grader.grade(transcript, _make_task()))
+        assert outcome.passed is True
+
+    def test_regex_grader_none_output(self) -> None:
+        grader = RegexMatchGrader("regex_none", patterns=[r"\d+"])
+        outcome = _run(grader.grade(_make_transcript(None), _make_task()))
+        assert outcome.passed is False
+        assert outcome.metrics["output_present"] == 0.0
+
+    def test_regex_grader_field_extraction(self) -> None:
+        grader = RegexMatchGrader("regex_field", patterns=[r"^ID-\d+$"], field="id")
+        transcript = _make_transcript({"id": "ID-12345"})
+        outcome = _run(grader.grade(transcript, _make_task()))
+        assert outcome.passed is True
+        assert outcome.metrics["output_present"] == 1.0
+

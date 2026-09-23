@@ -150,3 +150,49 @@ class TestLatencyAnalyzer:
         assert "first_token_ms" in d
         assert "tokens_per_second" in d
         assert "total_tokens" in d
+
+    def test_unsorted_timestamps(self):
+        analyzer = LatencyAnalyzer()
+        # Events added out of chronological order
+        t = Transcript(task_id="t_unsorted")
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.STREAM_START,
+            timestamp_ms=0.0,
+        ))
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.TOKEN,
+            timestamp_ms=150.0,
+        ))
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.TOKEN,
+            timestamp_ms=50.0,
+        ))
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.TOKEN,
+            timestamp_ms=100.0,
+        ))
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.STREAM_END,
+            timestamp_ms=200.0,
+        ))
+
+        result = analyzer.analyze(t)
+        assert result.first_token_ms == 50.0
+        assert result.inter_token_mean_ms == pytest.approx(50.0)
+
+    def test_explicit_zero_token_count(self):
+        analyzer = LatencyAnalyzer()
+        t = Transcript(task_id="t_zero")
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.TOKEN,
+            timestamp_ms=50.0,
+            token_count=0,
+        ))
+        t.add_streaming_event(StreamingEvent(
+            event_type=StreamingEventType.TOKEN,
+            timestamp_ms=100.0,
+            token_count=5,
+        ))
+        result = analyzer.analyze(t)
+        assert result.total_tokens == 5
+

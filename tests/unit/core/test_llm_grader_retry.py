@@ -151,3 +151,19 @@ def test_missing_provider_raises_immediately_without_retry() -> None:
 
     with pytest.raises(NotImplementedError):
         asyncio.run(grader.grade(_transcript(), _task()))
+
+
+def test_non_string_provider_response_coerced() -> None:
+    class _CustomResponse:
+        def __str__(self) -> str:
+            return '{"score": 0.95}'
+
+    class _ObjectProvider:
+        async def complete(self, prompt: str) -> object:
+            return _CustomResponse()
+
+    grader = _JSONGrader("g", provider=_ObjectProvider(), config=_config())
+    outcome = asyncio.run(grader.grade(_transcript(), _task()))
+    assert outcome.passed is True
+    assert outcome.score == 0.95
+

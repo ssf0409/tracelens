@@ -53,9 +53,28 @@ class EventExpectation(BaseModel):
         if mt in (EventMatchType.CONTENT_REGEX, EventMatchType.RESULT_REGEX):
             if not self.content_pattern:
                 raise ValueError(f"match_type='{mt}' requires 'content_pattern'")
+            try:
+                re.compile(self.content_pattern)
+            except re.error as exc:
+                raise ValueError(
+                    f"EventExpectation '{self.event_id}': invalid regex pattern "
+                    f"'{self.content_pattern}': {exc}"
+                ) from exc
         if mt == EventMatchType.STEP_TYPE:
             if self.step_type is None:
                 raise ValueError("match_type='step_type' requires 'step_type'")
+
+        if self.argument_patterns:
+            for key, pattern in self.argument_patterns.items():
+                if pattern.startswith("re:"):
+                    regex_str = pattern[3:]
+                    try:
+                        re.compile(regex_str)
+                    except re.error as exc:
+                        raise ValueError(
+                            f"EventExpectation '{self.event_id}': invalid regex in argument pattern "
+                            f"for '{key}': '{regex_str}' -- {exc}"
+                        ) from exc
         return self
 
 
@@ -66,6 +85,29 @@ class EventChainConfig(BaseModel):
     ordering: OrderingMode = OrderingMode.STRICT
     require_all: bool = True
     score_per_event: bool = True
+
+    @model_validator(mode="after")
+    def _validate_event_chain(self) -> "EventChainConfig":
+        seen_ids: set[str] = set()
+        for exp in self.expected_events:
+            if exp.event_id in seen_ids:
+                raise ValueError(
+                    f"Duplicate event_id '{exp.event_id}' in expected_events"
+                )
+            seen_ids.add(exp.event_id)
+
+        for exp in self.expected_events:
+            for after_id in exp.after:
+                if after_id not in seen_ids:
+                    raise ValueError(
+                        f"EventExpectation '{exp.event_id}' has 'after' dependency on "
+                        f"unknown event_id '{after_id}'"
+                    )
+                if after_id == exp.event_id:
+                    raise ValueError(
+                        f"EventExpectation '{exp.event_id}' cannot depend on itself in 'after'"
+                    )
+        return self
 
 
 class EventChainVerifier(CodeGrader):
@@ -150,7 +192,11 @@ class EventChainVerifier(CodeGrader):
         else:
             passed = ratio >= (self.config.pass_threshold if self.config else 0.5)
 
-        score = ratio
+        if self.chain_config.score_per_event:
+            score = ratio
+        else:
+            score = 1.0 if passed else 0.0
+
         if not ordering_ok:
             score *= 0.5
 
@@ -172,6 +218,8 @@ class EventChainVerifier(CodeGrader):
                 return True
             case EventMatchType.CONTENT_REGEX:
                 if expectation.content_pattern is None:
+                    return False
+                if expectation.step_type is not None and step.step_type != expectation.step_type:
                     return False
                 content_str = str(step.content) if step.content is not None else ""
                 return self._safe_search(expectation.content_pattern, content_str)

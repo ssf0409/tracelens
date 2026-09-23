@@ -239,9 +239,24 @@ class Transcript(BaseModel):
         if step.error:
             self.errors.append(step.error)
 
+    @property
+    def all_tool_calls(self) -> list[ToolCall]:
+        """All tool calls recorded in either `tool_calls` or `steps` without duplicates.
+
+        Preserves ordering: items in `tool_calls` first, followed by any
+        `step.tool_call` from `steps` that is not already included.
+        """
+        calls = list(self.tool_calls)
+        seen_ids = {id(tc) for tc in calls}
+        for s in self.steps:
+            if s.tool_call is not None and id(s.tool_call) not in seen_ids:
+                calls.append(s.tool_call)
+                seen_ids.add(id(s.tool_call))
+        return calls
+
     def get_tool_calls_by_name(self, name: str) -> list[ToolCall]:
         """Get all tool calls with a specific name."""
-        return [tc for tc in self.tool_calls if tc.tool_name == name]
+        return [tc for tc in self.all_tool_calls if tc.tool_name == name]
 
     def get_steps_by_type(self, step_type: StepType) -> list[TranscriptStep]:
         """Get all steps of a specific type."""
