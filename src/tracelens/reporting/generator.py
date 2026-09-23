@@ -301,7 +301,6 @@ class ReportGenerator:
     def build_report(
         self,
         batch: TrialBatch,
-        baseline_manager: BaselineManager | None = None,
     ) -> ReportData:
         """Build a ReportData from a TrialBatch.
 
