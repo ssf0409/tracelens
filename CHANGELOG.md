@@ -8,6 +8,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-24
+
 ### Added
 
 - **Provenance records what an adapter or grader *is*, not only what it is
