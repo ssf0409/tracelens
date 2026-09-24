@@ -38,11 +38,14 @@ from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 METHOD = "paired task bootstrap"
 UNIT = "task"
 DEFAULT_THRESHOLD = 0.03
+DEFAULT_CONFIDENCE = 0.95
+DEFAULT_N_BOOTSTRAP = 10000
 BUILTIN_METRICS = ("pass_rate", "mean_score")
 UNMATCHED_POLICIES = ("error", "exclude")
 _EXACT_SIGN_FLIP_MAX_TASKS = 12
 # An interval bound this close to zero is treated as touching zero, so
-# floating-point residue from averaging never decides significance.
+# floating-point residue from averaging never decides significance. The
+# threshold gets the same slack, scaled to its size.
 _ZERO_TOLERANCE = 1e-9
 # The level a p-value is held to is rounded to this many digits, so that
 # 1 - 0.95 is 0.05 and not 0.05000000000000004.
@@ -289,8 +292,41 @@ def _enumerates(tasks: int, n_bootstrap: int) -> bool:
 
 
 def alpha_for(confidence: float) -> float:
-    """The level a p-value is held to: ``1 - confidence``, without float residue."""
-    return round(1.0 - confidence, _ALPHA_DIGITS)
+    """The level a p-value is held to: ``1 - confidence``, without float residue.
+
+    Raises:
+        ValueError: If ``confidence`` is not strictly between 0 and 1, or is
+            so close to either end that ``1 - confidence`` rounds to 0 or 1.
+    """
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be strictly between 0 and 1, got {confidence!r}")
+    alpha = round(1.0 - confidence, _ALPHA_DIGITS)
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(
+            f"confidence {confidence!r} is too close to {0 if alpha else 1}: the level "
+            f"1 - confidence rounds to {alpha:g} at {_ALPHA_DIGITS} digits"
+        )
+    return alpha
+
+
+def _level_shortfall(tasks: int, n_bootstrap: int, confidence: float) -> tuple[bool, bool]:
+    """What keeps the sign-flip test from reaching ``p <= 1 - confidence``.
+
+    ``(too few tasks, too few draws)``: the exact test cannot go below
+    ``2 / 2^T``, and a sampled estimate cannot go below ``1 / (B + 1)``.
+    """
+    alpha = alpha_for(confidence)
+    too_few_tasks = tasks < 1 or 2.0 ** (1 - tasks) > alpha
+    too_few_draws = not _enumerates(tasks, n_bootstrap) and 1.0 / (n_bootstrap + 1) > alpha
+    return too_few_tasks, too_few_draws
+
+
+def _shortfall_names(too_few_tasks: bool, too_few_draws: bool) -> str:
+    return " and ".join(
+        name
+        for name, short in (("tasks", too_few_tasks), ("sign-flip draws", too_few_draws))
+        if short
+    )
 
 
 def min_attainable_p(tasks: int, n_bootstrap: int) -> float | None:
@@ -298,10 +334,10 @@ def min_attainable_p(tasks: int, n_bootstrap: int) -> float | None:
 
     Only the observed sign assignment and its mirror image can be as extreme
     as the observed mean, and only when every difference is non-zero and all
-    share one sign, so the exact two-sided p-value is never below ``2 / 2^T``.
-    When the assignments are sampled rather than enumerated, the estimate
-    ``(extreme + 1) / (B + 1)`` is also never below ``1 / (B + 1)``. ``None``
-    without tasks.
+    share one sign, so the exact two-sided p-value is never below ``2 / 2^T``,
+    and a sampled estimate is never reported below it either. A sampled
+    estimate ``(extreme + 1) / (B + 1)`` is also never below ``1 / (B + 1)``.
+    ``None`` without tasks.
     """
     if tasks < 1:
         return None
@@ -319,11 +355,10 @@ def min_tasks_for(confidence: float) -> int:
     large and consistent it is, so there is no verdict.
 
     Raises:
-        ValueError: If ``confidence`` is not strictly between 0 and 1.
+        ValueError: If ``confidence`` is not strictly between 0 and 1 (see
+            :func:`alpha_for`).
     """
     alpha = alpha_for(confidence)
-    if not 0.0 < alpha < 1.0:
-        raise ValueError(f"confidence must be strictly between 0 and 1, got {confidence!r}")
     tasks = 2
     while 2.0 ** (1 - tasks) > alpha:
         tasks += 1
@@ -337,7 +372,9 @@ def _sign_flip_p_value(
 
     Exact (all ``2^T`` assignments) when ``T`` is small enough for that to
     cost no more than ``n_bootstrap`` draws; otherwise ``n_bootstrap`` random
-    assignments, with the observed one counted.
+    assignments, with the observed one counted, and never below the exact
+    test's floor ``2 / 2^T`` (a sample can miss the few assignments as extreme
+    as the observed one, but the exact p-value always counts them).
     """
     t = len(diffs)
     observed = abs(delta) - 1e-12
@@ -356,14 +393,14 @@ def _sign_flip_p_value(
         means = signs @ diffs / t
         extreme += int(np.sum(np.abs(means) >= observed))
         start += size
-    return (extreme + 1) / (n_bootstrap + 1), False
+    return max((extreme + 1) / (n_bootstrap + 1), 2.0 ** (1 - t)), False
 
 
 def paired_task_effect(
     diffs: Sequence[float],
     *,
-    confidence: float = 0.95,
-    n_bootstrap: int = 10000,
+    confidence: float = DEFAULT_CONFIDENCE,
+    n_bootstrap: int = DEFAULT_N_BOOTSTRAP,
     seed: int | None = 0,
 ) -> PairedEffect:
     """Mean of paired per-task differences with a task bootstrap and sign-flip test.
@@ -372,11 +409,10 @@ def paired_task_effect(
     an improvement). Fewer than two tasks yield no interval and no p-value.
 
     Raises:
-        ValueError: If ``confidence`` is not strictly between 0 and 1, or
-            ``n_bootstrap`` is less than 1.
+        ValueError: If ``confidence`` is not strictly between 0 and 1 (see
+            :func:`alpha_for`), or ``n_bootstrap`` is less than 1.
     """
-    if not 0.0 < alpha_for(confidence) < 1.0:
-        raise ValueError(f"confidence must be strictly between 0 and 1, got {confidence!r}")
+    alpha_for(confidence)
     if n_bootstrap < 1:
         raise ValueError(f"n_bootstrap must be at least 1, got {n_bootstrap!r}")
     values = np.asarray(sorted(float(d) for d in diffs))
@@ -407,8 +443,18 @@ def can_reach_level(effect: PairedEffect) -> bool:
     False with fewer than :func:`min_tasks_for` paired tasks, or with too few
     sampled sign assignments to resolve the level.
     """
-    attainable = min_attainable_p(effect.tasks, effect.n_bootstrap)
-    return attainable is not None and attainable <= alpha_for(effect.confidence)
+    return not any(_level_shortfall(effect.tasks, effect.n_bootstrap, effect.confidence))
+
+
+def _threshold_bounds(threshold: float) -> tuple[float, float]:
+    """Where a value reaches the threshold: at or below the first, or at or above the second.
+
+    Floating-point residue never decides which side of the threshold a value
+    falls on: ``0.8 - 0.6`` and ``0.6 - 0.4`` are the same drop of one trial
+    in five, and both reach a threshold of 0.2.
+    """
+    slack = _ZERO_TOLERANCE * max(1.0, threshold)
+    return -threshold + slack, threshold - slack
 
 
 def is_significant(effect: PairedEffect) -> bool | None:
@@ -433,25 +479,27 @@ def decide(effect: PairedEffect, threshold: float) -> Verdict:
     There is no verdict without enough tasks for the sign-flip test to reach
     the level. A difference is significant only when the interval and the
     p-value agree, and a significant difference below the threshold passes
-    only when the interval also rules out a regression of the threshold or
-    more, so every verdict that exits 0 has ``ci_lower > -threshold``.
+    only when the interval also stays above ``-threshold``, so every verdict
+    that exits 0 has ``ci_lower > -threshold``. A value within floating-point
+    residue of the threshold counts as reaching it.
     """
     significant = is_significant(effect)
     if significant is None or effect.delta is None or not can_reach_level(effect):
         return Verdict.INSUFFICIENT_EVIDENCE
     assert effect.ci_lower is not None and effect.ci_upper is not None  # as significant
     delta, lo, hi = effect.delta, effect.ci_lower, effect.ci_upper
+    down, up = _threshold_bounds(threshold)
     if significant:
-        if delta <= -threshold:
+        if delta <= down:
             return Verdict.REGRESSION
-        if lo <= -threshold:
+        if lo <= down:
             # Significant, and small on the estimate, but a regression of the
             # threshold or more is still inside the interval.
             return Verdict.INCONCLUSIVE
-        if delta >= threshold:
+        if delta >= up:
             return Verdict.IMPROVEMENT
         return Verdict.BELOW_THRESHOLD
-    if lo > -threshold and hi < threshold:
+    if lo > down and hi < up:
         return Verdict.EQUIVALENT
     return Verdict.INCONCLUSIVE
 
@@ -591,15 +639,17 @@ class RunComparison(BaseModel):
     def _readings(self, lower: float, upper: float) -> list[str]:
         """Significance, practical relevance, and the interval's extent against the threshold."""
         alpha = alpha_for(self.confidence)
-        reachable = self.min_attainable_p is not None and self.min_attainable_p <= alpha
-        p_agrees = reachable and self.p_value is not None and self.p_value <= alpha
+        short = _level_shortfall(self.alignment.compared, self.n_bootstrap, self.confidence)
         if self.significant:
             significance = "significant"
-        elif self.interval_excludes_zero and not reachable:
-            significance = "not significant (the interval excludes 0, but too few tasks for p)"
+        elif self.interval_excludes_zero and any(short):
+            significance = (
+                "not significant (the interval excludes 0, but too few "
+                f"{_shortfall_names(*short)} for p)"
+            )
         elif self.interval_excludes_zero:
             significance = f"not significant (the interval excludes 0, but p > {alpha:g})"
-        elif p_agrees:
+        elif not any(short) and self.p_value is not None and self.p_value <= alpha:
             significance = f"not significant (p <= {alpha:g}, but the interval includes 0)"
         else:
             significance = "not significant"
@@ -607,12 +657,13 @@ class RunComparison(BaseModel):
         relevance = (
             f"|delta| >= threshold {tau}" if self.meaningful else f"|delta| < threshold {tau}"
         )
-        low, high = lower <= -self.threshold, upper >= self.threshold
+        down, up = _threshold_bounds(self.threshold)
+        low, high = lower <= down, upper >= up
         if low and high:
             extent = f"interval reaches both -{tau} and +{tau}"
-        elif upper <= -self.threshold:
+        elif upper <= down:
             extent = f"interval beyond -{tau}"
-        elif lower >= self.threshold:
+        elif lower >= up:
             extent = f"interval beyond +{tau}"
         elif low:
             extent = f"interval reaches -{tau}"
@@ -623,18 +674,23 @@ class RunComparison(BaseModel):
         return [significance, relevance, extent]
 
     def _shortfall(self, attainable: float) -> str:
-        """Why there is no verdict: the p-value the test cannot get below."""
+        """Why there is no verdict: the p-value the test cannot get below, and what it takes."""
         alpha = alpha_for(self.confidence)
-        need = f"a {self.confidence * 100:g}% verdict needs p <= {alpha:g}"
         tasks = self.alignment.compared
-        if self.min_tasks is not None and tasks < self.min_tasks:
-            return (
-                f"with {tasks} paired task(s) the sign-flip test cannot give p below "
-                f"{attainable:.4f}; {need}, which takes at least {self.min_tasks} tasks"
-            )
+        too_few_tasks, too_few_draws = _level_shortfall(tasks, self.n_bootstrap, self.confidence)
+        have: list[str] = []
+        takes: list[str] = []
+        if too_few_tasks or not too_few_draws:  # one is short whenever there is no verdict
+            have.append(f"{tasks} paired task(s)")
+            takes.append(f"at least {self.min_tasks} tasks")
+        if too_few_draws:
+            have.append(f"B = {self.n_bootstrap} sampled sign flips")
+            takes.append(f"B >= {math.ceil(1 / alpha) - 1}")
+        test = "the test" if too_few_draws else "the sign-flip test"
         return (
-            f"with B = {self.n_bootstrap} sampled sign flips the test cannot give p below "
-            f"{attainable:.4f}; {need}, which takes B >= {math.ceil(1 / alpha) - 1}"
+            f"with {' and '.join(have)} {test} cannot give p below {attainable:.4f}; "
+            f"a {self.confidence * 100:g}% verdict needs p <= {alpha:g}, "
+            f"which takes {' and '.join(takes)}"
         )
 
 
@@ -681,8 +737,8 @@ def compare_runs(
     direction: str | None = None,
     grader: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
-    confidence: float = 0.95,
-    n_bootstrap: int = 10000,
+    confidence: float = DEFAULT_CONFIDENCE,
+    n_bootstrap: int = DEFAULT_N_BOOTSTRAP,
     seed: int | None = 0,
     unmatched_tasks: str = "error",
     require_provenance: bool = False,
@@ -810,6 +866,7 @@ def compare_runs(
         if effect.ci_lower is None or effect.ci_upper is None
         else excludes_zero(effect.ci_lower, effect.ci_upper)
     )
+    down, up = _threshold_bounds(threshold)
     return RunComparison(
         metric=selector.name,
         direction=selector.direction,
@@ -839,7 +896,7 @@ def compare_runs(
         threshold=threshold,
         significant=is_significant(effect),
         interval_excludes_zero=interval_excludes_zero,
-        meaningful=None if effect.delta is None else abs(effect.delta) >= threshold,
+        meaningful=None if effect.delta is None else effect.delta <= down or effect.delta >= up,
         verdict=verdict,
         exit_code=exit_code,
         observe=observe,
@@ -850,6 +907,8 @@ def compare_runs(
 
 
 __all__ = [
+    "DEFAULT_CONFIDENCE",
+    "DEFAULT_N_BOOTSTRAP",
     "DEFAULT_THRESHOLD",
     "ComparisonError",
     "Direction",

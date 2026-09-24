@@ -144,8 +144,8 @@ statistics are the ones fixed in the
 - **Three readings, one verdict.** Significance (the interval excludes 0 *and*
   the p-value agrees), practical relevance (`|delta|` against `--threshold`),
   and evidence (the interval's extent against the threshold). A small
-  significant change passes as "below the threshold" only when the interval
-  also rules out a regression of the threshold. The verdict is one of *improvement*,
+  significant change passes as "below the threshold" only when the
+  interval's lower end also stays above `-threshold`. The verdict is one of *improvement*,
   *regression*, *significant but below the threshold*, *equivalent within the
   threshold*, *inconclusive*, or *insufficient evidence*; exit codes are 0, 1,
   and 2 respectively for "no regression", "regression", and "cannot tell".

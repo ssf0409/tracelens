@@ -408,7 +408,9 @@ excluded and counted. Unavailable evidence is never a zero delta.
    (counting the observed one) whose mean is at least as extreme as `|Δ|`.
    The assignments are drawn with the same `seed`; when `T ≤ 12` and
    `2^T ≤ B` all assignments are enumerated instead and the p-value is
-   exact.
+   exact. A sampled p-value is never reported below `2 / 2^T`, the exact
+   test's floor: a sample can miss the few assignments as extreme as the
+   observed one, which the exact p-value always counts.
 
 **Verdict.** Given the practical threshold `τ` (`--threshold`, an absolute
 delta on the metric's scale; default 0.03), the level `α = 1 − confidence`,
@@ -446,9 +448,16 @@ three separate readings, and the output reports all three. Non-significance
 is never equivalence: only an interval inside `(−τ, τ)` supports "no
 meaningful change". Likewise a significant change below the threshold passes
 only when the interval also stays above `−τ`. Every verdict that exits 0
-therefore rules out a regression of `τ` or more (`lo > −τ`): while the
-interval reaches `−τ`, narrowing it toward harm can move the verdict from 2
-to 1, never to 0.
+therefore has `lo > −τ`: while the interval reaches `−τ`, narrowing it toward
+harm can move the verdict from 2 to 1, never to 0. That is what the
+interval reads, not a guarantee at the nominal level: the exit-0 rows rest on
+the interval alone, not on the sign-flip test, and on few tasks the interval
+is too narrow. When every task's difference is drawn around a drop of exactly
+`τ`, the verdict still exits 0 in 7.2 % of comparisons at six tasks and
+3.6 % at thirty (the *Exit 0* table below), where a one-sided 97.5 % bound
+would allow 2.5 %. A delta or bound within floating-point residue of `±τ`
+counts as reaching it, so the same drop of one trial in five reaches a
+threshold of 0.2 whether it is `0.8 → 0.6` or `0.6 → 0.4`.
 Exit codes follow the CLI contract (0 success, 1 negative result, 2
 unevaluable). `--observe` makes every *evaluated* comparison exit 0, for
 dashboards and exploratory runs; incompatible, empty, or aggregate-only inputs
@@ -487,6 +496,26 @@ Below 6 tasks there is no verdict. Near 2.5 % a cell's sampling error is about
 | 15 | 4.9 % | 3.3 % | 94.5 % | 1.0 % | 65.5 % |
 | 20 | 2.7 % | 2.2 % | 99.1 % | 1.6 % | 82.6 % |
 | 30 | 3.1 % | 2.5 % | 100.0 % | 1.7 % | 94.6 % |
+
+**Exit 0.** How often the verdict exits 0, out of the same number of
+comparisons at the same settings, when each task's paired difference is drawn
+from a normal distribution whose standard deviation is the threshold, 0.03:
+around -0.03 (*drop of τ*, a regression of exactly the threshold, which every
+exit 0 misses) or around 0 (*no change*, where exit 0 is right). Near 5 % a
+cell's sampling error is about 1.0 percentage points either way.
+
+| tasks T | drop of τ | no change |
+|---|---|---|
+| 2 | 0.0 % | 0.0 % |
+| 3 | 0.0 % | 0.0 % |
+| 4 | 0.0 % | 0.0 % |
+| 5 | 0.0 % | 0.0 % |
+| 6 | 7.2 % | 51.2 % |
+| 8 | 4.9 % | 67.5 % |
+| 10 | 5.7 % | 79.0 % |
+| 15 | 3.8 % | 94.8 % |
+| 20 | 3.8 % | 99.1 % |
+| 30 | 3.6 % | 100.0 % |
 
 **Output.** The terminal summary and the `--output` JSON carry the same
 fields: the method (`paired task bootstrap`), the unit, the metric and its
@@ -545,7 +574,7 @@ are never compared across silently different populations.
 | The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
 | No run-versus-run command; `compare_metrics` resampled two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 (fixed) |
 | `tracelens compare` decided on the percentile interval alone and never consulted the sign-flip p-value it printed; with few tasks the interval is too narrow, so a no-change comparison was called a regression 21 % of the time at two tasks and 6.7 % at six, beside `p = 0.5` | significance needs the interval and the p-value to agree, and there is no verdict below the tasks at which the test can reach the level (6 at 0.95) | #112 (fixed) |
-| A significant change smaller than `τ` passed even when the interval reached past `−τ`, so making a regression more certain could move exit 2 to exit 0 | "below the threshold" requires `lo > −τ`; every verdict that exits 0 rules out a regression of `τ` or more | #112 (fixed) |
+| A significant change smaller than `τ` passed even when the interval reached past `−τ`, so making a regression more certain could move exit 2 to exit 0 | "below the threshold" requires `lo > −τ`, so every verdict that exits 0 has `lo > −τ` | #112 (fixed) |
 | The gate's fallback for a zero-variance baseline divided the delta by the sample SD, not the standard error, so a drop's p-value never tightened with `n` (1.0 → 0.4 over 5, 10, or 100 trials all read p ≈ 0.22) | exact test on the two counts for 0/1 metrics; SE-based t-tests otherwise | #111 (fixed) |
 | A drop that was not significant was dropped from stdout, JSON, Markdown, and HTML, so an underpowered check read like a clean pass | every change above the floor is reported with its evidence, `underpowered`, and `trials_needed` | #111 (fixed) |
 | The baseline's `sample_size` was never read; the stored mean was treated as exact | two-sample tests on both sample sizes, used as recorded | #111 (fixed) |

@@ -58,6 +58,9 @@ def derived_subset(name: str, task_ids: Sequence[str]) -> dict[str, Any]:
         for task_id, digest in measurement["task_hashes"].items()
         if task_id in keep
     }
+    # A stand-in digest (the real one hashes the tasks' content): compatibility
+    # only asks whether two runs carry the same one, and subsets of the same
+    # tasks do.
     measurement["eval_set_hash"] = hashlib.sha256(
         "".join(sorted(measurement["task_hashes"].values())).encode()
     ).hexdigest()
