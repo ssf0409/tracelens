@@ -40,10 +40,12 @@ does not know is rejected with a clear error.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -81,6 +83,40 @@ def task_content_hash(task: Task) -> str:
     return content_hash(task.model_dump(mode="json"))
 
 
+def component_source_hash(obj: object) -> str | None:
+    """SHA-256 of the source file that defines ``obj``'s class.
+
+    The candidate side's counterpart to :func:`task_content_hash`. A class
+    path names *where* an adapter or grader lives, not *what* it does, so
+    two runs of entirely different code under the same class path were
+    indistinguishable unless someone remembered to bump
+    ``provenance_version``. Hashing the defining file makes an edit visible
+    whether or not anyone did.
+
+    ``None`` when there is no source file to hash -- a class defined in the
+    REPL, built by ``exec``, or implemented in C -- and for artifacts written
+    before it was recorded. ``None`` means *unknown*, never *unchanged*.
+
+    Only the defining file is hashed. Helpers it imports from elsewhere in
+    the project are not, and neither is anything the code reads at run time
+    (a model name from the environment, a prompt file): declare those through
+    ``DecisionSpec``. What is hashed is the source on disk, and that is what
+    ran, because plugins are loaded from source (``execution.registry``).
+    """
+    target = obj if isinstance(obj, type) else type(obj)
+    try:
+        source_file = inspect.getsourcefile(target)
+    except (TypeError, OSError):
+        return None
+    if not source_file:
+        return None
+    try:
+        data = Path(source_file).read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
 def eval_set_hash(eval_set: EvalSet) -> str:
     """Content identity of an eval set's tasks, independent of task order.
 
@@ -111,25 +147,35 @@ def short_hash(digest: str | None) -> str:
 
 
 class ComponentIdentity(BaseModel):
-    """Declared identity of an adapter or grader.
+    """Identity of an adapter or grader: what it is declared to be, and what it is.
 
-    ``version`` is the component's ``provenance_version`` attribute when it
-    declares one; TraceLens never serializes object state.
+    ``class_path``, ``name`` and ``version`` (the component's
+    ``provenance_version`` attribute when it declares one) are the *declared*
+    identity. ``source_hash`` is the *content* identity -- SHA-256 of the
+    defining source file, see :func:`component_source_hash` -- so an edit
+    that keeps the class path is still a visible change. TraceLens never
+    serializes object state.
     """
 
     class_path: str
     name: str | None = None
     version: str | None = None
+    source_hash: str | None = None
 
     @classmethod
     def of(cls, obj: object, *, name: str | None = None) -> ComponentIdentity:
-        """Identity of a live component, reading its declared version if any."""
+        """Identity of a live component: declared version and source hash."""
         declared = getattr(obj, "provenance_version", None)
         return cls(
             class_path=class_path(obj),
             name=name,
             version=declared if isinstance(declared, str) and declared else None,
+            source_hash=component_source_hash(obj),
         )
+
+    def declared(self) -> tuple[str, str | None, str | None]:
+        """The declared identity alone, for grouping and ordering."""
+        return (self.class_path, self.name, self.version)
 
     def describe(self) -> str:
         text = self.class_path
@@ -322,19 +368,42 @@ class CompatibilityReport(BaseModel):
                 self.reasons
             )
         shared = len(self.tasks.same) if self.tasks else 0
-        candidate = (
-            "candidate changed"
-            + (f" ({', '.join(sorted(self.candidate_diff))})" if self.candidate_diff else "")
-            if self.candidate_changed
-            else "candidate unchanged"
+        if self.candidate_changed is None:
+            candidate = "candidate unchanged as declared (source not recorded on one side)"
+        elif self.candidate_changed:
+            candidate = "candidate changed" + (
+                f" ({', '.join(sorted(self.candidate_diff))})" if self.candidate_diff else ""
+            )
+        else:
+            candidate = "candidate unchanged"
+        graders = (
+            "graders same as declared (source not recorded on one side)"
+            if self.graders_changed is None
+            else "same graders"
         )
         line = (
             f"Measurement compatibility: compatible; {shared} shared task(s), "
-            f"same graders; {candidate}"
+            f"{graders}; {candidate}"
         )
         if self.notes:
             line += "; note: " + "; ".join(self.notes)
         return line
+
+
+def component_change(a: ComponentIdentity, b: ComponentIdentity) -> bool | None:
+    """Whether two identities name different code.
+
+    ``True`` when the declared identity differs, or when both sides recorded
+    a source hash and the hashes differ. ``None`` when the declared identity
+    matches but a source hash is missing on either side: an edit that kept
+    the class path would then be invisible, and that is reported as unknown
+    rather than passed off as unchanged.
+    """
+    if a.declared() != b.declared():
+        return True
+    if a.source_hash is None or b.source_hash is None:
+        return None
+    return a.source_hash != b.source_hash
 
 
 def _list_ids(ids: Sequence[str], limit: int = 8) -> str:
@@ -395,13 +464,34 @@ def check_compatibility(
             "and no per-task detail is available"
         )
 
-    graders_a = sorted(g.describe() for g in ma.graders)
-    graders_b = sorted(g.describe() for g in mb.graders)
-    graders_changed = graders_a != graders_b
-    if graders_changed:
+    graders_a = sorted(ma.graders, key=lambda g: tuple(x or "" for x in g.declared()))
+    graders_b = sorted(mb.graders, key=lambda g: tuple(x or "" for x in g.declared()))
+    graders_changed: bool | None
+    if [g.declared() for g in graders_a] != [g.declared() for g in graders_b]:
+        graders_changed = True
         reasons.append(
-            f"graders differ: A = [{', '.join(graders_a)}]; B = [{', '.join(graders_b)}]"
+            f"graders differ: A = [{', '.join(g.describe() for g in graders_a)}]; "
+            f"B = [{', '.join(g.describe() for g in graders_b)}]"
         )
+    else:
+        changes = [component_change(x, y) for x, y in zip(graders_a, graders_b, strict=True)]
+        if any(c is True for c in changes):
+            # Same declared identity, different code. A changed grader is a
+            # different measurement whether or not its version was bumped.
+            graders_changed = True
+            edited = [g.describe() for g, c in zip(graders_a, changes, strict=True) if c is True]
+            reasons.append(
+                "grader source changed under the same declared identity: "
+                + ", ".join(edited)
+            )
+        elif any(c is None for c in changes):
+            graders_changed = None
+            notes.append(
+                "grader source not recorded on one side; an edit that kept the "
+                "class path and version would not be detected"
+            )
+        else:
+            graders_changed = False
 
     for name, va in ma.runner.model_dump().items():
         vb = getattr(mb.runner, name)
@@ -413,8 +503,20 @@ def check_compatibility(
         )
 
     ca, cb = a.candidate, b.candidate
-    adapter_changed = ca.adapter != cb.adapter
+    adapter_changed = component_change(ca.adapter, cb.adapter)
+    if adapter_changed is None:
+        notes.append(
+            "adapter source not recorded on one side; an edit that kept the "
+            "class path would not be detected"
+        )
     spec_changed = ca.decision_spec_fingerprint != cb.decision_spec_fingerprint
+    candidate_changed: bool | None
+    if adapter_changed is True or spec_changed:
+        candidate_changed = True
+    elif adapter_changed is None:
+        candidate_changed = None
+    else:
+        candidate_changed = False
     candidate_diff: dict[str, list[Any]] = {}
     if ca.decision_spec is not None and cb.decision_spec is not None:
         candidate_diff = {
@@ -431,6 +533,6 @@ def check_compatibility(
         tasks=tasks,
         graders_changed=graders_changed,
         adapter_changed=adapter_changed,
-        candidate_changed=adapter_changed or spec_changed,
+        candidate_changed=candidate_changed,
         candidate_diff=candidate_diff,
     )

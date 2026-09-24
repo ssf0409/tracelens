@@ -1539,9 +1539,14 @@ def test_results_and_trials_carry_provenance_and_report_rerenders_it(
     assert prov["schema_version"] == 1
     assert prov["measurement"]["eval_set_name"] == "tasks"
     assert set(prov["measurement"]["task_hashes"]) == {"t-pass", "t-fail"}
-    assert prov["measurement"]["graders"] == [
-        {"class_path": GRADER, "name": "value_grader", "version": None}
-    ]
+    (grader,) = prov["measurement"]["graders"]
+    assert {k: grader[k] for k in ("class_path", "name", "version")} == {
+        "class_path": GRADER, "name": "value_grader", "version": None
+    }
+    # A grader loaded from a real file through the CLI carries its content
+    # identity, not only its name: the SHA-256 of the defining source.
+    assert isinstance(grader["source_hash"], str) and len(grader["source_hash"]) == 64
+    assert isinstance(prov["candidate"]["adapter"]["source_hash"], str)
     assert prov["measurement"]["runner"]["num_runs"] == 2
     assert prov["candidate"]["adapter"]["class_path"] == ADAPTER
     assert prov["candidate"]["decision_spec_fingerprint"] is None

@@ -495,8 +495,17 @@ class RunComparison(BaseModel):
 def _what_changed(compat: CompatibilityReport) -> str:
     if compat.status is Compatibility.UNKNOWN:
         return "unknown (no provenance on one side)"
+    if compat.candidate_changed is None:
+        # The declared identity matches but a source hash is missing on one
+        # side (an artifact written before it was recorded), so an edit that
+        # kept the class path cannot be ruled out. Say so; do not call it
+        # unchanged.
+        return (
+            "nothing declared (same adapter class path and DecisionSpec fingerprint; "
+            "adapter source not recorded on one side, so a code edit would not show)"
+        )
     if not compat.candidate_changed:
-        return "nothing declared (same adapter and DecisionSpec fingerprint)"
+        return "nothing (same adapter source and DecisionSpec fingerprint)"
     parts = []
     if compat.adapter_changed:
         parts.append("adapter")

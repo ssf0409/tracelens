@@ -178,7 +178,11 @@ def test_documented_user_journey(tmp_path: Path) -> None:
         "--output", "eval/results/compare.json", cwd=project, expect=1,
     )
     assert "Verdict: REGRESSION (exit 1)" in compare.stdout
-    assert "What changed: nothing declared" in compare.stdout  # same class path and spec
+    # Same class path and DecisionSpec, but step 5 rewrote the adapter's body.
+    # Before the candidate side was content-addressed this read "nothing
+    # declared": literally true, and exactly the blind spot that let a run
+    # measure the wrong agent without anyone noticing.
+    assert "What changed: adapter" in compare.stdout
     decision = load(project / "eval/results/compare.json")
     assert decision["verdict"] == "regression" and decision["delta"] == -1.0
     assert decision["alignment"]["compared"] == 2 and decision["alignment"]["aligned_by"] == "content"

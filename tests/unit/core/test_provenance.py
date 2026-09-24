@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,6 +23,8 @@ from tracelens.core.provenance import (
     build_provenance,
     canonical_json,
     check_compatibility,
+    component_change,
+    component_source_hash,
     content_hash,
     eval_set_hash,
     task_content_hash,
@@ -62,8 +65,11 @@ def _task(task_id: str, x: int = 1, **kwargs: Any) -> Task:
 
 def _settings(**overrides: Any) -> RunnerSettings:
     base: dict[str, Any] = {
-        "num_runs": 2, "max_concurrency": 3, "timeout_seconds": 30.0,
-        "max_infra_retries": 1, "infra_exception_types": ["builtins.ConnectionError"],
+        "num_runs": 2,
+        "max_concurrency": 3,
+        "timeout_seconds": 30.0,
+        "max_infra_retries": 1,
+        "infra_exception_types": ["builtins.ConnectionError"],
     }
     base.update(overrides)
     return RunnerSettings(**base)
@@ -144,9 +150,8 @@ class TestHashing:
 
 class TestIdentities:
     def test_component_identity_reads_declared_version_only(self):
-        assert ComponentIdentity.of(_Adapter()) == ComponentIdentity(
-            class_path=f"{__name__}._Adapter"
-        )
+        identity = ComponentIdentity.of(_Adapter())
+        assert identity.declared() == (f"{__name__}._Adapter", None, None)
         assert ComponentIdentity.of(_VersionedAdapter()).version == "agent-2.3.0"
         grader = ComponentIdentity.of(_VersionedGrader("quality"), name="quality")
         assert grader.describe() == f"quality ({__name__}._VersionedGrader) @ rubric-v4"
@@ -158,11 +163,17 @@ class TestIdentities:
 
     def test_runner_settings_from_config(self):
         config = RunnerConfig(
-            num_runs=4, max_concurrency=2, timeout_seconds=12.5, max_infra_retries=3,
+            num_runs=4,
+            max_concurrency=2,
+            timeout_seconds=12.5,
+            max_infra_retries=3,
             infra_exception_types=(ConnectionError, MemoryError),
         )
         assert RunnerSettings.from_config(config) == RunnerSettings(
-            num_runs=4, max_concurrency=2, timeout_seconds=12.5, max_infra_retries=3,
+            num_runs=4,
+            max_concurrency=2,
+            timeout_seconds=12.5,
+            max_infra_retries=3,
             infra_exception_types=["builtins.ConnectionError", "builtins.MemoryError"],
         )
 
@@ -172,14 +183,17 @@ class TestRunProvenance:
         spec = DecisionSpec(model=ModelConfig(provider="p", model_id="m"))
         tasks = [_task("a"), _task("b")]
         prov = _provenance(
-            tasks, graders=[_Grader("g1"), _VersionedGrader("g2")],
-            adapter=_VersionedAdapter(), spec=spec,
+            tasks,
+            graders=[_Grader("g1"), _VersionedGrader("g2")],
+            adapter=_VersionedAdapter(),
+            spec=spec,
         )
         assert prov.schema_version == PROVENANCE_SCHEMA_VERSION
         assert prov.run_id == "run-1" and prov.tracelens_version
         assert prov.measurement.eval_set_name == "suite"
         assert prov.measurement.task_hashes == {
-            "a": task_content_hash(_task("a")), "b": task_content_hash(_task("b")),
+            "a": task_content_hash(_task("a")),
+            "b": task_content_hash(_task("b")),
         }
         assert prov.measurement.eval_set_hash == eval_set_hash(EvalSet(name="s", tasks=tasks))
         assert [g.name for g in prov.measurement.graders] == ["g1", "g2"]
@@ -344,3 +358,82 @@ class TestCompatibility:
     def test_report_round_trips_through_json(self):
         report = check_compatibility(_provenance([_task("a", 1)]), _provenance([_task("a", 2)]))
         assert CompatibilityReport.model_validate(json.loads(report.model_dump_json())) == report
+
+
+class TestContentIdentity:
+    """A class path says where a component lives; the source hash says what it is."""
+
+    def test_source_hash_is_the_sha256_of_the_defining_file(self):
+        # Independent expectation: hash this test module's bytes directly.
+        expected = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        assert ComponentIdentity.of(_Adapter()).source_hash == expected
+        assert ComponentIdentity.of(_VersionedGrader("q"), name="q").source_hash == expected
+        assert component_source_hash(_Adapter) == expected  # the class itself works too
+
+    def test_no_source_file_means_unknown_not_unchanged(self):
+        # A class built in memory has nothing to hash; that must read as None.
+        namespace: dict[str, object] = {}
+        exec("class Built:\n    pass", namespace)
+        assert component_source_hash(namespace["Built"]()) is None
+        assert component_source_hash(int) is None  # implemented in C
+
+    def test_component_change_is_tri_state(self):
+        same = ComponentIdentity(class_path="x.A", source_hash="aa")
+        edited = ComponentIdentity(class_path="x.A", source_hash="bb")
+        unknown = ComponentIdentity(class_path="x.A")
+        other = ComponentIdentity(class_path="x.B", source_hash="aa")
+        assert component_change(same, same) is False
+        assert component_change(same, edited) is True
+        assert component_change(same, other) is True  # declared identity wins
+        assert component_change(same, unknown) is None
+        assert component_change(unknown, unknown) is None
+
+    def test_an_adapter_edit_under_the_same_class_path_is_now_visible(self):
+        # The case provenance could not see: same class path, different code.
+        before = _provenance([_task("a")])
+        after = before.model_copy(deep=True)
+        after.candidate.adapter.source_hash = "0" * 64
+        report = check_compatibility(before, after)
+        assert report.compatible  # a candidate change never breaks comparability
+        assert report.adapter_changed is True and report.candidate_changed is True
+        assert report.summary_line().endswith("candidate changed")
+
+    def test_a_grader_edit_under_the_same_declared_identity_is_a_different_measurement(self):
+        before = _provenance([_task("a")])
+        after = before.model_copy(deep=True)
+        after.measurement.graders[0].source_hash = "0" * 64
+        report = check_compatibility(before, after)
+        assert report.status is Compatibility.INCOMPATIBLE and report.graders_changed is True
+        assert any(
+            "grader source changed under the same declared identity" in r for r in report.reasons
+        )
+
+    def test_a_missing_hash_is_reported_as_unknown_on_both_sides_of_the_envelope(self):
+        # An artifact written before source hashes were recorded: the declared
+        # identity matches, so nothing is claimed either way.
+        before = _provenance([_task("a")])
+        legacy = before.model_copy(deep=True)
+        legacy.candidate.adapter.source_hash = None
+        legacy.measurement.graders[0].source_hash = None
+        report = check_compatibility(before, legacy)
+        assert report.compatible  # unknown must not turn into "incompatible"
+        assert report.adapter_changed is None and report.candidate_changed is None
+        assert report.graders_changed is None
+        assert any("adapter source not recorded" in n for n in report.notes)
+        assert any("grader source not recorded" in n for n in report.notes)
+        line = report.summary_line()
+        assert line.startswith(
+            "Measurement compatibility: compatible; 1 shared task(s), "
+            "graders same as declared (source not recorded on one side); "
+            "candidate unchanged as declared (source not recorded on one side)"
+        )
+        assert "; note: " in line  # the two "not recorded" notes follow
+
+    def test_legacy_json_without_the_field_still_loads(self):
+        data = _provenance([_task("a")]).model_dump(mode="json")
+        del data["candidate"]["adapter"]["source_hash"]
+        for grader in data["measurement"]["graders"]:
+            del grader["source_hash"]
+        loaded = RunProvenance.model_validate(data)
+        assert loaded.candidate.adapter.source_hash is None
+        assert all(g.source_hash is None for g in loaded.measurement.graders)
