@@ -61,6 +61,11 @@ See [Installation](https://ssf0409.github.io/tracelens/installation/) for extras
 ## 5-Minute Demo
 
 ```bash
+# From a PyPI installation
+tracelens init
+tracelens run --config config.yml
+
+# Or from a clone of the repository
 python examples/hello_world.py
 tracelens report --results examples/reports/hello_world_report.json --format markdown
 ```

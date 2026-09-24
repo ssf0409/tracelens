@@ -58,7 +58,7 @@ protected canary for a safety score:
 ```python
 from tracelens.baselines import BaselineManager, PromotionPolicy
 
-manager = BaselineManager("eval/baselines/baselines.json")
+manager = BaselineManager("eval/eval/baselines.json")
 
 manager.create_capability_baseline(
     task_id="math_agent",
@@ -91,7 +91,7 @@ All `BaselineManager` write APIs also accept `decision_spec=`. For canaries,
 comparison (`compare_with_specs()`) in the CI gate. A hand-typed `fingerprint=`
 string still works if you don't build specs.
 
-Commit the generated `eval/baselines/baselines.json` file. Treat it like a test
+Commit the generated `eval/eval/baselines.json` file. Treat it like a test
 fixture: changes should be reviewed, and the PR should explain why the baseline
 is being created or promoted.
 
@@ -104,7 +104,7 @@ care where the metrics came from.
 ```python
 from tracelens.baselines import BaselineManager, RegressionDetector
 
-manager = BaselineManager("eval/baselines/baselines.json")
+manager = BaselineManager("eval/eval/baselines.json")
 baseline = manager.get_baseline("math_agent")
 
 candidate_results = [
@@ -137,7 +137,7 @@ Now make the candidate worse by more than the default moderate threshold.
 ```python
 from tracelens.baselines import BaselineManager, RegressionDetector, RegressionSeverity
 
-manager = BaselineManager("eval/baselines/baselines.json")
+manager = BaselineManager("eval/eval/baselines.json")
 baseline = manager.get_baseline("math_agent")
 
 candidate_results = [{"pass_rate": 0.84}] * 20
@@ -181,7 +181,7 @@ is trustworthy.
 ```python
 from tracelens.baselines import BaselineManager
 
-manager = BaselineManager("eval/baselines/baselines.json")
+manager = BaselineManager("eval/eval/baselines.json")
 
 promoted, reason = manager.try_promote(
     task_id="math_agent",
@@ -215,7 +215,7 @@ floor and the associated `DecisionSpec` fingerprint.
 ## 7. Wire The Comparison Into CI
 
 If you run evals through the CLI, `tracelens run --baseline-check
---baselines-file eval/baselines/baselines.json --fail-on-regression moderate`
+--baselines-file eval/eval/baselines.json --fail-on-regression moderate`
 does this end to end. Exit codes: 0 = gate passed, 1 = gate blocked (a blocking
 regression, or `--require-baselines` with tasks missing baselines), 2 =
 misconfigured or unevaluable gate. Missing/unparseable baseline files are
@@ -240,7 +240,7 @@ import sys
 
 from tracelens.baselines import BaselineManager, RegressionDetector, RegressionSeverity
 
-manager = BaselineManager("eval/baselines/baselines.json")
+manager = BaselineManager("eval/eval/baselines.json")
 baseline = manager.get_baseline("math_agent")
 candidate_results = load_candidate_results()  # Your eval harness owns this.
 
