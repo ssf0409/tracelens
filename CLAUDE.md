@@ -229,7 +229,10 @@ id and are labelled), one statistic per task and run (`--metric pass_rate |
 mean_score | <grader_id>.<metric_name>`, `--direction`, `--grader`), paired
 differences with a task bootstrap and sign-flip p-value, and a verdict against
 `--threshold`: improvement / equivalent / below-threshold exit 0, regression
-1, inconclusive or insufficient evidence 2 (`--observe` forces 0). The stdout
+1, inconclusive or insufficient evidence 2 (`--observe` forces 0).
+Significance needs the interval and the sign-flip p to agree; fewer tasks than
+the p can resolve (6 at 0.95; `min_tasks`) is insufficient evidence, and every
+exit-0 verdict has `ci_lower > -threshold` (issue #112). The stdout
 summary and `--output` JSON share every field. Fixtures for the tests live in
 `tests/fixtures/compare/` (regenerate with `generate.py`).
 

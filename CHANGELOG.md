@@ -26,6 +26,32 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **`tracelens compare` needs the interval and the p-value to agree, and
+  enough tasks for the p-value to count.** The verdict used to rest on the
+  percentile task-bootstrap interval alone. That interval is too narrow on a
+  handful of tasks, and the sign-flip p-value printed beside it was never
+  consulted. Two tasks that both collapsed therefore read `delta = -1.0000,
+  95% CI [-1.0000, -1.0000], p = 0.5000 (exact)` over `Verdict: REGRESSION
+  (exit 1)`, and with no change at all a regression was called in 21 % of
+  simulated comparisons at two tasks and 6.7 % at six. A difference is now
+  significant only when the interval excludes 0 *and* `p <= 1 - confidence`.
+  Below the task count at which the exact sign-flip test can reach that level
+  at all, there is no verdict: its smallest p-value is `2 / 2^T`, so that is
+  6 tasks at 95 % confidence, 5 at 90 %, 8 at 99 %. The output then says
+  which p-value the test cannot get below and how many tasks a verdict needs.
+  From six tasks up, a no-change comparison is called a regression about
+  2 % of the time. *Behaviour change:* a comparison of fewer than six tasks
+  exits 2 whatever the data, including two runs where nothing moved, and
+  small suites lose power. A real drop of 0.10 is called a regression 37 % of
+  the time on six tasks, 80 % on ten, 99 % on twenty. `RunComparison` and the
+  `--output` JSON gain `min_attainable_p`, `min_tasks` and
+  `interval_excludes_zero`, and `significant` is now the agreement reading.
+  The summary's readings line adds the interval's extent against the
+  threshold. `scripts/compare_error_rates.py` regenerates the contract's
+  error-rate tables at the command's defaults, which it imports
+  (`DEFAULT_CONFIDENCE` and `DEFAULT_N_BOOTSTRAP` join `DEFAULT_THRESHOLD` in
+  `tracelens.statistics.run_comparison`), and takes every setting as a flag.
+  (#112)
 - **A grader whose source changed is a different measurement, declared or
   not.** `check_compatibility` (and so `tracelens compare`) treats two runs
   as incompatible when a grader's source hash differs under the same class
@@ -93,6 +119,37 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **A more certain regression no longer passes as "below the threshold".**
+  `tracelens compare` returned `significant_below_threshold` (exit 0) for any
+  significant change smaller than the threshold, even when the interval
+  reached past `-threshold`. With the default threshold of 0.03, `delta
+  -0.025, CI [-0.050, -0.001]` passed, while the less certain `delta -0.024,
+  CI [-0.050, +0.001]` was inconclusive (exit 2). Making a regression more
+  certain turned exit 2 into exit 0. "Below the threshold" now also requires
+  the interval's lower bound to stay above `-threshold`; otherwise the
+  comparison is inconclusive. Every verdict that exits 0 now has its interval
+  above `-threshold`. On a handful of tasks that interval is still too
+  narrow: when every task drops by exactly the threshold, the verdict exits 0
+  in 7.2 % of simulated comparisons at six tasks and 3.6 % at thirty, not
+  2.5 %. The contract's new *Exit 0* table gives the rate by task count.
+  (#112)
+- **A change of exactly the threshold reaches it however it rounds.**
+  `tracelens compare` compared `delta` and the interval with `±threshold`
+  exactly, so floating-point residue decided the verdict. With `--threshold
+  0.2`, twelve tasks that each lost one trial in five were a regression when
+  they went from 0.8 to 0.6 (`-0.20000000000000007`) and passed as below the
+  threshold when they went from 0.6 to 0.4 (`-0.19999999999999996`). A value
+  within residue of the threshold now counts as reaching it. (#112)
+- **A sampled sign-flip p-value is never below what the exact test can
+  give.** With more than twelve tasks, or fewer draws than `2^T`, the
+  p-value is estimated from sampled sign assignments. The estimate could miss
+  the few assignments as extreme as the observed one and report less than
+  the exact floor `2 / 2^T`. That contradicted `min_attainable_p`, and the
+  `evidence:` line printed after it. In about a quarter of 13-task
+  comparisons where every task moved the same way, the reported p-value was
+  below the floor of `0.000244`. The estimate is now never reported below
+  it. The baseline gate's suite-level p-value, which uses the same test, is
+  floored the same way. (#112)
 - **Plugins are loaded from the source on disk, not from stale bytecode.**
   Python treats a cached `.pyc` as valid while the source file's size and
   its modification time in whole seconds are unchanged. An adapter edited to

@@ -24,15 +24,21 @@ from tracelens.core.provenance import (
 from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 from tracelens.statistics.inference import bootstrap_difference_ci
 from tracelens.statistics.run_comparison import (
+    VERDICT_EXIT_CODES,
     ComparisonError,
     Direction,
     MetricSelector,
     PairedEffect,
     RunComparison,
     Verdict,
+    alpha_for,
+    can_reach_level,
     compare_runs,
     decide,
     excludes_zero,
+    is_significant,
+    min_attainable_p,
+    min_tasks_for,
     paired_task_effect,
 )
 
@@ -234,36 +240,230 @@ class TestPairedTaskEffect:
 # --- decide ---------------------------------------------------------------------
 
 
-def _effect(delta: float | None, lo: float | None, hi: float | None, tasks: int = 5) -> PairedEffect:
+def _effect(
+    delta: float | None,
+    lo: float | None,
+    hi: float | None,
+    p: float | None = 0.001,
+    *,
+    tasks: int = 20,
+    n_bootstrap: int = 10_000,
+    confidence: float = 0.95,
+) -> PairedEffect:
     return PairedEffect(
         tasks=tasks, delta=delta, ci_lower=lo, ci_upper=hi,
-        confidence=0.95, n_bootstrap=10, seed=0,
+        p_value=None if lo is None else p, confidence=confidence,
+        n_bootstrap=n_bootstrap, seed=0,
     )
+
+
+def _exit(effect: PairedEffect, threshold: float = 0.03) -> int:
+    return VERDICT_EXIT_CODES[decide(effect, threshold)]
 
 
 class TestDecide:
     @pytest.mark.parametrize(
-        ("delta", "lo", "hi", "verdict"),
+        ("delta", "lo", "hi", "p", "verdict"),
         [
-            (None, None, None, Verdict.INSUFFICIENT_EVIDENCE),
-            (0.4, None, None, Verdict.INSUFFICIENT_EVIDENCE),
-            (-0.10, -0.15, -0.05, Verdict.REGRESSION),
-            (0.10, 0.05, 0.15, Verdict.IMPROVEMENT),
-            (0.01, 0.005, 0.02, Verdict.BELOW_THRESHOLD),
-            (-0.02, -0.025, -0.01, Verdict.BELOW_THRESHOLD),
-            (0.0, -0.01, 0.02, Verdict.EQUIVALENT),
-            (0.02, -0.05, 0.10, Verdict.INCONCLUSIVE),
-            (0.0, -0.03, 0.0, Verdict.INCONCLUSIVE),  # touches the threshold
-            (0.03, 0.03, 0.03, Verdict.IMPROVEMENT),  # degenerate at the threshold
+            (None, None, None, None, Verdict.INSUFFICIENT_EVIDENCE),
+            (0.4, None, None, None, Verdict.INSUFFICIENT_EVIDENCE),
+            (-0.10, -0.15, -0.05, 0.001, Verdict.REGRESSION),
+            (0.10, 0.05, 0.15, 0.001, Verdict.IMPROVEMENT),
+            (0.01, 0.005, 0.02, 0.001, Verdict.BELOW_THRESHOLD),
+            (-0.02, -0.025, -0.01, 0.001, Verdict.BELOW_THRESHOLD),  # harmful bound inside
+            (0.0, -0.01, 0.02, 0.6, Verdict.EQUIVALENT),
+            (0.02, -0.05, 0.10, 0.4, Verdict.INCONCLUSIVE),
+            (0.0, -0.03, 0.0, 0.5, Verdict.INCONCLUSIVE),  # touches the threshold
+            (0.03, 0.03, 0.03, 0.001, Verdict.IMPROVEMENT),  # degenerate at the threshold
         ],
     )
-    def test_verdict_table(self, delta, lo, hi, verdict):
-        assert decide(_effect(delta, lo, hi), threshold=0.03) is verdict
+    def test_verdict_table(self, delta, lo, hi, p, verdict):
+        assert decide(_effect(delta, lo, hi, p), threshold=0.03) is verdict
+
+    @pytest.mark.parametrize(
+        ("delta", "lo", "hi", "p", "verdict"),
+        [
+            # The interval excludes 0, but the sign-flip test does not agree.
+            (-0.10, -0.15, -0.05, 0.06, Verdict.INCONCLUSIVE),
+            (0.10, 0.05, 0.15, 0.06, Verdict.INCONCLUSIVE),
+            (0.01, 0.005, 0.02, 0.06, Verdict.EQUIVALENT),
+            # The p-value is small, but the interval includes 0.
+            (-0.10, -0.20, 0.01, 0.001, Verdict.INCONCLUSIVE),
+            # A p-value at the level agrees with it.
+            (-0.10, -0.15, -0.05, 0.05, Verdict.REGRESSION),
+        ],
+    )
+    def test_significance_needs_the_interval_and_the_p_value_to_agree(
+        self, delta, lo, hi, p, verdict
+    ):
+        effect = _effect(delta, lo, hi, p)
+        assert decide(effect, threshold=0.03) is verdict
+        assert is_significant(effect) is (verdict in (Verdict.REGRESSION,))
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [
+            # The issue's pairs, and two more like them: the harmful bound stays at
+            # or past -tau while the interval moves off zero toward harm. The old
+            # table passed every "after" (significant, |delta| < tau); none may.
+            ((-0.024, -0.050, 0.001), (-0.025, -0.050, -0.001)),
+            ((-0.024, -0.200, 0.001), (-0.029, -0.200, -0.001)),
+            ((-0.010, -0.030, 0.010), (-0.020, -0.030, -0.005)),
+            ((-0.020, -0.100, 0.020), (-0.029, -0.100, -0.001)),
+        ],
+    )
+    def test_more_certainty_of_harm_never_turns_exit_2_into_exit_0(self, before, after):
+        assert decide(_effect(*before, p=0.4), 0.03) is Verdict.INCONCLUSIVE
+        assert decide(_effect(*after), 0.03) is Verdict.INCONCLUSIVE
+        assert _exit(_effect(*before, p=0.4)) == _exit(_effect(*after)) == 2
+
+    def test_every_passing_verdict_keeps_its_interval_above_minus_the_threshold(self):
+        grid = [x / 100 for x in range(-12, 13)]
+        for lo, hi in product(grid, grid):
+            if lo > hi:
+                continue
+            for delta, p in product((lo, (lo + hi) / 2, hi), (0.001, 0.05, 0.2)):
+                effect = _effect(delta, lo, hi, p)
+                if _exit(effect) == 0:
+                    assert lo > -0.03, (delta, lo, hi, p, decide(effect, 0.03))
+                if _exit(effect) == 1:
+                    worse = _effect(delta - 0.02, lo - 0.02, hi - 0.02, p)
+                    assert _exit(worse) == 1, (delta, lo, hi, p)
 
     def test_floating_point_residue_never_decides_significance(self):
         assert not excludes_zero(1e-12, 0.2) and not excludes_zero(-0.2, -1e-12)
         assert excludes_zero(1e-6, 0.2) and excludes_zero(-0.2, -1e-6)
         assert decide(_effect(0.1, 1e-12, 0.2), threshold=0.03) is Verdict.INCONCLUSIVE
+
+    @pytest.mark.parametrize(
+        ("before", "after", "tau"),
+        [(0.8, 0.6, 0.2), (0.6, 0.4, 0.2), (1.0, 0.97, 0.03), (0.36, 0.33, 0.03)],
+    )
+    def test_a_change_of_exactly_the_threshold_reaches_it_however_it_rounds(
+        self, before, after, tau
+    ):
+        # 0.6 - 0.8 is -0.20000000000000007 and 0.4 - 0.6 is -0.19999999999999996:
+        # the same drop of one trial in five, which may not pass on one side of 0.2.
+        assert decide(paired_task_effect([after - before] * 12), tau) is Verdict.REGRESSION
+        assert decide(paired_task_effect([before - after] * 12), tau) is Verdict.IMPROVEMENT
+        # An interval that reaches -tau only up to residue is not inside the threshold.
+        assert decide(_effect(0.0, after - before, 0.01, p=0.5), tau) is Verdict.INCONCLUSIVE
+
+
+class TestEvidenceFloor:
+    """No verdict below the tasks at which the exact test can reach the level (#112)."""
+
+    @pytest.mark.parametrize(("confidence", "tasks"), [(0.95, 6), (0.90, 5), (0.99, 8), (0.5, 2)])
+    def test_min_tasks_is_where_the_exact_test_first_reaches_the_level(self, confidence, tasks):
+        assert min_tasks_for(confidence) == tasks
+        assert 2.0 ** (1 - tasks) <= alpha_for(confidence)
+        assert tasks == 2 or 2.0 ** (2 - tasks) > alpha_for(confidence)
+
+    def test_min_tasks_rejects_a_confidence_outside_0_and_1(self):
+        for confidence in (0.0, 1.0, 1 - 1e-13):
+            with pytest.raises(ValueError, match="confidence"):
+                min_tasks_for(confidence)
+
+    def test_a_confidence_whose_level_rounds_away_is_rejected_for_that_reason(self):
+        with pytest.raises(ValueError, match="strictly between 0 and 1, got 1.5"):
+            alpha_for(1.5)
+        with pytest.raises(ValueError, match="too close to 1: the level 1 - confidence rounds to 0"):
+            paired_task_effect([0.1, 0.2], confidence=0.9999999999996)
+        with pytest.raises(ValueError, match="too close to 0: the level 1 - confidence rounds to 1"):
+            alpha_for(1e-13)
+
+    def test_min_attainable_p(self):
+        assert min_attainable_p(0, 10_000) is None
+        assert min_attainable_p(1, 10_000) == 1.0
+        assert min_attainable_p(2, 10_000) == 0.5
+        assert min_attainable_p(6, 10_000) == 1 / 32
+        # 13 tasks are sampled (2^13 > 10000); the exact floor is still higher.
+        assert min_attainable_p(13, 10_000) == 2.0**-12
+        # 20 tasks: a sampled estimate never goes below 1 / (B + 1).
+        assert min_attainable_p(20, 10_000) == 1 / 10_001
+        assert min_attainable_p(5, 20) == 1 / 16
+        assert min_attainable_p(20, 10) == 1 / 11
+
+    @pytest.mark.parametrize("tasks", [2, 3, 5, 6, 8])
+    def test_the_floor_is_what_the_exact_test_returns_on_the_strongest_data(self, tasks):
+        effect = paired_task_effect([-0.5] * tasks, n_bootstrap=1000, seed=0)
+        assert effect.p_value_exact and effect.p_value == min_attainable_p(tasks, 1000)
+
+    @pytest.mark.parametrize("tasks", [2, 3, 4, 5])
+    def test_no_verdict_below_the_floor_however_decisive_the_data(self, tasks):
+        # Every task went from always passing to always failing.
+        effect = paired_task_effect([-1.0] * tasks, n_bootstrap=10_000, seed=0)
+        assert effect.ci_lower == effect.ci_upper == -1.0
+        assert effect.p_value == 2 / 2**tasks
+        assert is_significant(effect) is False and not can_reach_level(effect)
+        assert decide(effect, 0.03) is Verdict.INSUFFICIENT_EVIDENCE
+
+    def test_six_tasks_are_enough_at_95_percent_and_eight_at_99(self):
+        six = paired_task_effect([-1.0] * 6, n_bootstrap=10_000, seed=0)
+        assert six.p_value == 1 / 32 and decide(six, 0.03) is Verdict.REGRESSION
+        strict = paired_task_effect([-1.0] * 6, confidence=0.99, n_bootstrap=10_000, seed=0)
+        assert decide(strict, 0.03) is Verdict.INSUFFICIENT_EVIDENCE
+        eight = paired_task_effect([-1.0] * 8, confidence=0.99, n_bootstrap=10_000, seed=0)
+        assert decide(eight, 0.03) is Verdict.REGRESSION
+
+    def test_a_sampled_p_value_is_never_reported_below_the_exact_floor(self):
+        # Twenty sampled flips of five same-sign tasks can miss both extreme
+        # assignments (1/21 < 0.05); the exact p-value always counts them.
+        effect = paired_task_effect([-1.0] * 5, n_bootstrap=20, seed=2)
+        assert not effect.p_value_exact and effect.p_value == 2 / 2**5
+        for seed in range(20):
+            sampled = paired_task_effect([-0.5] * 13, seed=seed)
+            assert not sampled.p_value_exact
+            assert sampled.p_value is not None and sampled.p_value >= 2 / 2**13
+            assert sampled.p_value >= min_attainable_p(13, 10_000)
+
+    def test_too_few_sampled_sign_flips_cannot_resolve_the_level(self):
+        effect = paired_task_effect([-1.0] * 20, n_bootstrap=10, seed=0)
+        assert not effect.p_value_exact and effect.p_value is not None
+        assert effect.p_value >= 1 / 11
+        assert decide(effect, 0.03) is Verdict.INSUFFICIENT_EVIDENCE
+
+
+class TestCalibration:
+    """Under no change the verdict calls a regression no more often than the level.
+
+    The paired differences are drawn around zero with sd 0.1 (the issue's
+    null simulation); the interval alone called a regression in 21 % of such
+    runs at two tasks and 6.7 % at six (``scripts/compare_error_rates.py``).
+    """
+
+    @pytest.mark.parametrize("tasks", [6, 10, 20])
+    def test_null_false_verdict_rates_stay_at_or_below_the_level(self, tasks):
+        rng = np.random.default_rng(112_000 + tasks)
+        runs = 1000
+        regressions = improvements = interval_alone = 0
+        for i in range(runs):
+            diffs = rng.normal(0.0, 0.1, size=tasks)
+            effect = paired_task_effect(diffs.tolist(), n_bootstrap=1000, seed=i)
+            verdict = decide(effect, 0.03)
+            regressions += verdict is Verdict.REGRESSION
+            improvements += verdict is Verdict.IMPROVEMENT
+            assert effect.delta is not None and effect.ci_lower is not None
+            assert effect.ci_upper is not None
+            interval_alone += excludes_zero(effect.ci_lower, effect.ci_upper) and (
+                effect.delta <= -0.03
+            )
+        # Each side of a 95 % rule gets 2.5 %; allow two standard errors of 1000 runs.
+        bound = 0.025 + 2 * math.sqrt(0.025 * 0.975 / runs)
+        assert regressions / runs <= bound
+        assert improvements / runs <= bound
+        if tasks in (6, 10):
+            # Control: on the same runs the interval alone (the old table)
+            # calls a regression more often than that.
+            assert interval_alone / runs > bound
+
+    @pytest.mark.parametrize("tasks", [2, 3, 4, 5])
+    def test_no_null_run_below_the_floor_gets_a_verdict(self, tasks):
+        rng = np.random.default_rng(112_000 + tasks)
+        for i in range(200):
+            diffs = rng.normal(0.0, 0.1, size=tasks)
+            effect = paired_task_effect(diffs.tolist(), n_bootstrap=1000, seed=i)
+            assert decide(effect, 0.03) is Verdict.INSUFFICIENT_EVIDENCE
 
 
 # --- compare_runs ---------------------------------------------------------------
@@ -330,12 +530,14 @@ class TestCompareRuns:
         assert only_g.grader == "g" and both.grader is None
 
     def test_lower_is_better_metric_normalises_direction(self):
+        tasks = ["a", "b", "c", "d", "e", "f"]
+
         def batch(latency: float) -> TrialBatch:
             b = TrialBatch()
-            for t in ("a", "b", "c"):
+            for t in tasks:
                 for i in range(2):
                     b.add_trial(_trial(t, i, passed=True, metrics={"latency_ms": latency + i}))
-            b.provenance = _provenance(["a", "b", "c"])
+            b.provenance = _provenance(tasks)
             return b
 
         result = compare_runs(
@@ -432,16 +634,165 @@ class TestCompareRuns:
         assert RunComparison.model_validate_json(a.model_dump_json()) == a
 
     def test_observe_exits_zero_for_evaluated_comparisons_only(self):
-        baseline = _pass_batch({"a": [True, False], "b": [False, False]})
-        candidate = _pass_batch({"a": [False, True], "b": [True, False]})
+        baseline = _pass_batch({f"t{i}": [True, False] for i in range(6)})
+        candidate = _pass_batch({
+            "t0": [True, True], "t1": [False, False], "t2": [True, True],
+            "t3": [False, False], "t4": [True, False], "t5": [False, True],
+        })
         result = compare_runs(baseline, candidate, n_bootstrap=64, observe=True)
         assert result.verdict is Verdict.INCONCLUSIVE and result.exit_code == 0
+        few = compare_runs(
+            _pass_batch({"a": [True], "b": [True]}), _pass_batch({"a": [False], "b": [False]}),
+            n_bootstrap=64, observe=True,
+        )
+        assert few.verdict is Verdict.INSUFFICIENT_EVIDENCE and few.exit_code == 0
         empty = compare_runs(
             _pass_batch({"a": [True]}, hashes={"a": "x"}),
             _pass_batch({"a": [True]}, hashes={"a": "y"}),
             unmatched_tasks="exclude", observe=True,
         )
         assert empty.delta is None and empty.exit_code == 2
+
+    def test_two_tasks_give_no_verdict_and_say_what_one_would_take(self):
+        """The issue's CLI case: all-pass against all-fail on two tasks."""
+        baseline = _pass_batch({"a": [True] * 5, "b": [True] * 5})
+        candidate = _pass_batch({"a": [False] * 5, "b": [False] * 5})
+        result = compare_runs(baseline, candidate, n_bootstrap=10_000)
+        assert result.delta == result.ci_lower == result.ci_upper == -1.0
+        assert result.p_value == 0.5 and result.p_value_exact
+        assert result.verdict is Verdict.INSUFFICIENT_EVIDENCE and result.exit_code == 2
+        assert result.interval_excludes_zero is True and result.significant is False
+        assert result.min_attainable_p == 0.5 and result.min_tasks == 6
+        text = "\n".join(result.summary_lines())
+        assert (
+            "readings: not significant (the interval excludes 0, but too few tasks for p), "
+            "|delta| >= threshold 0.03, interval beyond -0.03"
+        ) in text
+        assert (
+            "evidence: with 2 paired task(s) the sign-flip test cannot give p below 0.5000; "
+            "a 95% verdict needs p <= 0.05, which takes at least 6 tasks"
+        ) in text
+        assert "Verdict: insufficient evidence (exit 2)" in text
+        data = json.loads(result.model_dump_json())
+        assert data["min_attainable_p"] == 0.5 and data["min_tasks"] == 6
+        assert data["significant"] is False and data["interval_excludes_zero"] is True
+
+    def test_the_same_collapse_on_six_tasks_is_a_regression(self):
+        baseline = _pass_batch({f"t{i}": [True] * 5 for i in range(6)})
+        candidate = _pass_batch({f"t{i}": [False] * 5 for i in range(6)})
+        result = compare_runs(baseline, candidate, n_bootstrap=10_000)
+        assert result.p_value == 1 / 32 and result.p_value_exact
+        assert result.significant is True and result.min_attainable_p == 1 / 32
+        assert result.verdict is Verdict.REGRESSION and result.exit_code == 1
+        assert "evidence:" not in "\n".join(result.summary_lines())
+        # One task that did not move carries no sign, so five tasks' worth of
+        # evidence cannot reach 5 %: p = 4 / 64.
+        held = compare_runs(
+            baseline,
+            _pass_batch({**{f"t{i}": [False] * 5 for i in range(5)}, "t5": [True] * 5}),
+            n_bootstrap=10_000,
+        )
+        assert held.p_value == 1 / 16 and held.interval_excludes_zero and not held.significant
+        assert held.verdict is Verdict.INCONCLUSIVE and held.exit_code == 2
+        assert "readings: not significant (the interval excludes 0, but p > 0.05)" in (
+            "\n".join(held.summary_lines())
+        )
+
+    def test_readings_name_whichever_side_disagrees(self):
+        baseline, candidate = self._metric_batches([0.01] * 6 + [0.02] * 6)
+        result = compare_runs(baseline, candidate, metric="g.m", n_bootstrap=10_000)
+        # The rendering reads the recorded fields; pose the rarer disagreement.
+        posed = result.model_copy(update={
+            "ci_lower": -0.01, "ci_upper": 0.2, "interval_excludes_zero": False,
+            "significant": False, "p_value": 0.01, "verdict": Verdict.INCONCLUSIVE,
+        })
+        assert (
+            "readings: not significant (p <= 0.05, but the interval includes 0), "
+            "|delta| < threshold 0.03, interval reaches +0.03"
+        ) in "\n".join(posed.summary_lines())
+
+    def test_the_shortfall_names_whichever_is_short_tasks_or_draws(self):
+        six_down = (
+            _pass_batch({f"t{i}": [True] * 3 for i in range(6)}),
+            _pass_batch({f"t{i}": [False] * 3 for i in range(6)}),
+        )
+        # Six tasks are enough, but ten sampled sign flips cannot resolve 5 %.
+        draws = compare_runs(*six_down, n_bootstrap=10)
+        assert draws.verdict is Verdict.INSUFFICIENT_EVIDENCE and draws.exit_code == 2
+        assert draws.min_attainable_p == pytest.approx(1 / 11) and draws.min_tasks == 6
+        text = "\n".join(draws.summary_lines())
+        assert (
+            "evidence: with B = 10 sampled sign flips the test cannot give p below 0.0909; "
+            "a 95% verdict needs p <= 0.05, which takes B >= 19"
+        ) in text
+        assert "the interval excludes 0, but too few sign-flip draws for p)" in text
+        # Three tasks and five draws: both are short, and both are named.
+        three_down = (
+            _pass_batch({f"t{i}": [True] * 3 for i in range(3)}),
+            _pass_batch({f"t{i}": [False] * 3 for i in range(3)}),
+        )
+        both = compare_runs(*three_down, n_bootstrap=5)
+        text = "\n".join(both.summary_lines())
+        assert (
+            "evidence: with 3 paired task(s) and B = 5 sampled sign flips the test cannot give "
+            "p below 0.2500; a 95% verdict needs p <= 0.05, which takes at least 6 tasks and "
+            "B >= 19"
+        ) in text
+        assert "the interval excludes 0, but too few tasks and sign-flip draws for p)" in text
+        assert "too few tasks for p)" in "\n".join(
+            compare_runs(*three_down, n_bootstrap=10_000).summary_lines()
+        )
+        # One task: no interval, and the evidence line says why no verdict.
+        one = compare_runs(_pass_batch({"a": [True]}), _pass_batch({"a": [False]}))
+        text = "\n".join(one.summary_lines())
+        assert "delta = -1.0000; no interval (fewer than 2 tasks)" in text
+        assert "with 1 paired task(s) the sign-flip test cannot give p below 1.0000" in text
+        # No task with a value on both sides: nothing to say about the test.
+        none = compare_runs(
+            _pass_batch({"a": [True]}, hashes={"a": "x"}),
+            _pass_batch({"a": [True]}, hashes={"a": "y"}),
+            unmatched_tasks="exclude",
+        )
+        text = "\n".join(none.summary_lines())
+        assert "delta: n/a (no task has a value on both sides)" in text
+        assert none.min_attainable_p is None and "evidence:" not in text
+
+    @staticmethod
+    def _metric_batches(drops: list[float]) -> tuple[TrialBatch, TrialBatch]:
+        tasks = [f"t{i:02d}" for i in range(len(drops))]
+        baseline, candidate = TrialBatch(), TrialBatch()
+        for task_id, drop in zip(tasks, drops, strict=True):
+            baseline.add_trial(_trial(task_id, 0, passed=True, metrics={"m": 1.0}))
+            candidate.add_trial(_trial(task_id, 0, passed=True, metrics={"m": 1.0 - drop}))
+        baseline.provenance = _provenance(tasks)
+        candidate.provenance = _provenance(tasks)
+        return baseline, candidate
+
+    def test_a_drop_of_exactly_the_threshold_is_meaningful_however_it_rounds(self):
+        baseline, candidate = self._metric_batches([0.2] * 12)
+        assert (1.0 - 0.2) - 1.0 > -0.2  # the per-task difference rounds up
+        result = compare_runs(baseline, candidate, metric="g.m", threshold=0.2)
+        assert result.meaningful is True and result.verdict is Verdict.REGRESSION
+        assert "|delta| >= threshold 0.2, interval beyond -0.2" in "\n".join(
+            result.summary_lines()
+        )
+
+    def test_a_small_significant_drop_that_may_be_larger_is_inconclusive(self):
+        """The non-monotone row: significant, |delta| < tau, but -tau is inside the interval."""
+        baseline, candidate = self._metric_batches([0.005] * 6 + [0.05] * 6)
+        result = compare_runs(baseline, candidate, metric="g.m", threshold=0.03, n_bootstrap=10_000)
+        assert result.delta == pytest.approx(-0.0275)
+        assert result.significant is True and result.ci_lower <= -0.03
+        assert result.verdict is Verdict.INCONCLUSIVE and result.exit_code == 2
+        assert "readings: significant, |delta| < threshold 0.03, interval reaches -0.03" in (
+            "\n".join(result.summary_lines())
+        )
+        # The same drop, pinned inside the threshold, is below it and passes.
+        baseline, candidate = self._metric_batches([0.01] * 6 + [0.02] * 6)
+        tight = compare_runs(baseline, candidate, metric="g.m", threshold=0.03, n_bootstrap=10_000)
+        assert tight.significant is True and tight.ci_lower > -0.03
+        assert tight.verdict is Verdict.BELOW_THRESHOLD and tight.exit_code == 0
+        assert "interval inside (-0.03, +0.03)" in "\n".join(tight.summary_lines())
 
     def test_rejects_bad_parameters(self):
         baseline = _pass_batch({"a": [True]})

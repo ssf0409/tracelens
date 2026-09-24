@@ -25,10 +25,13 @@ from pydantic import ValidationError
 from tracelens.cli._errors import debug_enabled, usage_error
 from tracelens.core.trial import TrialBatch
 from tracelens.statistics.run_comparison import (
+    DEFAULT_CONFIDENCE,
+    DEFAULT_N_BOOTSTRAP,
     DEFAULT_THRESHOLD,
     UNMATCHED_POLICIES,
     ComparisonError,
     compare_runs,
+    min_tasks_for,
 )
 
 
@@ -74,12 +77,16 @@ def add_compare_parser(subparsers: argparse._SubParsersAction) -> None:  # type:
         ),
     )
     parser.add_argument(
-        "--confidence", type=float, default=0.95,
-        help="Confidence level of the interval (default: 0.95)",
+        "--confidence", type=float, default=DEFAULT_CONFIDENCE,
+        help=(
+            "Confidence level of the interval; the p-value must reach 1 - confidence "
+            f"(default: {DEFAULT_CONFIDENCE}, which needs at least "
+            f"{min_tasks_for(DEFAULT_CONFIDENCE)} paired tasks for a verdict)"
+        ),
     )
     parser.add_argument(
-        "--bootstrap", type=int, default=10000, dest="n_bootstrap", metavar="B",
-        help="Bootstrap resamples and sign-flip draws (default: 10000)",
+        "--bootstrap", type=int, default=DEFAULT_N_BOOTSTRAP, dest="n_bootstrap", metavar="B",
+        help=f"Bootstrap resamples and sign-flip draws (default: {DEFAULT_N_BOOTSTRAP})",
     )
     parser.add_argument(
         "--seed", type=int, default=0,
