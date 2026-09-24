@@ -124,7 +124,7 @@ project:
 ```toml
 [project]
 dependencies = [
-    "tracelens>=0.3.0",
+    "tracelens--8<-- "includes/version.txt"",
 ]
 ```
 
