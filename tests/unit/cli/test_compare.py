@@ -14,6 +14,7 @@ from tests.fixtures.compare import (
     derived_edited,
     derived_identical,
     derived_legacy,
+    derived_subset,
     load,
 )
 from tracelens.cli.compare import cmd_compare
@@ -97,6 +98,25 @@ class TestCommand:
         assert "Verdict: REGRESSION (exit 1)" in capsys.readouterr().out
         assert _run(str(BASELINE), str(NOISY)) == 2
         assert "inconclusive" in capsys.readouterr().out
+
+    def test_two_tasks_exit_2_and_name_the_p_value_two_tasks_can_reach(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        baseline, regressed = tmp_path / "baseline.json", tmp_path / "regressed.json"
+        baseline.write_text(json.dumps(derived_subset("baseline", ["t00", "t15"])))
+        regressed.write_text(json.dumps(derived_subset("regressed", ["t00", "t15"])))
+        target = tmp_path / "compare.json"
+        assert _run(str(baseline), str(regressed), "--output", str(target)) == 2
+        out = capsys.readouterr().out
+        assert "tasks: 2 task(s) compared, aligned by content" in out
+        assert (
+            "evidence: with 2 paired task(s) the sign-flip test cannot give p below 0.5000; "
+            "a 95% verdict needs p <= 0.05, which takes at least 6 tasks"
+        ) in out
+        assert "Verdict: insufficient evidence (exit 2)" in out
+        data = json.loads(target.read_text())
+        assert data["verdict"] == "insufficient_evidence" and data["exit_code"] == 2
+        assert data["min_attainable_p"] == 0.5 and data["min_tasks"] == 6
 
     def test_observe_mode_exits_zero(self, capsys: pytest.CaptureFixture[str]):
         assert _run(str(BASELINE), str(NOISY), "--observe") == 0

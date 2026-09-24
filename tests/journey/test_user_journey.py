@@ -10,11 +10,13 @@ installed into a clean environment); locally it falls back to
 The journey: an existing project -> ``tracelens init`` -> ``run --config``
 -> baselines from the README snippet -> gate enabled in ``tracelens.yaml``
 -> an intentional regression blocks -> ``inspect`` explains it ->
-``compare`` calls it a regression -> a targeted ``--task-id`` rerun ->
+``compare`` refuses a verdict on two tasks and says what one would take ->
+a targeted ``--task-id`` rerun ->
 an infra outage and a grader crash make the gate unevaluable and are told
 apart -> malformed input and a bad config are usage errors ->
 checkpoint/resume re-executing nothing -> the suite passes again and
-``compare`` calls it equivalent -> ``report`` and ``sample`` read the
+``compare`` sees nothing move, still without a verdict -> ``report`` and
+``sample`` read the
 artifacts -> ``reconcile`` validates grader calibration on filled worksheets.
 
 This deliberately duplicates no unit test: the boundary it covers is the
@@ -172,19 +174,27 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert "starter FAIL score=0.00" in inspect.stdout
     assert (project / "eval/results/failures.html").read_text().count("agent failure") >= 2
 
-    # 7. compare calls the broken run a regression against the trusted one.
+    # 7. compare pairs the broken run with the trusted one but gives no verdict
+    # on the scaffold's two tasks: however decisive the data, the exact
+    # sign-flip test cannot go below p = 0.5 with two tasks, and a verdict
+    # needs p <= 0.05 (issue #112). The output says what it would take.
     compare = tracelens(
         "compare", "eval/results/trusted-trials.json", "eval/results/trials.json",
-        "--output", "eval/results/compare.json", cwd=project, expect=1,
+        "--output", "eval/results/compare.json", cwd=project, expect=2,
     )
-    assert "Verdict: REGRESSION (exit 1)" in compare.stdout
+    assert "Verdict: insufficient evidence (exit 2)" in compare.stdout
+    assert (
+        "the sign-flip test cannot give p below 0.5000; a 95% verdict needs p <= 0.05, "
+        "which takes at least 6 tasks"
+    ) in compare.stdout
     # Same class path and DecisionSpec, but step 5 rewrote the adapter's body.
     # Before the candidate side was content-addressed this read "nothing
     # declared": literally true, and exactly the blind spot that let a run
     # measure the wrong agent without anyone noticing.
     assert "What changed: adapter" in compare.stdout
     decision = load(project / "eval/results/compare.json")
-    assert decision["verdict"] == "regression" and decision["delta"] == -1.0
+    assert decision["verdict"] == "insufficient_evidence" and decision["delta"] == -1.0
+    assert decision["min_attainable_p"] == 0.5 and decision["min_tasks"] == 6
     assert decision["alignment"]["compared"] == 2 and decision["alignment"]["aligned_by"] == "content"
 
     # 7b. A partial regression (1 of 5 runs passes) is blocked on its evidence:
@@ -312,14 +322,17 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert load(project / "eval/results/checkpoint-results.json")["total_trials"] == 4
     adapter.write_text(source)
 
-    # 13. The whole suite passes again, and compare calls it equivalent.
+    # 13. The whole suite passes again. compare sees that nothing moved, and
+    # still does not call two tasks equivalent: that claim needs the same
+    # evidence a regression does.
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
     assert load(results)["gate"]["status"] == "passed"
     compare = tracelens(
         "compare", "eval/results/trusted-trials.json", "eval/results/trials.json",
-        cwd=project, expect=0,
+        cwd=project, expect=2,
     )
-    assert "equivalent within the practical threshold" in compare.stdout
+    assert "What moved: nothing; every compared task has the same value" in compare.stdout
+    assert "Verdict: insufficient evidence (exit 2)" in compare.stdout
 
     # 14. The saved artifacts are readable by the other documented commands.
     rendered = tracelens(

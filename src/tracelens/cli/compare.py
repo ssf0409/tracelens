@@ -75,7 +75,10 @@ def add_compare_parser(subparsers: argparse._SubParsersAction) -> None:  # type:
     )
     parser.add_argument(
         "--confidence", type=float, default=0.95,
-        help="Confidence level of the interval (default: 0.95)",
+        help=(
+            "Confidence level of the interval; the p-value must reach 1 - confidence "
+            "(default: 0.95, which needs at least 6 paired tasks for a verdict)"
+        ),
     )
     parser.add_argument(
         "--bootstrap", type=int, default=10000, dest="n_bootstrap", metavar="B",

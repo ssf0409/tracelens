@@ -2,7 +2,7 @@
 
     uv run --frozen python tests/fixtures/compare/generate.py
 
-Every scenario runs the same twelve-task eval set through the real
+Every scenario runs the same sixteen-task eval set through the real
 ``EvaluationRunner`` with a deterministic simulated agent, so the files are
 genuine ``tracelens run --save-trials`` artifacts (provenance included):
 

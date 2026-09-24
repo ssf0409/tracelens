@@ -26,6 +26,29 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **`tracelens compare` needs the interval and the p-value to agree, and
+  enough tasks for the p-value to count.** The verdict used to rest on the
+  percentile task-bootstrap interval alone. That interval is too narrow on a
+  handful of tasks, and the sign-flip p-value printed beside it was never
+  consulted. Two tasks that both collapsed therefore read `delta = -1.0000,
+  95% CI [-1.0000, -1.0000], p = 0.5000 (exact)` over `Verdict: REGRESSION
+  (exit 1)`, and with no change at all a regression was called in 21 % of
+  simulated comparisons at two tasks and 6.7 % at six. A difference is now
+  significant only when the interval excludes 0 *and* `p <= 1 - confidence`.
+  Below the task count at which the exact sign-flip test can reach that level
+  at all, there is no verdict: its smallest p-value is `2 / 2^T`, so that is
+  6 tasks at 95 % confidence, 5 at 90 %, 8 at 99 %. The output then says
+  which p-value the test cannot get below and how many tasks a verdict needs.
+  From six tasks up, a no-change comparison is called a regression about
+  2 % of the time. *Behaviour change:* a comparison of fewer than six tasks
+  exits 2 whatever the data, including two runs where nothing moved, and
+  small suites lose power. A real drop of 0.10 is called a regression 37 % of
+  the time on six tasks, 80 % on ten, 99 % on twenty. `RunComparison` and the
+  `--output` JSON gain `min_attainable_p`, `min_tasks` and
+  `interval_excludes_zero`, and `significant` is now the agreement reading.
+  The summary's readings line adds the interval's extent against the
+  threshold. `scripts/compare_error_rates.py` regenerates the contract's
+  error-rate table. (#112)
 - **A grader whose source changed is a different measurement, declared or
   not.** `check_compatibility` (and so `tracelens compare`) treats two runs
   as incompatible when a grader's source hash differs under the same class
@@ -93,6 +116,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **A more certain regression no longer passes as "below the threshold".**
+  `tracelens compare` returned `significant_below_threshold` (exit 0) for any
+  significant change smaller than the threshold, even when the interval
+  reached past `-threshold`. With the default threshold of 0.03, `delta
+  -0.025, CI [-0.050, -0.001]` passed, while the less certain `delta -0.024,
+  CI [-0.050, +0.001]` was inconclusive (exit 2). Making a regression more
+  certain turned exit 2 into exit 0. "Below the threshold" now also requires
+  the interval's lower bound to stay above `-threshold`; otherwise the
+  comparison is inconclusive. Every verdict that exits 0 now rules out a
+  regression of the threshold or more. (#112)
 - **Plugins are loaded from the source on disk, not from stale bytecode.**
   Python treats a cached `.pyc` as valid while the source file's size and
   its modification time in whole seconds are unchanged. An adapter edited to

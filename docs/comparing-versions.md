@@ -1,11 +1,11 @@
 # Comparing Versions
 
 You changed the model, or you rewrote the prompt. The eval suite that was passing
-at 38% is now at 78%. Two questions follow immediately:
+at 41% is now at 85%. Two questions follow immediately:
 
 1. **Did behavior actually change?** Or is this run-to-run jitter from a
    non-deterministic agent?
-2. **Is the change real or noise?** A 40-point jump is obviously real. A
+2. **Is the change real or noise?** A 44-point jump is obviously real. A
    3-point jump on 20 trials usually isn't. Where's the line?
 
 This page answers both with one workflow: run the *same* eval set against two
@@ -95,8 +95,8 @@ b1, s1 = await run_version(lambda: SimpleAdapter(make_agent(0.66)), v1_spec)
 b2, s2 = await run_version(lambda: SimpleAdapter(make_agent(0.82)), v2_spec)
 ```
 
-`scores` is the flattened list of per-trial grader scores (6 tasks × 10 runs =
-60 values per version). That per-trial granularity is what the significance test
+`scores` is the flattened list of per-trial grader scores (12 tasks × 10 runs =
+120 values per version). That per-trial granularity is what the significance test
 in the next step consumes.
 
 Printing the per-version summary gives you the headline numbers:
@@ -104,8 +104,8 @@ Printing the per-version summary gives you the headline numbers:
 ```
 version comparison
 ------------------
-  v1 [20a1b674339b]  pass_rate=38%  mean_quality=0.656  n=60
-  v2 [cc545403c02b]  pass_rate=78%  mean_quality=0.816  n=60
+  v1 [20a1b674339b]  pass_rate=41%  mean_quality=0.656  n=120
+  v2 [cc545403c02b]  pass_rate=85%  mean_quality=0.832  n=120
 ```
 
 The fingerprint in brackets is your audit trail: every row is tied to a specific
@@ -127,15 +127,25 @@ statistics are the ones fixed in the
 [statistical contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28):
 
 - **The task is the sampling unit.** Each task's mean score under v1 and under
-  v2 is paired, and the interval comes from resampling *tasks*. Six tickets of
-  different difficulty therefore cancel out instead of looking like noise, and
-  ten repeated trials of one ticket never masquerade as ten independent samples.
+  v2 is paired, and the interval comes from resampling *tasks*. Twelve tickets
+  of different difficulty therefore cancel out instead of looking like noise,
+  and ten repeated trials of one ticket never masquerade as ten independent
+  samples.
 - **Comparability is checked, not assumed.** The runs' provenance must show the
   same task content and graders; a task edited between the runs, or a changed
   grader, is refused rather than matched by id.
-- **Three readings, one verdict.** Significance (does the interval exclude 0),
-  practical relevance (`|delta|` against `--threshold`), and evidence (is the
-  interval narrow enough to say anything). The verdict is one of *improvement*,
+- **Enough tasks to decide.** With the task as the unit, the sign-flip test
+  behind the p-value cannot go below `2 / 2^T` on `T` tasks, so at the default
+  95% confidence there is no verdict on fewer than six tasks: the command
+  prints the numbers, says what p-value the test cannot get below and how many
+  tasks a verdict needs, and exits 2. Six is the floor, not a target: at six,
+  one ticket that does not move with the rest already leaves the result
+  inconclusive, which is why this example uses twelve.
+- **Three readings, one verdict.** Significance (the interval excludes 0 *and*
+  the p-value agrees), practical relevance (`|delta|` against `--threshold`),
+  and evidence (the interval's extent against the threshold). A small
+  significant change passes as "below the threshold" only when the interval
+  also rules out a regression of the threshold. The verdict is one of *improvement*,
   *regression*, *significant but below the threshold*, *equivalent within the
   threshold*, *inconclusive*, or *insufficient evidence*; exit codes are 0, 1,
   and 2 respectively for "no regression", "regression", and "cannot tell".
@@ -143,15 +153,15 @@ statistics are the ones fixed in the
 The example prints the same summary the command does:
 
 ```text
-Compared v2 vs v1 on mean_score (higher is better): paired task bootstrap over 6 task(s)
-  v1: 60 trials, 60 gradable, 6 task(s) with values
-  v2: 60 trials, 60 gradable, 6 task(s) with values
-  tasks: 6 task(s) compared, aligned by content
-  delta = +0.1599  95% CI [+0.1213, +0.1964]  p = 0.0312 (exact)  (B = 10000, seed = 0)
-  readings: significant, |delta| >= threshold 0.05
+Compared v2 vs v1 on mean_score (higher is better): paired task bootstrap over 12 task(s)
+  v1: 120 trials, 120 gradable, 12 task(s) with values
+  v2: 120 trials, 120 gradable, 12 task(s) with values
+  tasks: 12 task(s) compared, aligned by content
+  delta = +0.1763  95% CI [+0.1488, +0.2049]  p = 0.0005 (exact)  (B = 10000, seed = 0)
+  readings: significant, |delta| >= threshold 0.05, interval beyond +0.05
   Verdict: IMPROVEMENT (exit 0)
   What changed: DecisionSpec prompts (attribution evidence, not proof of cause)
-  What moved (largest first): ticket-4 +0.230 (n 10/10), ticket-1 +0.188 (n 10/10), ...
+  What moved (largest first): ticket-6 +0.271 (n 10/10), ticket-1 +0.254 (n 10/10), ...
 ```
 
 Read it top to bottom: *what was compared* (metric, tasks, how they were
@@ -195,19 +205,19 @@ the expensive part). The result fields:
 On the example's two score lists this reads:
 
 ```
-  quality delta (v2 - v1) = +0.160  95% CI [+0.119, +0.201]  cohens_d=1.38  p=0.000
+  quality delta (v2 - v1) = +0.176  95% CI [+0.147, +0.206]  cohens_d=1.50  p=0.000
 ```
 
 How to read this, in order of what matters:
 
-- **`95% CI [+0.119, +0.201]` excludes 0** → the difference is real, not noise.
+- **`95% CI [+0.147, +0.206]` excludes 0** → the difference is real, not noise.
   This is the single most important line. If the CI had been `[-0.02, +0.34]`,
   the improvement would be *plausibly zero* and you should not ship on it. The
   `is_significant` flag is exactly this check.
-- **`cohens_d=1.38`** → the effect is *large* (Cohen's conventions:
+- **`cohens_d=1.50`** → the effect is *large* (Cohen's conventions:
   <0.2 negligible, <0.5 small, <0.8 medium, ≥0.8 large; exposed as
   `res.effect_magnitude`). A change can be statistically significant but tiny;
-  `d` tells you whether it's worth caring about. 1.38 means the two distributions
+  `d` tells you whether it's worth caring about. 1.50 means the two distributions
   barely overlap.
 - **`p=0.000`** → the permutation test agrees the distributions differ. Treat the
   CI as primary and the p-value as corroboration, not the other way around.

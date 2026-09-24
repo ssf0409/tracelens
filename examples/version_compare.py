@@ -43,7 +43,7 @@ TASKS = EvalSet(
     name="support-replies",
     tasks=[
         Task(task_id=f"ticket-{i}", name=f"ticket-{i}", input_data={"ticket": f"issue {i}"})
-        for i in range(6)
+        for i in range(12)
     ],
 )
 
@@ -103,8 +103,10 @@ async def main() -> None:
         )
 
     # The task is the sampling unit: each task's mean quality under v1 and v2
-    # is paired, and the interval comes from resampling tasks, so the six
+    # is paired, and the interval comes from resampling tasks, so the twelve
     # tickets' different difficulties cancel instead of looking like noise.
+    # At the default 95% confidence there is no verdict on fewer than six
+    # tasks; twelve keeps one stray ticket from deciding the outcome.
     result = compare_runs(
         b1, b2, metric="mean_score", threshold=0.05, seed=0,
         baseline_label="v1", candidate_label="v2",

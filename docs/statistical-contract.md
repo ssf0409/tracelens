@@ -406,38 +406,100 @@ excluded and counted. Unavailable evidence is never a zero delta.
    within-task difference, each `d_t` is equally likely to carry either sign,
    and the two-sided p-value is the fraction of `B` random sign assignments
    (counting the observed one) whose mean is at least as extreme as `|Δ|`.
-   The assignments are drawn with the same `seed`; when `2^T ≤ B` all
-   assignments are enumerated instead and the p-value is exact.
+   The assignments are drawn with the same `seed`; when `T ≤ 12` and
+   `2^T ≤ B` all assignments are enumerated instead and the p-value is
+   exact.
 
 **Verdict.** Given the practical threshold `τ` (`--threshold`, an absolute
-delta on the metric's scale; default 0.03) and the interval `[lo, hi]`:
+delta on the metric's scale; default 0.03), the level `α = 1 − confidence`,
+the interval `[lo, hi]`, and the sign-flip p-value `p`, two rules come before
+the table (issue #112):
+
+- **Evidence floor.** With `T` paired tasks the exact sign-flip p-value
+  cannot fall below `2 / 2^T`. It gets there only when every difference is
+  non-zero and all share one sign, so that no sign assignment but the
+  observed one and its mirror image is as extreme. A sampled p-value also
+  cannot fall below `1 / (B + 1)`. When that floor is above `α`, no difference can be
+  significant however large it is, so there is no verdict: fewer than 6
+  tasks at 0.95, 5 at 0.90, 8 at 0.99. The output names the p-value the
+  test cannot get below and the tasks a verdict needs.
+- **Significance needs agreement.** A difference is significant when the
+  interval excludes 0 *and* `p ≤ α`. On few tasks the percentile interval is
+  too narrow: on its own it called a regression in 21 % of no-change
+  comparisons at two tasks and 6.7 % at six, beside a printed `p = 0.5`. The
+  sign-flip test is exact under the null of no change, so requiring both
+  keeps the regression rate at or below the level and the verdict never
+  contradicts the printed p-value.
 
 | Evidence | Verdict | Exit |
 |---|---|---|
-| `T < 2`, or no task has a value on both sides | insufficient evidence | 2 |
-| interval excludes 0 and `Δ ≤ −τ` | regression | 1 |
-| interval excludes 0 and `Δ ≥ τ` | improvement | 0 |
-| interval excludes 0 and `|Δ| < τ` | significant but below the practical threshold | 0 |
-| interval includes 0 and lies inside `(−τ, τ)` | equivalent within the threshold | 0 |
-| interval includes 0 and reaches beyond `±τ` | inconclusive: more runs or tasks needed | 2 |
+| no task has a value on both sides, `T < 2`, or the smallest attainable `p` is above `α` | insufficient evidence | 2 |
+| significant and `Δ ≤ −τ` | regression | 1 |
+| significant, `Δ ≥ τ`, and `lo > −τ` | improvement | 0 |
+| significant, `−τ < Δ < τ`, and `lo > −τ` | significant but below the practical threshold | 0 |
+| not significant, and the interval lies inside `(−τ, τ)` | equivalent within the threshold | 0 |
+| anything else: not significant with the interval reaching `−τ` or `τ`, or significant with `Δ > −τ` but `lo ≤ −τ` | inconclusive: more runs or tasks needed | 2 |
 
-Significance (the interval excludes 0), practical relevance (`|Δ|` against
-`τ`), and evidence (the interval's extent against `τ`) are three separate
-readings, and the output reports all three. Non-significance is never
-equivalence: only an interval inside `(−τ, τ)` supports "no meaningful
-change". Exit codes follow the CLI contract (0 success, 1 negative result, 2
+Significance (the interval and the p-value agree), practical relevance
+(`|Δ|` against `τ`), and evidence (the interval's extent against `τ`) are
+three separate readings, and the output reports all three. Non-significance
+is never equivalence: only an interval inside `(−τ, τ)` supports "no
+meaningful change". Likewise a significant change below the threshold passes
+only when the interval also stays above `−τ`. Every verdict that exits 0
+therefore rules out a regression of `τ` or more (`lo > −τ`): while the
+interval reaches `−τ`, narrowing it toward harm can move the verdict from 2
+to 1, never to 0.
+Exit codes follow the CLI contract (0 success, 1 negative result, 2
 unevaluable). `--observe` makes every *evaluated* comparison exit 0, for
 dashboards and exploratory runs; incompatible, empty, or aggregate-only inputs
 still exit 2.
+
+**Small suites.** The floor is a property of the task count, not of how
+decisive each task looks. Two tasks that both went from always passing to
+always failing give `p = 0.5` and no verdict, and so do two tasks that did
+not move at all: "equivalent" is a claim that needs the same evidence as
+"regression". A task whose difference is exactly 0 carries no sign, so it
+adds nothing to the test: six tasks of which five collapsed and one did not
+move give `p = 4/64` and an inconclusive verdict. Above the floor the rule
+trades power for calibration on small suites, as the table shows. The
+cheapest way to more power is more tasks; more trials per task help when the
+per-task differences are noisy.
+
+**Error rates.** How often the verdict is a regression, out of 2000 simulated
+comparisons per cell (threshold 0.03, confidence 0.95, B = 10000;
+`scripts/compare_error_rates.py` regenerates this table). *No change* draws
+each task's paired difference from a normal distribution around 0 with
+standard deviation 0.1, and *drop of 0.10* around -0.10; the pass/fail columns
+observe each task 5 times a side at a pass probability drawn from U(0.1, 0.9),
+which the drop lowers by 0.20. *Interval alone* is the verdict before #112.
+Below 6 tasks there is no verdict. Near 2.5 % a cell's sampling error is about
+0.7 percentage points either way (two standard errors).
+
+| tasks T | no change, interval alone | no change | drop of 0.10 | pass/fail, no change | pass/fail, 20-point drop |
+|---|---|---|---|---|---|
+| 2 | 21.1 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| 3 | 11.6 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| 4 | 9.3 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| 5 | 7.3 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| 6 | 6.7 % | 1.8 % | 36.9 % | 0.1 % | 6.2 % |
+| 8 | 5.7 % | 2.4 % | 67.2 % | 0.4 % | 24.2 % |
+| 10 | 5.5 % | 2.5 % | 80.0 % | 1.3 % | 39.1 % |
+| 15 | 4.9 % | 3.3 % | 94.5 % | 1.0 % | 65.5 % |
+| 20 | 2.7 % | 2.2 % | 99.1 % | 1.6 % | 82.6 % |
+| 30 | 3.1 % | 2.5 % | 100.0 % | 1.7 % | 94.6 % |
 
 **Output.** The terminal summary and the `--output` JSON carry the same
 fields: the method (`paired task bootstrap`), the unit, the metric and its
 direction, the grader selection, per-run trial counts (gradable, and excluded
 by reason), task counts (shared, and excluded by reason), `Δ` (with the raw
 candidate-minus-baseline delta for lower-is-better metrics), `[lo, hi]`,
-`confidence`, `B`, `seed`, the p-value, `τ`, the verdict, the exit code, the
-per-task `d_t` with each side's trial count (largest movers first), the
-compatibility report, and the candidate diff.
+`confidence`, `B`, `seed`, the p-value, the smallest p-value the test could
+return with these tasks and draws (`min_attainable_p`) and the fewest tasks
+a verdict needs at this confidence (`min_tasks`), `τ`, the readings
+(`significant`, which requires agreement; `interval_excludes_zero`, the
+interval alone; `meaningful`), the verdict, the exit code, the per-task `d_t`
+with each side's trial count (largest movers first), the compatibility
+report, and the candidate diff.
 
 ## Availability
 
@@ -482,6 +544,8 @@ are never compared across silently different populations.
 | A reliability metric with no eligible task rendered as `0.0` | `N/A` with reason | #46 (fixed) |
 | The gate decision was not persisted; a re-rendered report dropped regression data | one gate result across CLI, JSON, Markdown, HTML | #47 (fixed) |
 | No run-versus-run command; `compare_metrics` resampled two arms independently | `tracelens compare` per the contract above: paired task-level resampling, explicit estimand, three-way verdict | #28 (fixed) |
+| `tracelens compare` decided on the percentile interval alone and never consulted the sign-flip p-value it printed; with few tasks the interval is too narrow, so a no-change comparison was called a regression 21 % of the time at two tasks and 6.7 % at six, beside `p = 0.5` | significance needs the interval and the p-value to agree, and there is no verdict below the tasks at which the test can reach the level (6 at 0.95) | #112 (fixed) |
+| A significant change smaller than `τ` passed even when the interval reached past `−τ`, so making a regression more certain could move exit 2 to exit 0 | "below the threshold" requires `lo > −τ`; every verdict that exits 0 rules out a regression of `τ` or more | #112 (fixed) |
 | The gate's fallback for a zero-variance baseline divided the delta by the sample SD, not the standard error, so a drop's p-value never tightened with `n` (1.0 → 0.4 over 5, 10, or 100 trials all read p ≈ 0.22) | exact test on the two counts for 0/1 metrics; SE-based t-tests otherwise | #111 (fixed) |
 | A drop that was not significant was dropped from stdout, JSON, Markdown, and HTML, so an underpowered check read like a clean pass | every change above the floor is reported with its evidence, `underpowered`, and `trials_needed` | #111 (fixed) |
 | The baseline's `sample_size` was never read; the stored mean was treated as exact | two-sample tests on both sample sizes, used as recorded | #111 (fixed) |
