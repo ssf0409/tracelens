@@ -330,3 +330,29 @@ class TestDecisionSpecWritePath:
 
         assert promoted.decision_spec == self._spec(512)
         assert promoted.fingerprint == self._spec(512).fingerprint
+
+    def test_compare_to_baseline_with_ci_no_baseline(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        res = manager.compare_to_baseline_with_ci("nonexistent", {"accuracy": [1.0, 1.0]})
+        assert res == {"_no_baseline": True}
+
+    def test_compare_to_baseline_with_ci_success(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        manager.create_capability_baseline(
+            "t1",
+            {"accuracy": 0.8},
+            sample_size=10,
+        )
+        res = manager.compare_to_baseline_with_ci(
+            "t1",
+            {"accuracy": [0.85, 0.9, 0.8, 0.85, 0.9], "unknown_metric": [1.0]},
+            confidence=0.95,
+            n_bootstrap=100,
+        )
+        assert "accuracy" in res
+        assert "unknown_metric" not in res
+        assert "delta" in res["accuracy"]
+        assert "is_significant" in res["accuracy"]
+        assert "is_regression" in res["accuracy"]
+        assert res["accuracy"]["baseline"]["mean"] == 0.8
+        assert res["accuracy"]["higher_is_better"] is True
