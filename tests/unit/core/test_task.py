@@ -28,7 +28,6 @@ class TestTask:
         assert task.expectation is None
         assert task.tags == []
         assert task.difficulty is None
-        assert task.timeout_seconds == 300.0
 
     def test_legacy_max_retries_input_ignored(self):
         """max_retries was dead config (the runner never read it) and was

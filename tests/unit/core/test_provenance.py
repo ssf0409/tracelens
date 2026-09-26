@@ -120,7 +120,6 @@ class TestHashing:
             _task("t", 1, tags=["a"]),
             _task("t", 1, difficulty="hard"),
             _task("t", 1, category="math"),
-            _task("t", 1, timeout_seconds=1.0),
         ]
         hashes = {task_content_hash(v) for v in variants}
         assert task_content_hash(base) not in hashes
@@ -224,7 +223,7 @@ class TestRunProvenance:
         assert "Run: run-1" in text
         assert "Eval set: suite, 1 task(s), content " in text
         assert "Graders: g (" in text
-        assert "Runner: 2 run(s) per task, timeout 30s, 1 infra retries" in text
+        assert "Runner: 2 run(s) per task, 1 infra retries" in text
         assert f"Candidate spec: {spec.fingerprint[:12]}" in text
         assert "Candidate spec: none declared" in "\n".join(_provenance([]).summary_lines())
 
@@ -294,15 +293,14 @@ class TestCompatibility:
         assert report.reasons[0].startswith("graders differ: A = [g (")
 
     def test_runner_settings_and_version_differences_are_notes(self):
-        a = _provenance([_task("a")], settings=_settings(num_runs=2, timeout_seconds=30.0))
-        b = _provenance([_task("a")], settings=_settings(num_runs=5, timeout_seconds=60.0))
+        a = _provenance([_task("a")], settings=_settings(num_runs=2))
+        b = _provenance([_task("a")], settings=_settings(num_runs=5))
         b.tracelens_version = "0.0.1"
         report = check_compatibility(a, b)
         assert report.status is Compatibility.COMPATIBLE
         assert report.notes == [
             "runner num_runs differs (2 vs 5)",
-            "runner timeout_seconds differs (30.0 vs 60.0)",
-            f"TraceLens version differs ({a.tracelens_version} vs 0.0.1)",
+                        f"TraceLens version differs ({a.tracelens_version} vs 0.0.1)",
         ]
         assert "; note: runner num_runs differs (2 vs 5)" in report.summary_line()
 
