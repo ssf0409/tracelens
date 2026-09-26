@@ -162,7 +162,13 @@ class TestCommand:
             ([str(BASELINE), str(IMPROVED), "--metric", "speed"], "unknown metric 'speed'"),
             ([str(BASELINE), str(IMPROVED), "--metric", "pass_rate", "--direction", "lower"],
              "always higher-is-better"),
-            ([str(BASELINE), str(IMPROVED), "--threshold", "-1"], "threshold cannot be negative"),
+            ([str(BASELINE), str(IMPROVED), "--threshold", "-1"],
+             "threshold must be a finite number >= 0, got -1.0"),
+            # A NaN threshold let a regression pass; an infinite one gates nothing.
+            ([str(BASELINE), str(REGRESSED), "--threshold", "nan"],
+             "threshold must be a finite number >= 0, got nan"),
+            ([str(BASELINE), str(IMPROVED), "--threshold", "inf"],
+             "threshold must be a finite number >= 0, got inf"),
         ],
     )
     def test_input_errors_exit_2_without_output(self, argv, fragment, capsys):

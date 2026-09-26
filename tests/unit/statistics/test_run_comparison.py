@@ -203,12 +203,25 @@ class TestPairedTaskEffect:
         assert effect.p_value_exact and effect.p_value == pytest.approx(count / 2 ** len(diffs))
 
     def test_random_sign_flip_when_enumeration_is_too_large(self):
-        diffs = [0.1] * 13  # 2^13 > 500 draws
+        diffs = [0.1] * 13  # more tasks than the exact test enumerates
         effect = paired_task_effect(diffs, n_bootstrap=500, seed=0)
         assert not effect.p_value_exact
         assert effect.p_value is not None and 0.0 < effect.p_value <= 1.0
         # all differences positive: only the all-plus assignment is as extreme
         assert effect.p_value == pytest.approx(1 / 501, abs=0.01)
+
+    @pytest.mark.parametrize("scale", [1e-6, 1e-3, 1.0, 1e3, 1e6, 1e9])
+    def test_the_exact_p_value_does_not_depend_on_the_metric_scale(self, scale):
+        # Five tasks moved and one did not. The observed assignment, its mirror
+        # image, and both with the unmoved task flipped are as extreme: p = 4/64
+        # on any scale and in either direction. An absolute rounding tolerance
+        # lost them on values in the millions, and p fell below its 2/2^T floor.
+        rng = np.random.default_rng(112)
+        for _ in range(50):
+            diffs = (-np.abs(rng.normal(1.0, 0.3, 5)) * scale).tolist() + [0.0]
+            for d in (diffs, [-x for x in diffs]):
+                effect = paired_task_effect(d, n_bootstrap=100, seed=0)
+                assert effect.p_value_exact and effect.p_value == 4 / 64, (scale, d)
 
     def test_bootstrap_interval_is_the_percentile_of_task_resample_means(self):
         diffs = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
@@ -330,6 +343,15 @@ class TestDecide:
                     worse = _effect(delta - 0.02, lo - 0.02, hi - 0.02, p)
                     assert _exit(worse) == 1, (delta, lo, hi, p)
 
+    @pytest.mark.parametrize("threshold", [math.nan, math.inf, -math.inf, -0.01])
+    def test_a_threshold_that_is_not_a_finite_number_of_0_or_more_is_refused(self, threshold):
+        # With a NaN threshold every comparison against it is false, and a drop
+        # of 0.375 read as "below the practical threshold" and exited 0.
+        with pytest.raises(ValueError, match="threshold must be a finite number"):
+            decide(_effect(-0.375, -0.46, -0.30), threshold)
+        with pytest.raises(ValueError, match="threshold must be a finite number"):
+            decide(_effect(None, None, None), threshold)  # whatever the evidence
+
     def test_floating_point_residue_never_decides_significance(self):
         assert not excludes_zero(1e-12, 0.2) and not excludes_zero(-0.2, -1e-12)
         assert excludes_zero(1e-6, 0.2) and excludes_zero(-0.2, -1e-6)
@@ -377,12 +399,24 @@ class TestEvidenceFloor:
         assert min_attainable_p(1, 10_000) == 1.0
         assert min_attainable_p(2, 10_000) == 0.5
         assert min_attainable_p(6, 10_000) == 1 / 32
-        # 13 tasks are sampled (2^13 > 10000); the exact floor is still higher.
+        # Up to twelve tasks the test enumerates every assignment, whatever B.
+        assert min_attainable_p(6, 10) == 1 / 32
+        assert min_attainable_p(12, 10) == 2.0**-11
+        # 13 tasks are sampled; the exact floor is still higher than 1 / (B + 1).
         assert min_attainable_p(13, 10_000) == 2.0**-12
         # 20 tasks: a sampled estimate never goes below 1 / (B + 1).
         assert min_attainable_p(20, 10_000) == 1 / 10_001
-        assert min_attainable_p(5, 20) == 1 / 16
         assert min_attainable_p(20, 10) == 1 / 11
+
+    @pytest.mark.parametrize("n_bootstrap", [1, 10, 19, 63])
+    def test_up_to_twelve_tasks_the_test_is_exact_whatever_b(self, n_bootstrap):
+        # Six tasks that all collapsed: exactly p = 2/64, a regression at 95 %
+        # for every B and seed. Sampled with B = 19, about half the seeds got a
+        # p above 0.05 from the same data.
+        for seed in range(10):
+            effect = paired_task_effect([-1.0] * 6, n_bootstrap=n_bootstrap, seed=seed)
+            assert effect.p_value_exact and effect.p_value == 1 / 32
+            assert decide(effect, 0.03) is Verdict.REGRESSION
 
     @pytest.mark.parametrize("tasks", [2, 3, 5, 6, 8])
     def test_the_floor_is_what_the_exact_test_returns_on_the_strongest_data(self, tasks):
@@ -407,10 +441,10 @@ class TestEvidenceFloor:
         assert decide(eight, 0.03) is Verdict.REGRESSION
 
     def test_a_sampled_p_value_is_never_reported_below_the_exact_floor(self):
-        # Twenty sampled flips of five same-sign tasks can miss both extreme
-        # assignments (1/21 < 0.05); the exact p-value always counts them.
-        effect = paired_task_effect([-1.0] * 5, n_bootstrap=20, seed=2)
-        assert not effect.p_value_exact and effect.p_value == 2 / 2**5
+        # 5000 sampled flips of thirteen same-sign tasks can miss both extreme
+        # assignments (1/5001 < 2/2^13); the exact p-value always counts them.
+        effect = paired_task_effect([-1.0] * 13, n_bootstrap=5000, seed=1)
+        assert not effect.p_value_exact and effect.p_value == 2 / 2**13
         for seed in range(20):
             sampled = paired_task_effect([-0.5] * 13, seed=seed)
             assert not sampled.p_value_exact
@@ -716,8 +750,14 @@ class TestCompareRuns:
             _pass_batch({f"t{i}": [True] * 3 for i in range(6)}),
             _pass_batch({f"t{i}": [False] * 3 for i in range(6)}),
         )
-        # Six tasks are enough, but ten sampled sign flips cannot resolve 5 %.
-        draws = compare_runs(*six_down, n_bootstrap=10)
+        # Up to twelve tasks the test is exact, so B never keeps six tasks from a verdict.
+        assert compare_runs(*six_down, n_bootstrap=10).verdict is Verdict.REGRESSION
+        # Thirteen tasks are enough, but ten sampled sign flips cannot resolve 5 %.
+        thirteen_down = (
+            _pass_batch({f"t{i:02d}": [True] * 3 for i in range(13)}),
+            _pass_batch({f"t{i:02d}": [False] * 3 for i in range(13)}),
+        )
+        draws = compare_runs(*thirteen_down, n_bootstrap=10)
         assert draws.verdict is Verdict.INSUFFICIENT_EVIDENCE and draws.exit_code == 2
         assert draws.min_attainable_p == pytest.approx(1 / 11) and draws.min_tasks == 6
         text = "\n".join(draws.summary_lines())
@@ -726,22 +766,27 @@ class TestCompareRuns:
             "a 95% verdict needs p <= 0.05, which takes B >= 19"
         ) in text
         assert "the interval excludes 0, but too few sign-flip draws for p)" in text
-        # Three tasks and five draws: both are short, and both are named.
+        # At 99.99 % thirteen tasks are too few as well: both are short, and both are named.
+        both = compare_runs(*thirteen_down, n_bootstrap=100, confidence=0.9999)
+        text = "\n".join(both.summary_lines())
+        assert (
+            "evidence: with 13 paired task(s) and B = 100 sampled sign flips the test cannot "
+            "give p below 0.0099; a 99.99% verdict needs p <= 0.0001, which takes at least "
+            "15 tasks and B >= 9999"
+        ) in text
+        assert "the interval excludes 0, but too few tasks and sign-flip draws for p)" in text
+        # Three tasks: only the tasks are short, whatever B.
         three_down = (
             _pass_batch({f"t{i}": [True] * 3 for i in range(3)}),
             _pass_batch({f"t{i}": [False] * 3 for i in range(3)}),
         )
-        both = compare_runs(*three_down, n_bootstrap=5)
-        text = "\n".join(both.summary_lines())
-        assert (
-            "evidence: with 3 paired task(s) and B = 5 sampled sign flips the test cannot give "
-            "p below 0.2500; a 95% verdict needs p <= 0.05, which takes at least 6 tasks and "
-            "B >= 19"
-        ) in text
-        assert "the interval excludes 0, but too few tasks and sign-flip draws for p)" in text
-        assert "too few tasks for p)" in "\n".join(
-            compare_runs(*three_down, n_bootstrap=10_000).summary_lines()
-        )
+        for n_bootstrap in (5, 10_000):
+            text = "\n".join(compare_runs(*three_down, n_bootstrap=n_bootstrap).summary_lines())
+            assert "too few tasks for p)" in text
+            assert (
+                "evidence: with 3 paired task(s) the sign-flip test cannot give p below 0.2500; "
+                "a 95% verdict needs p <= 0.05, which takes at least 6 tasks"
+            ) in text
         # One task: no interval, and the evidence line says why no verdict.
         one = compare_runs(_pass_batch({"a": [True]}), _pass_batch({"a": [False]}))
         text = "\n".join(one.summary_lines())
@@ -794,10 +839,54 @@ class TestCompareRuns:
         assert tight.verdict is Verdict.BELOW_THRESHOLD and tight.exit_code == 0
         assert "interval inside (-0.03, +0.03)" in "\n".join(tight.summary_lines())
 
+    def test_the_evidence_line_never_rounds_the_floor_onto_the_level(self):
+        fourteen_down = (
+            _pass_batch({f"t{i:02d}": [True] * 3 for i in range(14)}),
+            _pass_batch({f"t{i:02d}": [False] * 3 for i in range(14)}),
+        )
+        result = compare_runs(*fourteen_down, confidence=0.9999)
+        assert result.verdict is Verdict.INSUFFICIENT_EVIDENCE
+        text = "\n".join(result.summary_lines())
+        # The floor 2/2^14 is 0.000122, not "0.0001" next to a level of 0.0001.
+        assert (
+            "evidence: with 14 paired task(s) the sign-flip test cannot give p below "
+            "0.00012207; a 99.99% verdict needs p <= 0.0001, which takes at least 15 tasks"
+        ) in text
+
+    @pytest.mark.parametrize(("confidence", "label"), [(0.95, "95%"), (0.975, "97.5%"), (0.999, "99.9%")])
+    def test_the_interval_is_labelled_with_its_confidence_unrounded(self, confidence, label):
+        baseline, candidate = self._metric_batches([0.01] * 6)
+        text = "\n".join(compare_runs(
+            baseline, candidate, metric="g.m", confidence=confidence, n_bootstrap=100
+        ).summary_lines())
+        assert f"  {label} CI [" in text
+
+    def test_a_comparison_and_its_mirror_image_agree_on_large_values(self):
+        """Token counts in the millions: reversing the comparison may not flip the verdict."""
+        tasks = [f"t{i}" for i in range(6)]
+        increase = [1040272.0, 966766.0, 1163007.8, 1067391.6, 1765010.4, 0.0]
+
+        def batch(extra: list[float]) -> TrialBatch:
+            b = TrialBatch()
+            for i, (task_id, dx) in enumerate(zip(tasks, extra, strict=True)):
+                tokens = 1_000_000.0 + 10_000 * i + dx
+                b.add_trial(_trial(task_id, 0, passed=True, metrics={"tokens": tokens}))
+            b.provenance = _provenance(tasks)
+            return b
+
+        before, after = batch([0.0] * 6), batch(increase)
+        options = {"metric": "g.tokens", "direction": "lower", "threshold": 10_000.0}
+        forward = compare_runs(before, after, **options)
+        backward = compare_runs(after, before, **options)
+        # Five tasks moved and one did not: p = 4/64 either way, so neither is significant.
+        assert forward.p_value == backward.p_value == 4 / 64
+        assert forward.verdict is backward.verdict is Verdict.INCONCLUSIVE
+
     def test_rejects_bad_parameters(self):
         baseline = _pass_batch({"a": [True]})
-        with pytest.raises(ComparisonError, match="threshold cannot be negative"):
-            compare_runs(baseline, baseline, threshold=-1)
+        for threshold in (-1, math.nan, math.inf):
+            with pytest.raises(ComparisonError, match="threshold must be a finite number >= 0"):
+                compare_runs(baseline, baseline, threshold=threshold)
         with pytest.raises(ComparisonError, match="unmatched_tasks must be"):
             compare_runs(baseline, baseline, unmatched_tasks="drop")
         with pytest.raises(ComparisonError, match="confidence"):

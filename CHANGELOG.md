@@ -141,8 +141,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   threshold when they went from 0.6 to 0.4 (`-0.19999999999999996`). A value
   within residue of the threshold now counts as reaching it. (#112)
 - **A sampled sign-flip p-value is never below what the exact test can
-  give.** With more than twelve tasks, or fewer draws than `2^T`, the
-  p-value is estimated from sampled sign assignments. The estimate could miss
+  give.** With more than twelve tasks the p-value is estimated from sampled
+  sign assignments. The estimate could miss
   the few assignments as extreme as the observed one and report less than
   the exact floor `2 / 2^T`. That contradicted `min_attainable_p`, and the
   `evidence:` line printed after it. In about a quarter of 13-task
@@ -150,6 +150,40 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   below the floor of `0.000244`. The estimate is now never reported below
   it. The baseline gate's suite-level p-value, which uses the same test, is
   floored the same way. (#112)
+- **The exact sign-flip p-value no longer depends on the metric's scale.**
+  An assignment counted as extreme when its mean came within `1e-12` of
+  `|delta|`, an absolute tolerance. On values in the millions, such as token
+  counts, rounding is larger than that. The observed assignment and its
+  mirror image could then go uncounted, and the exact p-value came out as 0,
+  below its floor of `2 / 2^T`. Now that the p-value decides significance,
+  reversing a comparison could flip its verdict. Take six tasks whose token
+  count rose by about a million, with one unchanged. They were inconclusive
+  with `p = 0.0625`, but the same runs compared the other way round were an
+  improvement with `p = 0.0000` (exit 0). The tolerance is now relative to
+  the size of the differences. The baseline gate's suite-level p-value, which
+  uses the same test, is fixed with it. (#112)
+- **A threshold must be a finite number.** Every comparison with NaN is
+  false. So `tracelens compare --threshold nan` read the regressed fixture
+  (`delta -0.375`, `p = 0.0001`) as "significant, but below the practical
+  threshold" and exited 0. `--threshold inf` made two identical runs
+  inconclusive (exit 2). A threshold that is not a finite number of 0 or
+  more now exits 2 before any computation, and `decide` raises `ValueError`
+  for it. (#112)
+- **Up to twelve tasks the sign-flip test is exact, whatever `--bootstrap`
+  is.** With `B` below `2^T`, the p-value used to be sampled even on a
+  handful of tasks, and there it depended on the seed. Take six tasks that
+  all collapsed, whose exact `p` is `2/64`. With `--bootstrap 19` they
+  reached 0.05 for only about half the seeds, even though the output said a
+  verdict "takes B >= 19". The test now enumerates every assignment up to
+  twelve tasks (4096 at most). `B` sets the number of sampled draws only
+  beyond that. (#112)
+- **The confidence and the p-value floor print unrounded.** The interval was
+  labelled with the confidence rounded to a whole percent, so
+  `--confidence 0.975` printed `98% CI` and `0.999` printed `100% CI`. The
+  `evidence:` line rounded the p-value floor to four decimals. At
+  `--confidence 0.9999`, fourteen tasks therefore read "cannot give p below
+  0.0001; a 99.99% verdict needs p <= 0.0001". They now print `97.5% CI` and
+  a floor of `0.00012207`. (#112)
 - **Plugins are loaded from the source on disk, not from stale bytecode.**
   Python treats a cached `.pyc` as valid while the source file's size and
   its modification time in whole seconds are unchanged. An adapter edited to

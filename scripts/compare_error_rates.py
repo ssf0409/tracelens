@@ -277,7 +277,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--bootstrap", type=positive_int, default=DEFAULT_N_BOOTSTRAP, dest="n_bootstrap",
-        metavar="B", help="bootstrap resamples and sign-flip draws (default: %(default)s)",
+        metavar="B",
+        help="bootstrap resamples, and sign-flip draws beyond 12 tasks (default: %(default)s)",
     )
     parser.add_argument(
         "--threshold", type=positive_float, default=DEFAULT_THRESHOLD,

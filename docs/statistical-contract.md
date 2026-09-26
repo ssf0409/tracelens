@@ -404,27 +404,31 @@ excluded and counted. Unavailable evidence is never a zero delta.
    reproduce the result exactly, and task order never matters.
 5. The p-value is a paired sign-flip permutation test: under the null of no
    within-task difference, each `d_t` is equally likely to carry either sign,
-   and the two-sided p-value is the fraction of `B` random sign assignments
-   (counting the observed one) whose mean is at least as extreme as `|Δ|`.
-   The assignments are drawn with the same `seed`; when `T ≤ 12` and
-   `2^T ≤ B` all assignments are enumerated instead and the p-value is
-   exact. A sampled p-value is never reported below `2 / 2^T`, the exact
-   test's floor: a sample can miss the few assignments as extreme as the
-   observed one, which the exact p-value always counts.
+   and the two-sided p-value is the fraction of sign assignments whose mean
+   is at least as extreme as `|Δ|`. Up to `T = 12` (4096 assignments) all
+   of them are enumerated, whatever `B`, and the p-value is exact. Beyond
+   that it is the fraction of `B` random assignments, drawn with the same
+   `seed` and counting the observed one, and is never reported below
+   `2 / 2^T`, the exact test's floor: a sample can miss the few assignments
+   as extreme as the observed one, which the exact p-value always counts.
+   "At least as extreme" allows for rounding relative to the size of the
+   differences, so the observed assignment, its mirror image, and exact ties
+   always count and the p-value does not depend on the metric's scale.
 
 **Verdict.** Given the practical threshold `τ` (`--threshold`, an absolute
-delta on the metric's scale; default 0.03), the level `α = 1 − confidence`,
-the interval `[lo, hi]`, and the sign-flip p-value `p`, two rules come before
-the table (issue #112):
+delta on the metric's scale; default 0.03; a finite number, 0 or more,
+otherwise exit 2), the level `α = 1 − confidence`, the interval `[lo, hi]`,
+and the sign-flip p-value `p`, two rules come before the table (issue #112):
 
 - **Evidence floor.** With `T` paired tasks the exact sign-flip p-value
   cannot fall below `2 / 2^T`. It gets there only when every difference is
   non-zero and all share one sign, so that no sign assignment but the
-  observed one and its mirror image is as extreme. A sampled p-value also
-  cannot fall below `1 / (B + 1)`. When that floor is above `α`, no difference can be
-  significant however large it is, so there is no verdict: fewer than 6
-  tasks at 0.95, 5 at 0.90, 8 at 0.99. The output names the p-value the
-  test cannot get below and the tasks a verdict needs.
+  observed one and its mirror image is as extreme. Beyond twelve tasks a
+  sampled p-value also cannot fall below `1 / (B + 1)`. When that floor is
+  above `α`, no difference can be significant however large it is, so there
+  is no verdict: fewer than 6 tasks at 0.95, 5 at 0.90, 8 at 0.99. The
+  output names the p-value the test cannot get below and the tasks (or,
+  beyond twelve tasks, the draws) a verdict needs.
 - **Significance needs agreement.** A difference is significant when the
   interval excludes 0 *and* `p ≤ α`. On few tasks the percentile interval is
   too narrow: on its own it called a regression in 21 % of no-change

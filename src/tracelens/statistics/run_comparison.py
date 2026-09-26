@@ -42,10 +42,13 @@ DEFAULT_CONFIDENCE = 0.95
 DEFAULT_N_BOOTSTRAP = 10000
 BUILTIN_METRICS = ("pass_rate", "mean_score")
 UNMATCHED_POLICIES = ("error", "exclude")
+# Up to this many tasks the sign-flip test enumerates all 2^T assignments
+# (4096 at most), whatever B: cheap, exact, and independent of the seed.
 _EXACT_SIGN_FLIP_MAX_TASKS = 12
 # An interval bound this close to zero is treated as touching zero, so
 # floating-point residue from averaging never decides significance. The
-# threshold gets the same slack, scaled to its size.
+# threshold gets the same slack, scaled to its size, and so do the sign-flip
+# test's ties, scaled to the size of the differences.
 _ZERO_TOLERANCE = 1e-9
 # The level a p-value is held to is rounded to this many digits, so that
 # 1 - 0.95 is 0.05 and not 0.05000000000000004.
@@ -286,9 +289,15 @@ def _bootstrap_means(diffs: np.ndarray, n_bootstrap: int, seed: int | None) -> n
     return out
 
 
-def _enumerates(tasks: int, n_bootstrap: int) -> bool:
-    """Whether the sign-flip p-value enumerates every assignment, and so is exact."""
-    return tasks <= _EXACT_SIGN_FLIP_MAX_TASKS and 2**tasks <= n_bootstrap
+def _enumerates(tasks: int) -> bool:
+    """Whether the sign-flip p-value enumerates every assignment, and so is exact.
+
+    Up to twelve tasks it always does. Sampling fewer draws than there are
+    assignments there only adds seed-dependent noise: six tasks that all
+    collapsed have an exact p of 2/64, but 19 sampled flips reach 0.05 for
+    about half the seeds.
+    """
+    return tasks <= _EXACT_SIGN_FLIP_MAX_TASKS
 
 
 def alpha_for(confidence: float) -> float:
@@ -317,7 +326,7 @@ def _level_shortfall(tasks: int, n_bootstrap: int, confidence: float) -> tuple[b
     """
     alpha = alpha_for(confidence)
     too_few_tasks = tasks < 1 or 2.0 ** (1 - tasks) > alpha
-    too_few_draws = not _enumerates(tasks, n_bootstrap) and 1.0 / (n_bootstrap + 1) > alpha
+    too_few_draws = not _enumerates(tasks) and 1.0 / (n_bootstrap + 1) > alpha
     return too_few_tasks, too_few_draws
 
 
@@ -329,20 +338,37 @@ def _shortfall_names(too_few_tasks: bool, too_few_draws: bool) -> str:
     )
 
 
+def _percent(confidence: float) -> str:
+    """``0.95`` as ``95%`` and ``0.999`` as ``99.9%``, never rounded to another level."""
+    return f"{confidence * 100:.12g}%"
+
+
+def _p_above(p: float, level: float) -> str:
+    """``p`` to four decimals, or in as many digits as it takes to read above ``level``.
+
+    A floor of 0.000122 next to a level of 0.0001 does not print as "0.0001".
+    """
+    text, digits = f"{p:.4f}", 4
+    while float(text) <= level and digits < 17:
+        digits += 1
+        text = f"{p:.{digits}g}"
+    return text
+
+
 def min_attainable_p(tasks: int, n_bootstrap: int) -> float | None:
     """The smallest p-value the sign-flip test can return with ``tasks`` paired tasks.
 
     Only the observed sign assignment and its mirror image can be as extreme
     as the observed mean, and only when every difference is non-zero and all
     share one sign, so the exact two-sided p-value is never below ``2 / 2^T``,
-    and a sampled estimate is never reported below it either. A sampled
-    estimate ``(extreme + 1) / (B + 1)`` is also never below ``1 / (B + 1)``.
-    ``None`` without tasks.
+    and a sampled estimate (beyond twelve tasks) is never reported below it
+    either. A sampled estimate ``(extreme + 1) / (B + 1)`` is also never below
+    ``1 / (B + 1)``. ``None`` without tasks.
     """
     if tasks < 1:
         return None
     floor = 2.0 ** (1 - tasks)
-    if _enumerates(tasks, n_bootstrap):
+    if _enumerates(tasks):
         return floor
     return max(floor, 1.0 / (n_bootstrap + 1))
 
@@ -370,15 +396,20 @@ def _sign_flip_p_value(
 ) -> tuple[float, bool]:
     """Two-sided paired sign-flip p-value.
 
-    Exact (all ``2^T`` assignments) when ``T`` is small enough for that to
-    cost no more than ``n_bootstrap`` draws; otherwise ``n_bootstrap`` random
-    assignments, with the observed one counted, and never below the exact
-    test's floor ``2 / 2^T`` (a sample can miss the few assignments as extreme
-    as the observed one, but the exact p-value always counts them).
+    Exact (all ``2^T`` assignments) up to twelve tasks, whatever
+    ``n_bootstrap``; beyond that ``n_bootstrap`` random assignments, with the
+    observed one counted, and never below the exact test's floor ``2 / 2^T``
+    (a sample can miss the few assignments as extreme as the observed one,
+    but the exact p-value always counts them).
     """
     t = len(diffs)
-    observed = abs(delta) - 1e-12
-    if _enumerates(t, n_bootstrap):
+    # An assignment is as extreme as the observed one when its |mean| reaches
+    # |delta| up to rounding. Rounding grows with the values, so the tolerance
+    # is relative: the observed assignment, its mirror image, and exact ties
+    # count on any metric scale, and the exact p is never below 2 / 2^T. (An
+    # absolute 1e-12 lost them on token counts in the millions: p = 0.)
+    observed = abs(delta) - _ZERO_TOLERANCE * float(np.abs(diffs).mean())
+    if _enumerates(t):
         patterns = np.arange(2**t)[:, None] >> np.arange(t)
         signs = (patterns & 1) * 2 - 1
         means = signs @ diffs / t
@@ -452,7 +483,14 @@ def _threshold_bounds(threshold: float) -> tuple[float, float]:
     Floating-point residue never decides which side of the threshold a value
     falls on: ``0.8 - 0.6`` and ``0.6 - 0.4`` are the same drop of one trial
     in five, and both reach a threshold of 0.2.
+
+    Raises:
+        ValueError: If ``threshold`` is not a finite number of 0 or more. No
+            value compares below a NaN threshold, so a regression would read
+            as below it and pass; an infinite threshold would gate nothing.
     """
+    if not (math.isfinite(threshold) and threshold >= 0):
+        raise ValueError(f"threshold must be a finite number >= 0, got {threshold!r}")
     slack = _ZERO_TOLERANCE * max(1.0, threshold)
     return -threshold + slack, threshold - slack
 
@@ -482,13 +520,17 @@ def decide(effect: PairedEffect, threshold: float) -> Verdict:
     only when the interval also stays above ``-threshold``, so every verdict
     that exits 0 has ``ci_lower > -threshold``. A value within floating-point
     residue of the threshold counts as reaching it.
+
+    Raises:
+        ValueError: If ``threshold`` is not a finite number of 0 or more,
+            whatever the evidence.
     """
+    down, up = _threshold_bounds(threshold)
     significant = is_significant(effect)
     if significant is None or effect.delta is None or not can_reach_level(effect):
         return Verdict.INSUFFICIENT_EVIDENCE
     assert effect.ci_lower is not None and effect.ci_upper is not None  # as significant
     delta, lo, hi = effect.delta, effect.ci_lower, effect.ci_upper
-    down, up = _threshold_bounds(threshold)
     if significant:
         if delta <= down:
             return Verdict.REGRESSION
@@ -610,7 +652,7 @@ class RunComparison(BaseModel):
                 else f"{self.p_value:.4f}" + (" (exact)" if self.p_value_exact else "")
             )
             lines.append(
-                f"  delta = {self.delta:+.4f}  {self.confidence:.0%} CI "
+                f"  delta = {self.delta:+.4f}  {_percent(self.confidence)} CI "
                 f"[{self.ci_lower:+.4f}, {self.ci_upper:+.4f}]  p = {p_text}  "
                 f"(B = {self.n_bootstrap}, seed = {self.seed})"
             )
@@ -688,8 +730,9 @@ class RunComparison(BaseModel):
             takes.append(f"B >= {math.ceil(1 / alpha) - 1}")
         test = "the test" if too_few_draws else "the sign-flip test"
         return (
-            f"with {' and '.join(have)} {test} cannot give p below {attainable:.4f}; "
-            f"a {self.confidence * 100:g}% verdict needs p <= {alpha:g}, "
+            f"with {' and '.join(have)} {test} cannot give p below "
+            f"{_p_above(attainable, alpha)}; a {_percent(self.confidence)} verdict needs "
+            f"p <= {alpha:g}, "
             f"which takes {' and '.join(takes)}"
         )
 
@@ -755,9 +798,11 @@ def compare_runs(
         direction: ``higher`` or ``lower`` (custom metrics only; built-ins
             are higher-is-better).
         grader: Restrict ``pass_rate`` / ``mean_score`` to one grader's outcome.
-        threshold: Practical threshold, an absolute delta on the metric scale.
+        threshold: Practical threshold, an absolute delta on the metric scale
+            (a finite number, 0 or more).
         confidence: Interval confidence level.
-        n_bootstrap: Bootstrap resamples (and sign-flip draws).
+        n_bootstrap: Bootstrap resamples, and sign-flip draws beyond twelve
+            tasks (up to twelve the test is exact).
         seed: Seed for both procedures; same inputs and seed reproduce the
             result exactly.
         unmatched_tasks: ``error`` (default) refuses task-set differences;
@@ -767,19 +812,18 @@ def compare_runs(
         observe: Observational mode: every evaluated comparison exits 0.
 
     Raises:
-        ComparisonError: Invalid selection, incompatible measurement setups
-            (different graders; task-set differences under ``error``), or
-            missing provenance under ``require_provenance``.
+        ComparisonError: Invalid selection or parameters, incompatible
+            measurement setups (different graders; task-set differences under
+            ``error``), or missing provenance under ``require_provenance``.
     """
     selector = MetricSelector.parse(metric, direction, grader)
-    if threshold < 0:
-        raise ComparisonError(f"threshold cannot be negative, got {threshold!r}")
     if unmatched_tasks not in UNMATCHED_POLICIES:
         raise ComparisonError(
             f"unmatched_tasks must be one of {', '.join(UNMATCHED_POLICIES)}, "
             f"got {unmatched_tasks!r}"
         )
     try:
+        _threshold_bounds(threshold)
         paired_task_effect([], confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
     except ValueError as exc:
         raise ComparisonError(str(exc)) from exc

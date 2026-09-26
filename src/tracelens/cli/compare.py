@@ -72,8 +72,8 @@ def add_compare_parser(subparsers: argparse._SubParsersAction) -> None:  # type:
     parser.add_argument(
         "--threshold", type=float, default=DEFAULT_THRESHOLD,
         help=(
-            "Practical threshold: an absolute delta on the metric's scale "
-            f"(default: {DEFAULT_THRESHOLD})"
+            "Practical threshold: an absolute delta on the metric's scale, a finite "
+            f"number >= 0 (default: {DEFAULT_THRESHOLD})"
         ),
     )
     parser.add_argument(
@@ -86,7 +86,10 @@ def add_compare_parser(subparsers: argparse._SubParsersAction) -> None:  # type:
     )
     parser.add_argument(
         "--bootstrap", type=int, default=DEFAULT_N_BOOTSTRAP, dest="n_bootstrap", metavar="B",
-        help=f"Bootstrap resamples and sign-flip draws (default: {DEFAULT_N_BOOTSTRAP})",
+        help=(
+            "Bootstrap resamples, and sign-flip draws beyond 12 tasks (up to 12 the "
+            f"sign-flip test is exact) (default: {DEFAULT_N_BOOTSTRAP})"
+        ),
     )
     parser.add_argument(
         "--seed", type=int, default=0,
