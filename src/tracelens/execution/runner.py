@@ -553,14 +553,10 @@ class EvaluationRunner:
                 await self.adapter.teardown(task, transcript)
             except Exception as teardown_exc:
                 if trial.status == TrialStatus.COMPLETED:
-                    trial.status = TrialStatus.FAILED
-                    trial.error_message = (
-                        f"Teardown failed: {teardown_exc}"
-                    )
-                    trial.error_traceback = traceback.format_exc()
-                    # The run itself succeeded; record the distinction so
-                    # fail_fast doesn't abort a suite over cleanup flakiness.
+                    # The run itself succeeded; preserve COMPLETED status so it is graded normally.
+                    # Record the cleanup flakiness in metadata so fail_fast ignores it.
                     trial.metadata["teardown_failed"] = True
+                    trial.metadata["teardown_error"] = str(teardown_exc)
                 else:
                     trial.error_message = (
                         f"{trial.error_message}; "

@@ -252,7 +252,7 @@ class Trial(BaseModel):
             "run": f"{self.run_index + 1}/{self.total_runs}",
             "status": self.status.value,
             "passed": self.passed,
-            "score": round(self.aggregate_score, 4) if self.aggregate_score else None,
+            "score": round(self.aggregate_score, 4) if self.aggregate_score is not None else None,
         }
         if self.fingerprint_short:
             result["fp"] = self.fingerprint_short

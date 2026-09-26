@@ -34,7 +34,7 @@ Which trials enter which statistic:
 | Trial state | Meaning | Agent statistics | Reported separately as |
 |---|---|---|---|
 | `COMPLETED`, no grader error | agent finished and was graded | included; passes iff every outcome passed | — |
-| `FAILED` | agent-level failure: adapter error not classified as infrastructure, or a teardown failure | included as a **failure** | — |
+| `FAILED` | agent-level failure: adapter error not classified as infrastructure | included as a **failure** | — |
 | `TIMEOUT` | runner time budget exceeded | included as a **failure**; the estimand is "passes within budget" | — |
 | `INFRA_ERROR` | infrastructure failure: OOM, network, sandbox, `InfraError` | **excluded** | `infra_error_count` / `infra_error_rate` |
 | any status with an outcome where `grader_error=True` | the grading harness crashed | **excluded** | `grader_error_count` / `grader_error_rate` |
@@ -43,9 +43,7 @@ Which trials enter which statistic:
 An included trial is a **gradable trial**. `passed` is true iff the trial
 carries at least one outcome and every outcome passed. Trials that never
 produced a transcript (`TIMEOUT`, and `FAILED` during setup or run) have no
-outcomes and therefore count as failures. A `FAILED` status caused by a
-teardown error after a graded run is judged by its outcomes and flagged with
-`metadata["teardown_failed"]`.
+outcomes and therefore count as failures.
 
 Harness failures are never folded into agent failure. They are excluded from
 agent statistics and shown next to them with counts, because a spike in

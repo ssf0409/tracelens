@@ -183,8 +183,7 @@ everything else:
 2. **Reproducibility is a first-class config.** Every run carries a
    `DecisionSpec` (model, prompt, tools, infra). Two runs with the
    same fingerprint should produce statistically similar results;
-   when they don't, regression detection knows whether to blame the
-   agent or the infrastructure.
+   when they don't, the fingerprint difference supports attributing the change to a declared configuration difference.
 
 Everything else — async vs sync, single agent vs HTTP, code grader vs
 LLM judge — is a knob you can turn without rewriting your eval set.

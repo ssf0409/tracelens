@@ -41,13 +41,13 @@ def pass_at_k(n: int, c: int, k: int) -> float:
         >>> pass_at_k(10, 1, 5)
         0.5  # 50% chance at least 1 of 5 passes
     """
-    if n - c < k:
-        # More passes needed than failures available
-        return 1.0
-
     if c == 0:
         # No passes, so pass@k is 0
         return 0.0
+
+    if n - c < k:
+        # More passes needed than failures available
+        return 1.0
 
     # Unbiased estimator: 1 - C(n-c, k) / C(n, k)
     # Equivalent to: 1 - prod((n-c-i)/(n-i) for i in range(k))
