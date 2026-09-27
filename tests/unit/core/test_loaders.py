@@ -860,7 +860,7 @@ class TestCSVReservedColumnFidelity:
         task = CSVTaskLoader().load(tmp_path / "t.csv")[0]
 
         assert task.tags == ["smoke", "regression"]
-        assert task.timeout_seconds == 42.5
+        assert task.metadata["timeout_seconds"] == 42.5
 
     @pytest.mark.parametrize("tags", ["not-json", '""'])
     def test_invalid_structured_columns_raise_with_location(

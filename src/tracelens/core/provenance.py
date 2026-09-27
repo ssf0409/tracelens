@@ -191,7 +191,6 @@ class RunnerSettings(BaseModel):
 
     num_runs: int
     max_concurrency: int
-    timeout_seconds: float
     max_infra_retries: int
     infra_exception_types: list[str] = Field(default_factory=list)
 
@@ -200,7 +199,6 @@ class RunnerSettings(BaseModel):
         return cls(
             num_runs=config.num_runs,
             max_concurrency=config.max_concurrency,
-            timeout_seconds=config.timeout_seconds,
             max_infra_retries=config.max_infra_retries,
             infra_exception_types=[
                 f"{t.__module__}.{t.__qualname__}" for t in config.infra_exception_types
@@ -260,7 +258,6 @@ class RunProvenance(BaseModel):
             "Graders: " + (", ".join(g.describe() for g in m.graders) or "none"),
             (
                 f"Runner: {m.runner.num_runs} run(s) per task, "
-                f"timeout {m.runner.timeout_seconds:g}s, "
                 f"{m.runner.max_infra_retries} infra retries"
             ),
             f"Adapter: {c.adapter.describe()}",

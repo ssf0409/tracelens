@@ -72,9 +72,6 @@ class Task(BaseModel):
     difficulty: str | None = None  # "easy", "medium", "hard"
     category: str | None = None
 
-    # Execution configuration
-    timeout_seconds: float = 300.0
-
     def matches_filter(
         self,
         tags: list[str] | None = None,
@@ -191,8 +188,6 @@ class EvalSet(BaseModel):
 
     # Configuration
     default_num_runs: int = 1  # For pass@k
-    default_timeout_seconds: float = 300.0
-
     def filter_tasks(
         self,
         tags: list[str] | None = None,
@@ -227,7 +222,6 @@ class EvalSet(BaseModel):
             default_grader_ids=self.default_grader_ids,
             metadata=self.metadata,
             default_num_runs=self.default_num_runs,
-            default_timeout_seconds=self.default_timeout_seconds,
         )
 
     def add_task(self, task: Task) -> None:

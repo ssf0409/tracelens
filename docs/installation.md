@@ -27,12 +27,12 @@ Add to your project's `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "tracelens>=0.3.0",
+    "tracelens--8<-- "includes/version.txt"",
 ]
 
 # With LLM extras
 dependencies = [
-    "tracelens[llm]>=0.3.0",
+    "tracelens[llm]--8<-- "includes/version.txt"",
 ]
 ```
 
@@ -76,7 +76,7 @@ uv pip install "tracelens[http,llm,datasets]"
 ## CI Installation
 
 For GitHub Actions, install your project dependencies normally. If your
-project depends on `tracelens>=0.3.0`, `uv sync` or `pip install -e .`
+project depends on `tracelens--8<-- "includes/version.txt"`, `uv sync` or `pip install -e .`
 is enough; no extra repository checkout or authentication is required.
 
 ```yaml
@@ -120,31 +120,8 @@ tracelens report --results examples/reports/hello_world_report.json --format mar
 
 ## Project Structure for Integration
 
-When integrating `tracelens` into your project, we recommend this structure:
+Run `tracelens init` to generate a standard repository layout (see [Getting Started](./getting-started.md)).
 
-```
-your-project/
-├── eval/
-│   ├── __init__.py
-│   ├── tasks/                    # Task definitions
-│   │   ├── __init__.py
-│   │   ├── task_schema.py        # Your Task subclass
-│   │   └── scenarios/            # JSON task files
-│   │       ├── scenario_001.json
-│   │       └── scenario_002.json
-│   ├── graders/                  # Grader implementations
-│   │   ├── __init__.py
-│   │   ├── quality_grader.py
-│   │   └── domain_grader.py
-│   ├── baselines/
-│   │   └── baselines.json        # Stored baselines
-│   ├── harness.py                # Evaluation orchestrator
-│   └── conftest.py               # Test fixtures
-├── .github/
-│   └── workflows/
-│       └── eval.yml              # CI evaluation workflow
-└── pyproject.toml                # Include tracelens dependency
-```
 
 ## Next Steps
 

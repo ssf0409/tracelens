@@ -694,12 +694,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         # The recorded reasons say which evidence is missing and, for an
         # underpowered check, how many trials would fix it -- print them
         # rather than leaving CLI-only users with the generic advice.
-        for reason in gate.reasons:
-            print(f"Error: {reason}", file=sys.stderr)
+        cause = "; ".join(gate.reasons) if gate.reasons else "unknown cause"
         print(
-            "Error: baseline check is unevaluable; verify the eval set, "
-            "run count, and matching baseline metrics; fix any infra/grader "
-            "failures listed above and rerun. This is not a passing gate.",
+            f"Error: baseline check is unevaluable: {cause}. This is not a passing gate.",
             file=sys.stderr,
         )
         return 2
