@@ -177,7 +177,9 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     # 7. compare pairs the broken run with the trusted one but gives no verdict
     # on the scaffold's two tasks: however decisive the data, the exact
     # sign-flip test cannot go below p = 0.5 with two tasks, and a verdict
-    # needs p <= 0.05 (issue #112). The output says what it would take.
+    # needs p <= 0.05 (issue #112). The output says what it would take, and
+    # still names the two tasks: each one's own five trials went from all
+    # passing to all failing, which trial noise does not explain.
     compare = tracelens(
         "compare", "eval/results/trusted-trials.json", "eval/results/trials.json",
         "--output", "eval/results/compare.json", cwd=project, expect=2,
@@ -186,6 +188,10 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert (
         "the sign-flip test cannot give p below 0.5000; a 95% verdict needs p <= 0.05, "
         "which takes at least 6 tasks"
+    ) in compare.stdout
+    assert (
+        "changed beyond trial noise (p <= 0.05 after Holm over 2 tasks): "
+        "starter-capital 1.000 -> 0.000 (p = 0.0020), starter-math 1.000 -> 0.000 (p = 0.0020)"
     ) in compare.stdout
     # Same class path and DecisionSpec, but step 5 rewrote the adapter's body.
     # Before the candidate side was content-addressed this read "nothing
@@ -196,6 +202,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert decision["verdict"] == "insufficient_evidence" and decision["delta"] == -1.0
     assert decision["min_attainable_p"] == 0.5 and decision["min_tasks"] == 6
     assert decision["alignment"]["compared"] == 2 and decision["alignment"]["aligned_by"] == "content"
+    assert decision["tasks_changed"] == ["starter-capital", "starter-math"]
 
     # 7b. A partial regression (1 of 5 runs passes) is blocked on its evidence:
     # the exact test on 5/5 -> 1/5 gives p=0.0107, under the level shared by
@@ -332,6 +339,7 @@ def test_documented_user_journey(tmp_path: Path) -> None:
         cwd=project, expect=2,
     )
     assert "What moved: nothing; every compared task has the same value" in compare.stdout
+    assert "changed beyond trial noise" not in compare.stdout
     assert "Verdict: insufficient evidence (exit 2)" in compare.stdout
 
     # 14. The saved artifacts are readable by the other documented commands.

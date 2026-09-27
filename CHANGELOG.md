@@ -23,6 +23,36 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   than calling the component unchanged. Only the defining file is hashed;
   declare run-time inputs through `DecisionSpec`. Hashing rule and semantics:
   `docs/reproducibility.md`, "Run provenance".
+- **An inconclusive `tracelens compare` says what would decide it, and which
+  tasks changed anyway.** On realistic suites most comparisons are
+  inconclusive, and the output used to stop there. Twenty pass/fail tasks at
+  five trials a side, three of which the candidate broke, read `p = 0.2464`
+  and exit 2: seventeen unchanged tasks leave the sign-flip test three signs
+  to go on. The summary now adds three things.
+  - **Per-task evidence, for every verdict.** Each task's own trials are
+    tested with the gate's test for the metric (Boschloo's exact test for
+    `pass_rate`, Welch's t-test for scores), two-sided and Holm-adjusted
+    across the compared tasks. Tasks at or below the level are listed as
+    `changed beyond trial noise` (`tasks_changed`; `test`, `p_value` and
+    `p_adjusted` on each `per_task` row). This is inference about these
+    tasks, so it never changes the verdict.
+  - **Resolution, for an inconclusive verdict.** The `resolution:` line gives
+    the interval's half-width, and about how many tasks would narrow it to
+    `±threshold` at the observed spread (`half_width`, `tasks_for_threshold`).
+  - **A recheck, for an inconclusive verdict.** Tasks whose own p-value is at
+    most twice the level before adjustment are `worth a recheck` (`recheck`).
+    A `Next:` line gives the `tracelens run --task-id ... --num-runs N` flags
+    to rerun them on both versions with four times the trials, 20 to 200
+    (`recheck_num_runs`), and says to compare the two reruns. Only the fresh
+    trials decide.
+
+  In simulation, one of twenty tasks dropped from 0.97 to 0.17. The suite
+  verdict was inconclusive in 98 % of comparisons, and the recheck confirmed
+  the drop in 89 %. A drop to 0.47 was confirmed in 48 %. An unchanged task
+  was confirmed in at most 2.4 % of comparisons, at 20 or 50 tasks.
+  `tracelens.baselines.comparison.two_sample_p_value` exposes the gate's
+  per-task test. Comparison JSON written before this loads with the new
+  fields empty. (#112)
 
 ### Changed
 

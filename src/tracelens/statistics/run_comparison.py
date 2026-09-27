@@ -19,6 +19,7 @@ verdict, and the output says how many tasks it would take.
 from __future__ import annotations
 
 import math
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +27,7 @@ from enum import StrEnum
 import numpy as np
 from pydantic import BaseModel, Field
 
+from tracelens.baselines.comparison import holm_adjusted, two_sample_p_value
 from tracelens.core.outcome import Outcome
 from tracelens.core.provenance import (
     Compatibility,
@@ -53,6 +55,21 @@ _ZERO_TOLERANCE = 1e-9
 # The level a p-value is held to is rounded to this many digits, so that
 # 1 - 0.95 is 0.05 and not 0.05000000000000004.
 _ALPHA_DIGITS = 12
+# A task is worth a recheck when its own p-value, before adjustment, is at
+# most twice the level. The recheck on fresh trials is what decides, so the
+# screen can be lenient. In simulation (20 pass/fail tasks, 5 trials a side,
+# one task dropping from 0.97 to 0.47), the recheck confirmed the drop in 48 %
+# of comparisons with this screen against 20 % with a screen at the level,
+# for less than one more task to rerun on average; an unchanged task was
+# confirmed in at most 2.4 % of comparisons at 20 or 50 tasks.
+_RECHECK_SCREEN = 2.0
+# A recheck reruns the flagged tasks with four times the trials (half the
+# per-task noise), at least 20 and at most 200; the printed command names at
+# most this many tasks.
+_RECHECK_RUNS_FACTOR = 4
+_RECHECK_MIN_RUNS = 20
+_RECHECK_MAX_RUNS = 200
+_RECHECK_COMMAND_TASKS = 10
 
 
 class Direction(StrEnum):
@@ -583,6 +600,12 @@ class TaskDelta(BaseModel):
     delta: float
     n_baseline: int
     n_candidate: int
+    # The task's own trials tested with the gate's test for the metric
+    # (two-sided), and that p-value Holm-adjusted across the compared tasks.
+    # ``None`` when no test applies to the task's trials.
+    test: str | None = None
+    p_value: float | None = None
+    p_adjusted: float | None = None
 
 
 class RunComparison(BaseModel):
@@ -622,6 +645,18 @@ class RunComparison(BaseModel):
     verdict: Verdict
     exit_code: int
     observe: bool = False
+    # What the comparison can resolve: the interval's half-width, and the
+    # tasks it would take to narrow it to +-threshold at the observed per-task
+    # spread (only when it is wider than that).
+    half_width: float | None = None
+    tasks_for_threshold: int | None = None
+    # Each task's own trials: the tasks that changed beyond their trial noise
+    # (Holm-adjusted p <= 1 - confidence), and those worth a recheck (p at or
+    # below twice that before adjustment), most significant first, with the
+    # trials a recheck should run.
+    tasks_changed: list[str] = Field(default_factory=list)
+    recheck: list[str] = Field(default_factory=list)
+    recheck_num_runs: int | None = None
     per_task: list[TaskDelta] = Field(default_factory=list)
     compatibility: CompatibilityReport
     notes: list[str] = Field(default_factory=list)
@@ -657,9 +692,23 @@ class RunComparison(BaseModel):
                 f"(B = {self.n_bootstrap}, seed = {self.seed})"
             )
             lines.append("  readings: " + ", ".join(self._readings(self.ci_lower, self.ci_upper)))
+            if self.verdict is Verdict.INCONCLUSIVE and self.half_width is not None:
+                lines.append("  resolution: " + self._resolution(self.half_width))
         if self.verdict is Verdict.INSUFFICIENT_EVIDENCE and self.min_attainable_p is not None:
             lines.append("  evidence: " + self._shortfall(self.min_attainable_p))
+        lines.extend(self._per_task_findings(top))
         lines.append(f"  Verdict: {VERDICT_TEXT[self.verdict]} (exit {self.exit_code})")
+        if self.verdict is Verdict.INCONCLUSIVE and self.recheck and self.recheck_num_runs:
+            shown = self.recheck[:_RECHECK_COMMAND_TASKS]
+            more = len(self.recheck) - len(shown)
+            lines.append(
+                f"  Next: rerun {'those tasks' if len(self.recheck) > 1 else 'that task'} on "
+                f"both versions with more trials (tracelens run ... --task-id "
+                f"{' '.join(shlex.quote(task_id) for task_id in shown)} "
+                f"--num-runs {self.recheck_num_runs} --save-trials <file>)"
+                + (f", {more} more in the JSON's `recheck`" if more else "")
+                + ", then compare the two reruns"
+            )
         lines.append("  What changed: " + _what_changed(self.compatibility))
         moved = [row for row in self.per_task if row.delta != 0.0]
         if self.per_task and not moved:
@@ -735,6 +784,67 @@ class RunComparison(BaseModel):
             f"p <= {alpha:g}, "
             f"which takes {' and '.join(takes)}"
         )
+
+    def _resolution(self, half_width: float) -> str:
+        """How small a change this comparison can tell apart, and what +-threshold would take."""
+        text = (
+            f"changes within about ±{half_width:.4f} (the interval's half-width) are inside "
+            "this comparison's noise"
+        )
+        if self.tasks_for_threshold is not None:
+            text += (
+                f"; ±{self.threshold:g} would take about {_about(self.tasks_for_threshold)} "
+                "tasks at this per-task spread"
+            )
+        return text
+
+    def _per_task_findings(self, top: int) -> list[str]:
+        """The tasks whose own trials changed, and (when inconclusive) those worth a recheck."""
+        rows = {row.task_id: row for row in self.per_task}
+        tested = sum(1 for row in self.per_task if row.p_value is not None)
+
+        def listed(ids: list[str]) -> str:
+            shown = ", ".join(
+                f"{task_id} {rows[task_id].baseline:.3f} -> {rows[task_id].candidate:.3f} "
+                f"(p {_p_text(rows[task_id].p_value)})"
+                for task_id in ids[:top]
+            )
+            more = len(ids) - top
+            return shown + (f", and {more} more" if more > 0 else "")
+
+        lines = []
+        if self.tasks_changed:
+            lines.append(
+                f"  changed beyond trial noise (p <= {alpha_for(self.confidence):g} after "
+                f"Holm over {tested} tasks): {listed(self.tasks_changed)}"
+            )
+        suggestive = [task_id for task_id in self.recheck if task_id not in self.tasks_changed]
+        if suggestive and self.verdict is Verdict.INCONCLUSIVE:
+            screen = _recheck_level(alpha_for(self.confidence))
+            lines.append(
+                f"  worth a recheck (p <= {screen:g} before adjustment): {listed(suggestive)}"
+            )
+        return lines
+
+
+def _p_text(p: float | None) -> str:
+    """``= 0.0215``, or ``< 0.0001`` for a p-value four decimals cannot show."""
+    if p is None:
+        return "n/a"
+    return "< 0.0001" if p < 0.0001 else f"= {p:.4f}"
+
+
+def _recheck_level(alpha: float) -> float:
+    """The screen for a recheck: twice the level, rounded like the level itself."""
+    return min(1.0, round(_RECHECK_SCREEN * alpha, _ALPHA_DIGITS))
+
+
+def _about(n: int) -> str:
+    """A planning figure in two significant digits, halves up: 985 as 990, 12345 as 12000."""
+    if n < 100:
+        return str(n)
+    step = 10 ** (len(str(n)) - 2)
+    return str((n + step // 2) // step * step)
 
 
 def _what_changed(compat: CompatibilityReport) -> str:
@@ -904,6 +1014,19 @@ def compare_runs(
     exit_code = VERDICT_EXIT_CODES[verdict]
     if observe and effect.delta is not None:
         exit_code = 0
+    changed_ids, recheck_ids, recheck_num_runs = _test_each_task(
+        rows, a_values, b_values, binary=selector.name == "pass_rate",
+        alpha=alpha_for(confidence),
+    )
+    half_width = (
+        None
+        if effect.ci_lower is None or effect.ci_upper is None
+        else (effect.ci_upper - effect.ci_lower) / 2
+    )
+    tasks_for_threshold = None
+    if half_width is not None and threshold > 0 and half_width > threshold:
+        # The half-width shrinks as 1/sqrt(T) at a fixed per-task spread.
+        tasks_for_threshold = math.ceil(round(len(compared) * (half_width / threshold) ** 2, 6))
     rows.sort(key=lambda row: (-abs(row.delta), row.task_id))
     interval_excludes_zero = (
         None
@@ -944,10 +1067,53 @@ def compare_runs(
         verdict=verdict,
         exit_code=exit_code,
         observe=observe,
+        half_width=half_width,
+        tasks_for_threshold=tasks_for_threshold,
+        tasks_changed=changed_ids,
+        recheck=recheck_ids,
+        recheck_num_runs=recheck_num_runs,
         per_task=rows,
         compatibility=compat,
         notes=notes,
     )
+
+
+def _test_each_task(
+    rows: list[TaskDelta],
+    a_values: dict[str, list[float]],
+    b_values: dict[str, list[float]],
+    *,
+    binary: bool,
+    alpha: float,
+) -> tuple[list[str], list[str], int | None]:
+    """Test each task's own trials, Holm across the tasks, and pick a recheck.
+
+    Fills each row's ``test``, ``p_value`` and ``p_adjusted``. Returns the
+    tasks that changed beyond their trial noise (adjusted p at or below
+    ``alpha``), the tasks worth a recheck (p at or below the screen level
+    before adjustment, which includes the changed ones), most significant
+    first, and the trials a recheck should run.
+    """
+    tested: list[tuple[TaskDelta, float]] = []
+    for row in rows:
+        row.test, row.p_value = two_sample_p_value(
+            a_values[row.task_id], b_values[row.task_id], binary=binary
+        )
+        if row.p_value is not None:
+            tested.append((row, row.p_value))
+    for (row, _p), adjusted in zip(tested, holm_adjusted([p for _row, p in tested]), strict=True):
+        row.p_adjusted = adjusted
+    tested.sort(key=lambda item: (item[1], item[0].task_id))
+    changed = [
+        row.task_id for row, _p in tested
+        if row.p_adjusted is not None and row.p_adjusted <= alpha
+    ]
+    recheck = [row for row, p in tested if p <= _recheck_level(alpha)]
+    if not recheck:
+        return changed, [], None
+    trials = max(max(row.n_baseline, row.n_candidate) for row in recheck)
+    num_runs = min(_RECHECK_MAX_RUNS, max(_RECHECK_MIN_RUNS, _RECHECK_RUNS_FACTOR * trials))
+    return changed, [row.task_id for row in recheck], num_runs
 
 
 __all__ = [

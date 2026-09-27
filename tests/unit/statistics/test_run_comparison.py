@@ -12,6 +12,7 @@ from itertools import product
 
 import numpy as np
 import pytest
+from scipy import stats
 
 from tracelens.core.outcome import Outcome
 from tracelens.core.provenance import (
@@ -31,6 +32,7 @@ from tracelens.statistics.run_comparison import (
     PairedEffect,
     RunComparison,
     Verdict,
+    _about,
     alpha_for,
     can_reach_level,
     compare_runs,
@@ -904,3 +906,185 @@ class TestCompareRuns:
         assert "What moved (largest first): c +1.000 (n 2/2), and 1 more" in text
         data = json.loads(result.model_dump_json())
         assert data["verdict"] == result.verdict.value and data["exit_code"] == result.exit_code
+
+
+# --- what an undecided comparison would take ----------------------------------------
+
+
+def _e2e_like() -> tuple[TrialBatch, TrialBatch]:
+    """Twenty tasks, five trials a side; v2 breaks t02 (5/5 -> 0/5), t03 (-> 1/5), t00 (-> 2/5)."""
+    base = {f"t{i:02d}": [True] * 5 for i in range(10)}
+    base.update({f"t{i:02d}": [True, False, True, False, True] for i in range(10, 20)})
+    cand = dict(base)
+    cand.update({
+        "t02": [False] * 5,
+        "t03": [True, False, False, False, False],
+        "t00": [True, True, False, False, False],
+    })
+    return _pass_batch(base), _pass_batch(cand)
+
+
+class TestPerTaskEvidence:
+    """Each task's own trials, tested with the gate's tests and Holm across the tasks."""
+
+    def test_a_concentrated_break_names_the_task_and_what_to_recheck(self):
+        result = compare_runs(*_e2e_like())
+        assert result.verdict is Verdict.INCONCLUSIVE and result.exit_code == 2
+        rows = {row.task_id: row for row in result.per_task}
+        # 5/5 -> 0/5: twice the one-sided Boschloo value sup p^5 (1-p)^5 = 1/1024.
+        assert rows["t02"].test == "boschloo_exact"
+        assert rows["t02"].p_value == pytest.approx(2 / 1024)
+        # Holm over the 20 tested tasks: the smallest p-value times 20.
+        assert rows["t02"].p_adjusted == pytest.approx(20 * 2 / 1024)
+        one_sided = stats.boschloo_exact([[5, 1], [0, 4]], alternative="greater").pvalue
+        assert rows["t03"].p_value == pytest.approx(2 * one_sided)
+        assert rows["t10"].p_value == 1.0 and rows["t10"].p_adjusted == 1.0
+        assert result.tasks_changed == ["t02"]
+        assert result.recheck == ["t02", "t03", "t00"] and result.recheck_num_runs == 20
+        text = "\n".join(result.summary_lines())
+        assert (
+            "changed beyond trial noise (p <= 0.05 after Holm over 20 tasks): "
+            "t02 1.000 -> 0.000 (p = 0.0020)"
+        ) in text
+        assert (
+            "worth a recheck (p <= 0.1 before adjustment): t03 1.000 -> 0.200 (p = 0.0215), "
+            "t00 1.000 -> 0.400 (p = 0.0618)"
+        ) in text
+        assert (
+            "Next: rerun those tasks on both versions with more trials (tracelens run ... "
+            "--task-id t02 t03 t00 --num-runs 20 --save-trials <file>), then compare the "
+            "two reruns"
+        ) in text
+        data = json.loads(result.model_dump_json())
+        assert data["tasks_changed"] == ["t02"] and data["recheck_num_runs"] == 20
+        assert {"test", "p_value", "p_adjusted"} <= set(data["per_task"][0])
+
+    def test_nothing_moved_names_nothing(self):
+        baseline, _ = _e2e_like()
+        result = compare_runs(baseline, baseline)
+        assert result.tasks_changed == [] and result.recheck == []
+        assert result.recheck_num_runs is None
+        text = "\n".join(result.summary_lines())
+        assert "changed beyond trial noise" not in text and "Next:" not in text
+
+    def test_two_collapsed_tasks_are_named_though_the_suite_gets_no_verdict(self):
+        """The scaffold's case: the per-task evidence is decisive, the suite verdict is not."""
+        baseline = _pass_batch({"a": [True] * 5, "b": [True] * 5})
+        candidate = _pass_batch({"a": [False] * 5, "b": [False] * 5})
+        result = compare_runs(baseline, candidate)
+        assert result.verdict is Verdict.INSUFFICIENT_EVIDENCE
+        assert result.tasks_changed == ["a", "b"]
+        assert [row.p_adjusted for row in result.per_task] == pytest.approx([4 / 1024] * 2)
+        text = "\n".join(result.summary_lines())
+        assert (
+            "changed beyond trial noise (p <= 0.05 after Holm over 2 tasks): "
+            "a 1.000 -> 0.000 (p = 0.0020), b 1.000 -> 0.000 (p = 0.0020)"
+        ) in text
+        # A recheck cannot give two tasks a suite verdict: no next step is offered.
+        assert "worth a recheck" not in text and "Next:" not in text
+
+    def test_a_continuous_metric_uses_welch_on_the_trial_values(self):
+        tasks = [f"t{i}" for i in range(6)]
+        shifted = [0.40, 0.45, 0.38, 0.42, 0.44]
+
+        def batch(values_for: dict[str, list[float]]) -> TrialBatch:
+            b = TrialBatch()
+            for task_id in tasks:
+                for i, v in enumerate(values_for.get(task_id, [0.5, 0.6, 0.55, 0.52, 0.58])):
+                    b.add_trial(_trial(task_id, i, passed=True, metrics={"m": v}))
+            b.provenance = _provenance(tasks)
+            return b
+
+        before = [0.80, 0.85, 0.79, 0.83, 0.81]
+        result = compare_runs(batch({"t0": before}), batch({"t0": shifted}), metric="g.m")
+        row = next(row for row in result.per_task if row.task_id == "t0")
+        assert row.test == "welch_t"
+        assert row.p_value == pytest.approx(stats.ttest_ind(before, shifted, equal_var=False).pvalue)
+        assert result.tasks_changed == ["t0"]
+
+    def test_the_recheck_runs_four_times_the_trials_between_20_and_200(self):
+        def pair(n: int) -> RunComparison:
+            base = {f"t{i}": [True] * n for i in range(8)}
+            cand = {**base, "t0": [False] * n}
+            return compare_runs(_pass_batch(base), _pass_batch(cand))
+
+        assert pair(3).recheck_num_runs == 20
+        assert pair(10).recheck_num_runs == 40
+        assert pair(60).recheck_num_runs == 200
+
+    def test_the_next_step_names_at_most_ten_tasks(self):
+        base = {f"t{i:02d}": [True] * 5 for i in range(12)}
+        base.update({f"u{i:02d}": [False] * 5 for i in range(12)})
+        cand = {task_id: [not r for r in runs] for task_id, runs in base.items()}
+        result = compare_runs(_pass_batch(base), _pass_batch(cand))
+        assert result.verdict is Verdict.INCONCLUSIVE and len(result.recheck) == 24
+        next_line = next(line for line in result.summary_lines() if "Next:" in line)
+        assert "--task-id " + " ".join(result.recheck[:10]) + " --num-runs" in next_line
+        assert "14 more in the JSON's `recheck`" in next_line
+
+    def test_the_next_step_quotes_task_ids_for_the_shell(self):
+        base = {f"ticket {i:02d}": [True] * 5 for i in range(10)}
+        base.update({f"ticket {i:02d}": [True, False, True, False, True] for i in range(10, 20)})
+        cand = {**base, "ticket 02": [False] * 5}
+        result = compare_runs(_pass_batch(base), _pass_batch(cand))
+        assert result.verdict is Verdict.INCONCLUSIVE and result.recheck == ["ticket 02"]
+        next_line = next(line for line in result.summary_lines() if "Next:" in line)
+        assert "rerun that task on both versions" in next_line
+        assert "--task-id 'ticket 02' --num-runs 20 --save-trials <file>" in next_line
+
+    def test_records_written_before_these_fields_still_load(self):
+        data = json.loads(compare_runs(*_e2e_like()).model_dump_json())
+        for key in ("half_width", "tasks_for_threshold", "tasks_changed", "recheck",
+                    "recheck_num_runs"):
+            del data[key]
+        for row in data["per_task"]:
+            del row["test"], row["p_value"], row["p_adjusted"]
+        old = RunComparison.model_validate(data)
+        assert old.tasks_changed == [] and old.per_task[0].p_value is None
+
+
+class TestResolution:
+    """An inconclusive comparison says what it can resolve and what +-threshold would take."""
+
+    def test_the_half_width_and_the_tasks_for_the_threshold(self):
+        result = compare_runs(*_e2e_like())
+        assert result.ci_lower is not None and result.ci_upper is not None
+        half = (result.ci_upper - result.ci_lower) / 2
+        assert result.half_width == pytest.approx(half) and half > 0.03
+        # The half-width shrinks as 1/sqrt(T): +-0.03 takes T * (h / 0.03)^2 tasks.
+        assert result.tasks_for_threshold == math.ceil(round(20 * (half / 0.03) ** 2, 6))
+        line = next(line for line in result.summary_lines() if "resolution:" in line)
+        assert line == (
+            f"  resolution: changes within about ±{half:.4f} (the interval's half-width) are "
+            f"inside this comparison's noise; ±0.03 would take about "
+            f"{_about(result.tasks_for_threshold)} tasks at this per-task spread"
+        )
+
+    def test_no_task_count_when_the_interval_is_already_narrower(self):
+        baseline, candidate = TestCompareRuns._metric_batches([0.005] * 6 + [0.05] * 6)
+        result = compare_runs(baseline, candidate, metric="g.m", threshold=0.03)
+        assert result.verdict is Verdict.INCONCLUSIVE
+        assert result.half_width is not None and result.half_width <= 0.03
+        assert result.tasks_for_threshold is None
+        line = next(line for line in result.summary_lines() if "resolution:" in line)
+        assert line.endswith("are inside this comparison's noise")
+
+    def test_no_task_count_for_a_zero_threshold(self):
+        result = compare_runs(*_e2e_like(), threshold=0.0)
+        assert result.half_width is not None and result.tasks_for_threshold is None
+
+    def test_only_an_inconclusive_verdict_prints_it(self):
+        six = compare_runs(
+            _pass_batch({f"t{i}": [True] * 5 for i in range(6)}),
+            _pass_batch({f"t{i}": [False] * 5 for i in range(6)}),
+        )
+        assert six.verdict is Verdict.REGRESSION and six.half_width == 0.0
+        assert "resolution:" not in "\n".join(six.summary_lines())
+
+    @pytest.mark.parametrize(
+        ("n", "text"),
+        [(7, "7"), (99, "99"), (100, "100"), (376, "380"), (503, "500"), (985, "990"),
+         (995, "1000"), (12345, "12000")],
+    )
+    def test_task_counts_are_planning_figures(self, n, text):
+        assert _about(n) == text

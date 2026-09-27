@@ -393,6 +393,39 @@ def _alternative(sides: _Sides) -> Alternative:
     return "greater" if sides.mean_c < sides.mean_b else "less"
 
 
+def two_sample_p_value(
+    baseline: Sequence[float], current: Sequence[float], *, binary: bool
+) -> tuple[str | None, float | None]:
+    """Two-sided p-value for one task's trials on two runs, by the gate's tests.
+
+    ``binary`` says the values are 0/1 outcomes (a pass rate), compared with
+    Boschloo's exact test on the counts; the caller decides that from what the
+    metric is, never from where the values happen to land. Otherwise the test
+    is the gate's continuous one: Welch's t-test, the exact permutation value
+    when a side shows no variation, or the prediction t for a single current
+    trial. The value is twice the one-sided p-value in the observed direction,
+    capped at 1: a test at half the level in each direction. ``(None, None)``
+    when no test applies (an empty side, or a continuous metric whose
+    baseline side has a single trial and so no measured spread).
+    """
+    n_b, n_c = len(baseline), len(current)
+    if n_b == 0 or n_c == 0:
+        return None, None
+    sides = _Sides(
+        binary=binary and _is_binary(baseline) and _is_binary(current),
+        mean_b=float(np.mean(baseline)),
+        n_b=n_b,
+        std_b=float(np.std(baseline, ddof=1)) if n_b >= 2 else None,
+        mean_c=float(np.mean(current)),
+        n_c=n_c,
+        std_c=float(np.std(current, ddof=1)) if n_c >= 2 else None,
+        baseline_n_assumed=n_b < 2,
+        higher_is_better=True,
+    )
+    test, p = _p_value(sides, _alternative(sides))
+    return test, None if p is None else min(1.0, 2.0 * p)
+
+
 def _trials_needed(
     sides: _Sides,
     alpha: float,

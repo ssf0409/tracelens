@@ -232,7 +232,13 @@ differences with a task bootstrap and sign-flip p-value, and a verdict against
 1, inconclusive or insufficient evidence 2 (`--observe` forces 0).
 Significance needs the interval and the sign-flip p to agree; fewer tasks than
 the p can resolve (6 at 0.95; `min_tasks`) is insufficient evidence, and every
-exit-0 verdict has `ci_lower > -threshold` (issue #112). The stdout
+exit-0 verdict has `ci_lower > -threshold` (issue #112). Every verdict names
+the tasks that changed beyond their own trial noise (the gate's per-task
+tests, Holm across tasks: `tasks_changed`; never changes the verdict); an
+inconclusive one adds the interval's half-width with the tasks that would
+resolve `±threshold` (`half_width`, `tasks_for_threshold`) and a recheck of
+the flagged tasks (`recheck`, `recheck_num_runs`: `run --task-id ...
+--num-runs N` on both versions, then compare the reruns). The stdout
 summary and `--output` JSON share every field. Fixtures for the tests live in
 `tests/fixtures/compare/` (regenerate with `generate.py`).
 

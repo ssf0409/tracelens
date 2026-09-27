@@ -521,6 +521,43 @@ cell's sampling error is about 1.0 percentage points either way.
 | 20 | 3.8 % | 99.1 % |
 | 30 | 3.6 % | 100.0 % |
 
+**What would decide it.** On realistic suites most comparisons are
+inconclusive: with twenty pass/fail tasks at five trials a side and `τ = 0.03`,
+an agent compared with itself and one that broke four of the twenty tasks
+both read "inconclusive". The verdict stays about the mean over tasks; three
+further readings say what would decide it.
+
+- *Resolution.* The interval's half-width `h = (hi − lo) / 2` is about the
+  smallest change the comparison can tell from no change. When the verdict is
+  inconclusive the output states `h` and, when `h > τ > 0`, about how many
+  tasks would narrow it to `±τ` at the observed per-task spread,
+  `⌈T (h / τ)²⌉`, since the half-width shrinks as `1 / √T`. It is a planning
+  figure, printed to two significant digits (`half_width` and
+  `tasks_for_threshold` in the JSON).
+- *Per-task evidence.* Each task's own trials on the two runs are tested with
+  the gate's test for the metric (see "Baseline regression detection"):
+  Boschloo's exact test on the counts for `pass_rate`; for `mean_score` and
+  outcome metrics, Welch's t-test, the exact permutation value when a side
+  shows no variation, or the prediction t for a single candidate trial, and no
+  test when the baseline side has a single trial. The metric decides the
+  family, never where the values land. The p-value is two-sided (twice the
+  one-sided value in the observed direction, capped at 1) and Holm-adjusted
+  across the compared tasks. A task whose adjusted p-value is at most `α`
+  changed beyond its trial noise, and the chance of naming any task that did
+  not change is at most `α` (exactly with the exact tests, approximately with
+  the t-tests). This is inference about these tasks, with the
+  trials as the only randomness, not about tasks in general, so it never
+  changes the verdict: two tasks that both collapsed are named, and the suite
+  still has no verdict.
+- *Recheck.* A task whose p-value before adjustment is at most `2α` is worth a
+  recheck (`recheck` in the JSON, whatever the verdict). When the verdict is
+  inconclusive the output prints the flags to rerun those tasks on both
+  versions with four times the trials, at least 20 and at most 200
+  (`recheck_num_runs`), and to compare the two reruns. Only the fresh trials
+  decide, so a lenient screen costs reruns, not errors: the recheck's own
+  per-task evidence keeps its `α`, because it does not reuse the trials that
+  picked the tasks.
+
 **Output.** The terminal summary and the `--output` JSON carry the same
 fields: the method (`paired task bootstrap`), the unit, the metric and its
 direction, the grader selection, per-run trial counts (gradable, and excluded
@@ -530,9 +567,11 @@ candidate-minus-baseline delta for lower-is-better metrics), `[lo, hi]`,
 return with these tasks and draws (`min_attainable_p`) and the fewest tasks
 a verdict needs at this confidence (`min_tasks`), `τ`, the readings
 (`significant`, which requires agreement; `interval_excludes_zero`, the
-interval alone; `meaningful`), the verdict, the exit code, the per-task `d_t`
-with each side's trial count (largest movers first), the compatibility
-report, and the candidate diff.
+interval alone; `meaningful`), the verdict, the exit code, the resolution
+(`half_width`, `tasks_for_threshold`), the per-task evidence (`tasks_changed`,
+`recheck`, `recheck_num_runs`), the per-task `d_t` with each side's trial
+count, test, p-value and adjusted p-value (largest movers first), the
+compatibility report, and the candidate diff.
 
 ## Availability
 

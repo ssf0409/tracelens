@@ -159,6 +159,7 @@ Compared v2 vs v1 on mean_score (higher is better): paired task bootstrap over 1
   tasks: 12 task(s) compared, aligned by content
   delta = +0.1763  95% CI [+0.1488, +0.2049]  p = 0.0005 (exact)  (B = 10000, seed = 0)
   readings: significant, |delta| >= threshold 0.05, interval beyond +0.05
+  changed beyond trial noise (p <= 0.05 after Holm over 12 tasks): ticket-0 0.677 -> 0.858 (p < 0.0001), ticket-6 0.598 -> 0.869 (p < 0.0001), ...
   Verdict: IMPROVEMENT (exit 0)
   What changed: DecisionSpec prompts (attribution evidence, not proof of cause)
   What moved (largest first): ticket-6 +0.271 (n 10/10), ticket-1 +0.254 (n 10/10), ...
@@ -166,15 +167,75 @@ Compared v2 vs v1 on mean_score (higher is better): paired task bootstrap over 1
 
 Read it top to bottom: *what was compared* (metric, tasks, how they were
 aligned), *what the data say* (delta, interval, p-value, and the three
-readings), *the verdict*, then *what changed* (from the two `DecisionSpec`s;
-here only the prompts) next to *what moved* (the tasks with the largest paired
-differences, the ones to read first). "What changed" is attribution evidence,
-not proof of cause.
+readings), *which tasks changed beyond their own trial noise* (seven of the
+twelve tickets, each tested on its own trials), *the verdict*, then *what
+changed* (from the two `DecisionSpec`s; here only the prompts) next to *what
+moved* (the tasks with the largest paired differences, the ones to read
+first). "What changed" is attribution evidence, not proof of cause.
 
 Every field in that summary is also in `--output compare.json`, so a CI job
 can branch on the exit code and archive the record. An inconclusive comparison
 exits 2 on purpose: not enough evidence must never read as "no regression";
 pass `--observe` for dashboards that only want the numbers.
+
+### When the comparison is inconclusive
+
+On realistic suites most comparisons end *inconclusive*, so the summary also
+says what would decide one. Twenty pass/fail tasks at five trials a side, where
+the candidate broke three tasks and left the other seventeen alone, read (the
+case is in the unit tests):
+
+```text
+  delta = -0.1200  95% CI [-0.2600, +0.0000]  p = 0.2464  (B = 10000, seed = 0)
+  readings: not significant, |delta| >= threshold 0.03, interval reaches -0.03
+  resolution: changes within about ±0.1300 (the interval's half-width) are inside this comparison's noise; ±0.03 would take about 380 tasks at this per-task spread
+  changed beyond trial noise (p <= 0.05 after Holm over 20 tasks): t02 1.000 -> 0.000 (p = 0.0020)
+  worth a recheck (p <= 0.1 before adjustment): t03 1.000 -> 0.200 (p = 0.0215), t00 1.000 -> 0.400 (p = 0.0618)
+  Verdict: inconclusive: more runs or tasks needed (exit 2)
+  Next: rerun those tasks on both versions with more trials (tracelens run ... --task-id t02 t03 t00 --num-runs 20 --save-trials <file>), then compare the two reruns
+```
+
+The verdict is about the mean over tasks, and three tasks that moved against
+seventeen that did not leave the sign-flip test only three signs to go on. The
+lines around the verdict say what would decide it:
+
+- **`resolution`** is the interval's half-width, about the smallest change this
+  comparison can tell from none. It shrinks as one over the square root of the
+  number of tasks, so the task count is a planning figure for the suite: at
+  this spread, resolving ±0.03 takes about 380 tasks. More trials per task
+  shrink only the trial-noise part of it; when the tasks themselves moved by
+  different amounts, as here, only more tasks narrow it.
+- **`changed beyond trial noise`** tests each task on its own trials, with the
+  gate's test for the metric (Boschloo's exact test for `pass_rate`, Welch's
+  t-test for scores), Holm-adjusted over the compared tasks, so the chance of
+  naming a task that did not change is held to 5%. `t02` went from 5/5 to
+  0/5: that task changed, whatever the suite verdict says. The line prints for
+  every verdict and never changes it; it is about these tasks, not tasks in
+  general. Five trials a side cannot give a p-value below `2/1024`, so on more
+  than 25 tasks no single task can be named this way; the recheck, which
+  adjusts only over the tasks it reruns, can.
+- **`worth a recheck`** lists the tasks whose own p-value is at most twice the
+  level before the adjustment, and **`Next`** reruns them with the named ones:
+  both versions, four times the trials (at least 20, at most 200). The screen
+  is lenient on purpose. Only the fresh trials decide, so a task flagged by
+  chance costs a rerun, not a false alarm.
+
+To follow `Next`, run each version on those tasks and compare the two reruns:
+
+```bash
+tracelens run --config tracelens.yaml --task-id t02 t03 t00 --num-runs 20 \
+  --output recheck/v1-results.json --report recheck/v1-report.md \
+  --html-report recheck/v1-report.html --save-trials recheck/v1-trials.json
+# switch to v2 (model, prompt, or code), then the same command with v2 paths
+tracelens compare recheck/v1-trials.json recheck/v2-trials.json
+```
+
+A rerun is a separate run. When its settings come from a config file, point
+every output the file names, and its `checkpoint` if it sets one, somewhere
+else: otherwise the rerun overwrites the full run's results, and the full
+run's checkpoint refuses the smaller run. Three tasks are too few for a suite
+verdict, so the recheck ends *insufficient evidence*; its
+`changed beyond trial noise` line is the answer for those tasks.
 
 ### Trial-level comparison with `compare_metrics`
 
