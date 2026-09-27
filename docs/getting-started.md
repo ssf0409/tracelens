@@ -24,12 +24,12 @@ For local development and to run the repository examples:
 ```bash
 git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
-uv pip install -e ".[dev]"
+uv sync --extra dev --extra http
 ```
 
-The `[dev]` extra pulls in pytest, ruff, mypy, and type stubs so
+The `[dev]` and `[http]` extras pull in pytest, ruff, mypy, httpx, and type stubs so
 the standard local verification commands run out of the box:
-`pytest -q`, `ruff check src/ tests/`, and `mypy src/tracelens/`.
+`make verify` (or `pytest -q`, `ruff check`, and `mypy`).
 
 The published package gives you the `tracelens` library and CLI. The
 checkout gives you the `examples/` files used in the demo below.

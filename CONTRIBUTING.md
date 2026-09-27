@@ -71,12 +71,11 @@ git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
 
 # Recommended: uv
-uv venv
-uv pip install -e ".[dev]"
+uv sync --extra dev --extra http
 
 # Or plain pip
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,http]"
 ```
 
 ### Optional dependency groups
