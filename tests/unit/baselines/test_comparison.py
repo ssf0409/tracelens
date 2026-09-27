@@ -3,6 +3,7 @@
 import warnings
 
 import pytest
+from scipy import stats
 
 from tracelens.baselines.comparison import (
     MetricRegression,
@@ -12,6 +13,7 @@ from tracelens.baselines.comparison import (
     holm_adjusted,
     relative_change,
     severity_at_least,
+    two_sample_p_value,
 )
 from tracelens.baselines.manager import MetricBaseline, TaskBaseline
 
@@ -1174,3 +1176,34 @@ class TestRerunAdviceIsNotFlooredByTheCurrentSize:
         )
         assert expected == 18
         assert _trials_needed(sides, 0.05, both_sides=True) == expected
+
+
+class TestTwoSamplePValue:
+    """One task's trials on two runs, by the gate's tests, two-sided (`tracelens compare`)."""
+
+    def test_the_most_extreme_table_is_twice_its_one_sided_value(self):
+        # 5/5 against 0/5: the one-sided Boschloo p is the largest chance of that
+        # table over the common rate, sup p^5 (1-p)^5 = 1/1024 at p = 1/2.
+        test, p = two_sample_p_value([1.0] * 5, [0.0] * 5, binary=True)
+        assert test == "boschloo_exact" and p == pytest.approx(2 / 1024)
+        assert two_sample_p_value([0.0] * 5, [1.0] * 5, binary=True)[1] == pytest.approx(2 / 1024)
+
+    def test_no_change_is_no_evidence(self):
+        assert two_sample_p_value([1.0, 0.0, 1.0], [0.0, 1.0, 1.0], binary=True)[1] == 1.0
+        assert two_sample_p_value([0.3, 0.5], [0.5, 0.3], binary=False) == (None, 1.0)
+
+    def test_a_continuous_metric_is_welch_two_sided(self):
+        a, b = [0.61, 0.72, 0.55, 0.68, 0.70], [0.41, 0.52, 0.49, 0.38, 0.47]
+        test, p = two_sample_p_value(a, b, binary=False)
+        assert test == "welch_t"
+        assert p == pytest.approx(stats.ttest_ind(a, b, equal_var=False).pvalue)
+
+    def test_the_metric_decides_the_family_not_the_values(self):
+        # 0/1 scores of a continuous metric stay on the continuous path: both
+        # sides constant, so the exact permutation value, twice 1 / C(10, 5).
+        test, p = two_sample_p_value([1.0] * 5, [0.0] * 5, binary=False)
+        assert test == "exact_permutation" and p == pytest.approx(2 / 252)
+
+    def test_no_test_without_trials_or_a_measured_baseline_spread(self):
+        assert two_sample_p_value([], [1.0], binary=True) == (None, None)
+        assert two_sample_p_value([0.4], [0.5, 0.6], binary=False) == (None, None)

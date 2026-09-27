@@ -301,6 +301,10 @@ bootstraps over tasks, and reports a verdict against `--threshold` (default
 0.03): exit 0 for improvement, equivalence, or a significant-but-negligible
 change; 1 for a regression; 2 when the runs are not comparable (changed task
 content, different graders) or the evidence is insufficient or inconclusive.
+A difference counts as significant only when the interval and the sign-flip
+p-value agree, and there is no verdict on fewer than six tasks at the default
+95% confidence: the command prints the numbers, the p-value the test cannot
+get below, and the tasks a verdict needs, and exits 2.
 `--metric pass_rate|mean_score|<grader_id>.<metric_name>`, `--direction lower`
 for metrics like latency, `--unmatched-tasks exclude` to compare only shared
 tasks, `--observe` to always exit 0, and `--output compare.json` for the

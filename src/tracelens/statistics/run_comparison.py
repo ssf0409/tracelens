@@ -8,11 +8,18 @@ task, and reports the mean difference with a percentile bootstrap interval
 over tasks, a paired sign-flip p-value, and a verdict against a practical
 threshold. The task is the sampling unit; repeated trials of a task are
 averaged into its statistic and never counted as independent samples.
+
+A difference is significant only when the interval and the p-value agree
+(issue #112). On a handful of tasks the percentile interval is too narrow,
+while the sign-flip test is exact under the null of no change. Below the
+number of tasks at which that test can reach the level at all there is no
+verdict, and the output says how many tasks it would take.
 """
 
 from __future__ import annotations
 
 import math
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,6 +27,7 @@ from enum import StrEnum
 import numpy as np
 from pydantic import BaseModel, Field
 
+from tracelens.baselines.comparison import holm_adjusted, two_sample_p_value
 from tracelens.core.outcome import Outcome
 from tracelens.core.provenance import (
     Compatibility,
@@ -32,12 +40,36 @@ from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 METHOD = "paired task bootstrap"
 UNIT = "task"
 DEFAULT_THRESHOLD = 0.03
+DEFAULT_CONFIDENCE = 0.95
+DEFAULT_N_BOOTSTRAP = 10000
 BUILTIN_METRICS = ("pass_rate", "mean_score")
 UNMATCHED_POLICIES = ("error", "exclude")
+# Up to this many tasks the sign-flip test enumerates all 2^T assignments
+# (4096 at most), whatever B: cheap, exact, and independent of the seed.
 _EXACT_SIGN_FLIP_MAX_TASKS = 12
 # An interval bound this close to zero is treated as touching zero, so
-# floating-point residue from averaging never decides significance.
+# floating-point residue from averaging never decides significance. The
+# threshold gets the same slack, scaled to its size, and so do the sign-flip
+# test's ties, scaled to the size of the differences.
 _ZERO_TOLERANCE = 1e-9
+# The level a p-value is held to is rounded to this many digits, so that
+# 1 - 0.95 is 0.05 and not 0.05000000000000004.
+_ALPHA_DIGITS = 12
+# A task is worth a recheck when its own p-value, before adjustment, is at
+# most twice the level. The recheck on fresh trials is what decides, so the
+# screen can be lenient. In simulation (20 pass/fail tasks, 5 trials a side,
+# one task dropping from 0.97 to 0.47), the recheck confirmed the drop in 48 %
+# of comparisons with this screen against 20 % with a screen at the level,
+# for less than one more task to rerun on average; an unchanged task was
+# confirmed in at most 2.4 % of comparisons at 20 or 50 tasks.
+_RECHECK_SCREEN = 2.0
+# A recheck reruns the flagged tasks with four times the trials (half the
+# per-task noise), at least 20 and at most 200; the printed command names at
+# most this many tasks.
+_RECHECK_RUNS_FACTOR = 4
+_RECHECK_MIN_RUNS = 20
+_RECHECK_MAX_RUNS = 200
+_RECHECK_COMMAND_TASKS = 10
 
 
 class Direction(StrEnum):
@@ -68,7 +100,7 @@ VERDICT_EXIT_CODES: dict[Verdict, int] = {
 }
 
 VERDICT_TEXT: dict[Verdict, str] = {
-    Verdict.INSUFFICIENT_EVIDENCE: "insufficient evidence (fewer than 2 paired tasks)",
+    Verdict.INSUFFICIENT_EVIDENCE: "insufficient evidence",
     Verdict.REGRESSION: "REGRESSION",
     Verdict.IMPROVEMENT: "IMPROVEMENT",
     Verdict.BELOW_THRESHOLD: "significant, but below the practical threshold",
@@ -274,18 +306,127 @@ def _bootstrap_means(diffs: np.ndarray, n_bootstrap: int, seed: int | None) -> n
     return out
 
 
+def _enumerates(tasks: int) -> bool:
+    """Whether the sign-flip p-value enumerates every assignment, and so is exact.
+
+    Up to twelve tasks it always does. Sampling fewer draws than there are
+    assignments there only adds seed-dependent noise: six tasks that all
+    collapsed have an exact p of 2/64, but 19 sampled flips reach 0.05 for
+    about half the seeds.
+    """
+    return tasks <= _EXACT_SIGN_FLIP_MAX_TASKS
+
+
+def alpha_for(confidence: float) -> float:
+    """The level a p-value is held to: ``1 - confidence``, without float residue.
+
+    Raises:
+        ValueError: If ``confidence`` is not strictly between 0 and 1, or is
+            so close to either end that ``1 - confidence`` rounds to 0 or 1.
+    """
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be strictly between 0 and 1, got {confidence!r}")
+    alpha = round(1.0 - confidence, _ALPHA_DIGITS)
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(
+            f"confidence {confidence!r} is too close to {0 if alpha else 1}: the level "
+            f"1 - confidence rounds to {alpha:g} at {_ALPHA_DIGITS} digits"
+        )
+    return alpha
+
+
+def _level_shortfall(tasks: int, n_bootstrap: int, confidence: float) -> tuple[bool, bool]:
+    """What keeps the sign-flip test from reaching ``p <= 1 - confidence``.
+
+    ``(too few tasks, too few draws)``: the exact test cannot go below
+    ``2 / 2^T``, and a sampled estimate cannot go below ``1 / (B + 1)``.
+    """
+    alpha = alpha_for(confidence)
+    too_few_tasks = tasks < 1 or 2.0 ** (1 - tasks) > alpha
+    too_few_draws = not _enumerates(tasks) and 1.0 / (n_bootstrap + 1) > alpha
+    return too_few_tasks, too_few_draws
+
+
+def _shortfall_names(too_few_tasks: bool, too_few_draws: bool) -> str:
+    return " and ".join(
+        name
+        for name, short in (("tasks", too_few_tasks), ("sign-flip draws", too_few_draws))
+        if short
+    )
+
+
+def _percent(confidence: float) -> str:
+    """``0.95`` as ``95%`` and ``0.999`` as ``99.9%``, never rounded to another level."""
+    return f"{confidence * 100:.12g}%"
+
+
+def _p_above(p: float, level: float) -> str:
+    """``p`` to four decimals, or in as many digits as it takes to read above ``level``.
+
+    A floor of 0.000122 next to a level of 0.0001 does not print as "0.0001".
+    """
+    text, digits = f"{p:.4f}", 4
+    while float(text) <= level and digits < 17:
+        digits += 1
+        text = f"{p:.{digits}g}"
+    return text
+
+
+def min_attainable_p(tasks: int, n_bootstrap: int) -> float | None:
+    """The smallest p-value the sign-flip test can return with ``tasks`` paired tasks.
+
+    Only the observed sign assignment and its mirror image can be as extreme
+    as the observed mean, and only when every difference is non-zero and all
+    share one sign, so the exact two-sided p-value is never below ``2 / 2^T``,
+    and a sampled estimate (beyond twelve tasks) is never reported below it
+    either. A sampled estimate ``(extreme + 1) / (B + 1)`` is also never below
+    ``1 / (B + 1)``. ``None`` without tasks.
+    """
+    if tasks < 1:
+        return None
+    floor = 2.0 ** (1 - tasks)
+    if _enumerates(tasks):
+        return floor
+    return max(floor, 1.0 / (n_bootstrap + 1))
+
+
+def min_tasks_for(confidence: float) -> int:
+    """The fewest paired tasks with which the sign-flip test can reach the level.
+
+    The smallest ``T`` with ``2 / 2^T <= 1 - confidence``: 6 at 0.95, 5 at
+    0.90, 8 at 0.99. With fewer tasks no difference is significant however
+    large and consistent it is, so there is no verdict.
+
+    Raises:
+        ValueError: If ``confidence`` is not strictly between 0 and 1 (see
+            :func:`alpha_for`).
+    """
+    alpha = alpha_for(confidence)
+    tasks = 2
+    while 2.0 ** (1 - tasks) > alpha:
+        tasks += 1
+    return tasks
+
+
 def _sign_flip_p_value(
     diffs: np.ndarray, delta: float, n_bootstrap: int, seed: int | None
 ) -> tuple[float, bool]:
     """Two-sided paired sign-flip p-value.
 
-    Exact (all ``2^T`` assignments) when ``T`` is small enough for that to
-    cost no more than ``n_bootstrap`` draws; otherwise ``n_bootstrap`` random
-    assignments, with the observed one counted.
+    Exact (all ``2^T`` assignments) up to twelve tasks, whatever
+    ``n_bootstrap``; beyond that ``n_bootstrap`` random assignments, with the
+    observed one counted, and never below the exact test's floor ``2 / 2^T``
+    (a sample can miss the few assignments as extreme as the observed one,
+    but the exact p-value always counts them).
     """
     t = len(diffs)
-    observed = abs(delta) - 1e-12
-    if t <= _EXACT_SIGN_FLIP_MAX_TASKS and 2**t <= n_bootstrap:
+    # An assignment is as extreme as the observed one when its |mean| reaches
+    # |delta| up to rounding. Rounding grows with the values, so the tolerance
+    # is relative: the observed assignment, its mirror image, and exact ties
+    # count on any metric scale, and the exact p is never below 2 / 2^T. (An
+    # absolute 1e-12 lost them on token counts in the millions: p = 0.)
+    observed = abs(delta) - _ZERO_TOLERANCE * float(np.abs(diffs).mean())
+    if _enumerates(t):
         patterns = np.arange(2**t)[:, None] >> np.arange(t)
         signs = (patterns & 1) * 2 - 1
         means = signs @ diffs / t
@@ -300,14 +441,14 @@ def _sign_flip_p_value(
         means = signs @ diffs / t
         extreme += int(np.sum(np.abs(means) >= observed))
         start += size
-    return (extreme + 1) / (n_bootstrap + 1), False
+    return max((extreme + 1) / (n_bootstrap + 1), 2.0 ** (1 - t)), False
 
 
 def paired_task_effect(
     diffs: Sequence[float],
     *,
-    confidence: float = 0.95,
-    n_bootstrap: int = 10000,
+    confidence: float = DEFAULT_CONFIDENCE,
+    n_bootstrap: int = DEFAULT_N_BOOTSTRAP,
     seed: int | None = 0,
 ) -> PairedEffect:
     """Mean of paired per-task differences with a task bootstrap and sign-flip test.
@@ -316,11 +457,10 @@ def paired_task_effect(
     an improvement). Fewer than two tasks yield no interval and no p-value.
 
     Raises:
-        ValueError: If ``confidence`` is not strictly between 0 and 1, or
-            ``n_bootstrap`` is less than 1.
+        ValueError: If ``confidence`` is not strictly between 0 and 1 (see
+            :func:`alpha_for`), or ``n_bootstrap`` is less than 1.
     """
-    if not 0.0 < confidence < 1.0:
-        raise ValueError(f"confidence must be strictly between 0 and 1, got {confidence!r}")
+    alpha_for(confidence)
     if n_bootstrap < 1:
         raise ValueError(f"n_bootstrap must be at least 1, got {n_bootstrap!r}")
     values = np.asarray(sorted(float(d) for d in diffs))
@@ -345,18 +485,80 @@ def excludes_zero(lower: float, upper: float) -> bool:
     return lower > _ZERO_TOLERANCE or upper < -_ZERO_TOLERANCE
 
 
+def can_reach_level(effect: PairedEffect) -> bool:
+    """Whether the sign-flip test could return ``p <= 1 - confidence`` at all.
+
+    False with fewer than :func:`min_tasks_for` paired tasks, or with too few
+    sampled sign assignments to resolve the level.
+    """
+    return not any(_level_shortfall(effect.tasks, effect.n_bootstrap, effect.confidence))
+
+
+def _threshold_bounds(threshold: float) -> tuple[float, float]:
+    """Where a value reaches the threshold: at or below the first, or at or above the second.
+
+    Floating-point residue never decides which side of the threshold a value
+    falls on: ``0.8 - 0.6`` and ``0.6 - 0.4`` are the same drop of one trial
+    in five, and both reach a threshold of 0.2.
+
+    Raises:
+        ValueError: If ``threshold`` is not a finite number of 0 or more. No
+            value compares below a NaN threshold, so a regression would read
+            as below it and pass; an infinite threshold would gate nothing.
+    """
+    if not (math.isfinite(threshold) and threshold >= 0):
+        raise ValueError(f"threshold must be a finite number >= 0, got {threshold!r}")
+    slack = _ZERO_TOLERANCE * max(1.0, threshold)
+    return -threshold + slack, threshold - slack
+
+
+def is_significant(effect: PairedEffect) -> bool | None:
+    """The contract's significance reading: the interval and the p-value agree.
+
+    Significant when the interval excludes 0 *and* the sign-flip p-value is
+    at most ``1 - confidence`` (which requires enough tasks to reach it).
+    ``None`` without an interval.
+    """
+    if effect.ci_lower is None or effect.ci_upper is None or effect.p_value is None:
+        return None
+    return (
+        can_reach_level(effect)
+        and excludes_zero(effect.ci_lower, effect.ci_upper)
+        and effect.p_value <= alpha_for(effect.confidence)
+    )
+
+
 def decide(effect: PairedEffect, threshold: float) -> Verdict:
-    """Apply the contract's verdict table."""
-    if effect.delta is None or effect.ci_lower is None or effect.ci_upper is None:
+    """Apply the contract's verdict table.
+
+    There is no verdict without enough tasks for the sign-flip test to reach
+    the level. A difference is significant only when the interval and the
+    p-value agree, and a significant difference below the threshold passes
+    only when the interval also stays above ``-threshold``, so every verdict
+    that exits 0 has ``ci_lower > -threshold``. A value within floating-point
+    residue of the threshold counts as reaching it.
+
+    Raises:
+        ValueError: If ``threshold`` is not a finite number of 0 or more,
+            whatever the evidence.
+    """
+    down, up = _threshold_bounds(threshold)
+    significant = is_significant(effect)
+    if significant is None or effect.delta is None or not can_reach_level(effect):
         return Verdict.INSUFFICIENT_EVIDENCE
+    assert effect.ci_lower is not None and effect.ci_upper is not None  # as significant
     delta, lo, hi = effect.delta, effect.ci_lower, effect.ci_upper
-    if excludes_zero(lo, hi):
-        if delta <= -threshold:
+    if significant:
+        if delta <= down:
             return Verdict.REGRESSION
-        if delta >= threshold:
+        if lo <= down:
+            # Significant, and small on the estimate, but a regression of the
+            # threshold or more is still inside the interval.
+            return Verdict.INCONCLUSIVE
+        if delta >= up:
             return Verdict.IMPROVEMENT
         return Verdict.BELOW_THRESHOLD
-    if lo > -threshold and hi < threshold:
+    if lo > down and hi < up:
         return Verdict.EQUIVALENT
     return Verdict.INCONCLUSIVE
 
@@ -398,6 +600,12 @@ class TaskDelta(BaseModel):
     delta: float
     n_baseline: int
     n_candidate: int
+    # The task's own trials tested with the gate's test for the metric
+    # (two-sided), and that p-value Holm-adjusted across the compared tasks.
+    # ``None`` when no test applies to the task's trials.
+    test: str | None = None
+    p_value: float | None = None
+    p_adjusted: float | None = None
 
 
 class RunComparison(BaseModel):
@@ -423,12 +631,32 @@ class RunComparison(BaseModel):
     seed: int | None
     p_value: float | None = None
     p_value_exact: bool = False
+    # The smallest p-value the sign-flip test could return with these tasks
+    # and draws, and the fewest tasks with which it can reach the level at
+    # this confidence. Below that there is no verdict.
+    min_attainable_p: float | None = None
+    min_tasks: int | None = None
     threshold: float
+    # ``significant`` is the contract's reading: the interval excludes 0 and
+    # the p-value agrees. ``interval_excludes_zero`` is the interval alone.
     significant: bool | None = None
+    interval_excludes_zero: bool | None = None
     meaningful: bool | None = None
     verdict: Verdict
     exit_code: int
     observe: bool = False
+    # What the comparison can resolve: the interval's half-width, and the
+    # tasks it would take to narrow it to +-threshold at the observed per-task
+    # spread (only when it is wider than that).
+    half_width: float | None = None
+    tasks_for_threshold: int | None = None
+    # Each task's own trials: the tasks that changed beyond their trial noise
+    # (Holm-adjusted p <= 1 - confidence), and those worth a recheck (p at or
+    # below twice that before adjustment), most significant first, with the
+    # trials a recheck should run.
+    tasks_changed: list[str] = Field(default_factory=list)
+    recheck: list[str] = Field(default_factory=list)
+    recheck_num_runs: int | None = None
     per_task: list[TaskDelta] = Field(default_factory=list)
     compatibility: CompatibilityReport
     notes: list[str] = Field(default_factory=list)
@@ -459,20 +687,28 @@ class RunComparison(BaseModel):
                 else f"{self.p_value:.4f}" + (" (exact)" if self.p_value_exact else "")
             )
             lines.append(
-                f"  delta = {self.delta:+.4f}  {self.confidence:.0%} CI "
+                f"  delta = {self.delta:+.4f}  {_percent(self.confidence)} CI "
                 f"[{self.ci_lower:+.4f}, {self.ci_upper:+.4f}]  p = {p_text}  "
                 f"(B = {self.n_bootstrap}, seed = {self.seed})"
             )
-            readings = [
-                "significant" if self.significant else "not significant",
-                (
-                    f"|delta| >= threshold {self.threshold:g}"
-                    if self.meaningful
-                    else f"|delta| < threshold {self.threshold:g}"
-                ),
-            ]
-            lines.append("  readings: " + ", ".join(readings))
+            lines.append("  readings: " + ", ".join(self._readings(self.ci_lower, self.ci_upper)))
+            if self.verdict is Verdict.INCONCLUSIVE and self.half_width is not None:
+                lines.append("  resolution: " + self._resolution(self.half_width))
+        if self.verdict is Verdict.INSUFFICIENT_EVIDENCE and self.min_attainable_p is not None:
+            lines.append("  evidence: " + self._shortfall(self.min_attainable_p))
+        lines.extend(self._per_task_findings(top))
         lines.append(f"  Verdict: {VERDICT_TEXT[self.verdict]} (exit {self.exit_code})")
+        if self.verdict is Verdict.INCONCLUSIVE and self.recheck and self.recheck_num_runs:
+            shown = self.recheck[:_RECHECK_COMMAND_TASKS]
+            more = len(self.recheck) - len(shown)
+            lines.append(
+                f"  Next: rerun {'those tasks' if len(self.recheck) > 1 else 'that task'} on "
+                f"both versions with more trials (tracelens run ... --task-id "
+                f"{' '.join(shlex.quote(task_id) for task_id in shown)} "
+                f"--num-runs {self.recheck_num_runs} --save-trials <file>)"
+                + (f", {more} more in the JSON's `recheck`" if more else "")
+                + ", then compare the two reruns"
+            )
         lines.append("  What changed: " + _what_changed(self.compatibility))
         moved = [row for row in self.per_task if row.delta != 0.0]
         if self.per_task and not moved:
@@ -490,6 +726,125 @@ class RunComparison(BaseModel):
         for note in self.notes:
             lines.append(f"  Note: {note}")
         return lines
+
+    def _readings(self, lower: float, upper: float) -> list[str]:
+        """Significance, practical relevance, and the interval's extent against the threshold."""
+        alpha = alpha_for(self.confidence)
+        short = _level_shortfall(self.alignment.compared, self.n_bootstrap, self.confidence)
+        if self.significant:
+            significance = "significant"
+        elif self.interval_excludes_zero and any(short):
+            significance = (
+                "not significant (the interval excludes 0, but too few "
+                f"{_shortfall_names(*short)} for p)"
+            )
+        elif self.interval_excludes_zero:
+            significance = f"not significant (the interval excludes 0, but p > {alpha:g})"
+        elif not any(short) and self.p_value is not None and self.p_value <= alpha:
+            significance = f"not significant (p <= {alpha:g}, but the interval includes 0)"
+        else:
+            significance = "not significant"
+        tau = f"{self.threshold:g}"
+        relevance = (
+            f"|delta| >= threshold {tau}" if self.meaningful else f"|delta| < threshold {tau}"
+        )
+        down, up = _threshold_bounds(self.threshold)
+        low, high = lower <= down, upper >= up
+        if low and high:
+            extent = f"interval reaches both -{tau} and +{tau}"
+        elif upper <= down:
+            extent = f"interval beyond -{tau}"
+        elif lower >= up:
+            extent = f"interval beyond +{tau}"
+        elif low:
+            extent = f"interval reaches -{tau}"
+        elif high:
+            extent = f"interval reaches +{tau}"
+        else:
+            extent = f"interval inside (-{tau}, +{tau})"
+        return [significance, relevance, extent]
+
+    def _shortfall(self, attainable: float) -> str:
+        """Why there is no verdict: the p-value the test cannot get below, and what it takes."""
+        alpha = alpha_for(self.confidence)
+        tasks = self.alignment.compared
+        too_few_tasks, too_few_draws = _level_shortfall(tasks, self.n_bootstrap, self.confidence)
+        have: list[str] = []
+        takes: list[str] = []
+        if too_few_tasks or not too_few_draws:  # one is short whenever there is no verdict
+            have.append(f"{tasks} paired task(s)")
+            takes.append(f"at least {self.min_tasks} tasks")
+        if too_few_draws:
+            have.append(f"B = {self.n_bootstrap} sampled sign flips")
+            takes.append(f"B >= {math.ceil(1 / alpha) - 1}")
+        test = "the test" if too_few_draws else "the sign-flip test"
+        return (
+            f"with {' and '.join(have)} {test} cannot give p below "
+            f"{_p_above(attainable, alpha)}; a {_percent(self.confidence)} verdict needs "
+            f"p <= {alpha:g}, "
+            f"which takes {' and '.join(takes)}"
+        )
+
+    def _resolution(self, half_width: float) -> str:
+        """How small a change this comparison can tell apart, and what +-threshold would take."""
+        text = (
+            f"changes within about ±{half_width:.4f} (the interval's half-width) are inside "
+            "this comparison's noise"
+        )
+        if self.tasks_for_threshold is not None:
+            text += (
+                f"; ±{self.threshold:g} would take about {_about(self.tasks_for_threshold)} "
+                "tasks at this per-task spread"
+            )
+        return text
+
+    def _per_task_findings(self, top: int) -> list[str]:
+        """The tasks whose own trials changed, and (when inconclusive) those worth a recheck."""
+        rows = {row.task_id: row for row in self.per_task}
+        tested = sum(1 for row in self.per_task if row.p_value is not None)
+
+        def listed(ids: list[str]) -> str:
+            shown = ", ".join(
+                f"{task_id} {rows[task_id].baseline:.3f} -> {rows[task_id].candidate:.3f} "
+                f"(p {_p_text(rows[task_id].p_value)})"
+                for task_id in ids[:top]
+            )
+            more = len(ids) - top
+            return shown + (f", and {more} more" if more > 0 else "")
+
+        lines = []
+        if self.tasks_changed:
+            lines.append(
+                f"  changed beyond trial noise (p <= {alpha_for(self.confidence):g} after "
+                f"Holm over {tested} tasks): {listed(self.tasks_changed)}"
+            )
+        suggestive = [task_id for task_id in self.recheck if task_id not in self.tasks_changed]
+        if suggestive and self.verdict is Verdict.INCONCLUSIVE:
+            screen = _recheck_level(alpha_for(self.confidence))
+            lines.append(
+                f"  worth a recheck (p <= {screen:g} before adjustment): {listed(suggestive)}"
+            )
+        return lines
+
+
+def _p_text(p: float | None) -> str:
+    """``= 0.0215``, or ``< 0.0001`` for a p-value four decimals cannot show."""
+    if p is None:
+        return "n/a"
+    return "< 0.0001" if p < 0.0001 else f"= {p:.4f}"
+
+
+def _recheck_level(alpha: float) -> float:
+    """The screen for a recheck: twice the level, rounded like the level itself."""
+    return min(1.0, round(_RECHECK_SCREEN * alpha, _ALPHA_DIGITS))
+
+
+def _about(n: int) -> str:
+    """A planning figure in two significant digits, halves up: 985 as 990, 12345 as 12000."""
+    if n < 100:
+        return str(n)
+    step = 10 ** (len(str(n)) - 2)
+    return str((n + step // 2) // step * step)
 
 
 def _what_changed(compat: CompatibilityReport) -> str:
@@ -535,8 +890,8 @@ def compare_runs(
     direction: str | None = None,
     grader: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
-    confidence: float = 0.95,
-    n_bootstrap: int = 10000,
+    confidence: float = DEFAULT_CONFIDENCE,
+    n_bootstrap: int = DEFAULT_N_BOOTSTRAP,
     seed: int | None = 0,
     unmatched_tasks: str = "error",
     require_provenance: bool = False,
@@ -553,9 +908,11 @@ def compare_runs(
         direction: ``higher`` or ``lower`` (custom metrics only; built-ins
             are higher-is-better).
         grader: Restrict ``pass_rate`` / ``mean_score`` to one grader's outcome.
-        threshold: Practical threshold, an absolute delta on the metric scale.
+        threshold: Practical threshold, an absolute delta on the metric scale
+            (a finite number, 0 or more).
         confidence: Interval confidence level.
-        n_bootstrap: Bootstrap resamples (and sign-flip draws).
+        n_bootstrap: Bootstrap resamples, and sign-flip draws beyond twelve
+            tasks (up to twelve the test is exact).
         seed: Seed for both procedures; same inputs and seed reproduce the
             result exactly.
         unmatched_tasks: ``error`` (default) refuses task-set differences;
@@ -565,19 +922,18 @@ def compare_runs(
         observe: Observational mode: every evaluated comparison exits 0.
 
     Raises:
-        ComparisonError: Invalid selection, incompatible measurement setups
-            (different graders; task-set differences under ``error``), or
-            missing provenance under ``require_provenance``.
+        ComparisonError: Invalid selection or parameters, incompatible
+            measurement setups (different graders; task-set differences under
+            ``error``), or missing provenance under ``require_provenance``.
     """
     selector = MetricSelector.parse(metric, direction, grader)
-    if threshold < 0:
-        raise ComparisonError(f"threshold cannot be negative, got {threshold!r}")
     if unmatched_tasks not in UNMATCHED_POLICIES:
         raise ComparisonError(
             f"unmatched_tasks must be one of {', '.join(UNMATCHED_POLICIES)}, "
             f"got {unmatched_tasks!r}"
         )
     try:
+        _threshold_bounds(threshold)
         paired_task_effect([], confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
     except ValueError as exc:
         raise ComparisonError(str(exc)) from exc
@@ -658,12 +1014,26 @@ def compare_runs(
     exit_code = VERDICT_EXIT_CODES[verdict]
     if observe and effect.delta is not None:
         exit_code = 0
+    changed_ids, recheck_ids, recheck_num_runs = _test_each_task(
+        rows, a_values, b_values, binary=selector.name == "pass_rate",
+        alpha=alpha_for(confidence),
+    )
+    half_width = (
+        None
+        if effect.ci_lower is None or effect.ci_upper is None
+        else (effect.ci_upper - effect.ci_lower) / 2
+    )
+    tasks_for_threshold = None
+    if half_width is not None and threshold > 0 and half_width > threshold:
+        # The half-width shrinks as 1/sqrt(T) at a fixed per-task spread.
+        tasks_for_threshold = math.ceil(round(len(compared) * (half_width / threshold) ** 2, 6))
     rows.sort(key=lambda row: (-abs(row.delta), row.task_id))
-    significant = (
+    interval_excludes_zero = (
         None
         if effect.ci_lower is None or effect.ci_upper is None
         else excludes_zero(effect.ci_lower, effect.ci_upper)
     )
+    down, up = _threshold_bounds(threshold)
     return RunComparison(
         metric=selector.name,
         direction=selector.direction,
@@ -688,19 +1058,67 @@ def compare_runs(
         seed=seed,
         p_value=effect.p_value,
         p_value_exact=effect.p_value_exact,
+        min_attainable_p=min_attainable_p(effect.tasks, n_bootstrap),
+        min_tasks=min_tasks_for(confidence),
         threshold=threshold,
-        significant=significant,
-        meaningful=None if effect.delta is None else abs(effect.delta) >= threshold,
+        significant=is_significant(effect),
+        interval_excludes_zero=interval_excludes_zero,
+        meaningful=None if effect.delta is None else effect.delta <= down or effect.delta >= up,
         verdict=verdict,
         exit_code=exit_code,
         observe=observe,
+        half_width=half_width,
+        tasks_for_threshold=tasks_for_threshold,
+        tasks_changed=changed_ids,
+        recheck=recheck_ids,
+        recheck_num_runs=recheck_num_runs,
         per_task=rows,
         compatibility=compat,
         notes=notes,
     )
 
 
+def _test_each_task(
+    rows: list[TaskDelta],
+    a_values: dict[str, list[float]],
+    b_values: dict[str, list[float]],
+    *,
+    binary: bool,
+    alpha: float,
+) -> tuple[list[str], list[str], int | None]:
+    """Test each task's own trials, Holm across the tasks, and pick a recheck.
+
+    Fills each row's ``test``, ``p_value`` and ``p_adjusted``. Returns the
+    tasks that changed beyond their trial noise (adjusted p at or below
+    ``alpha``), the tasks worth a recheck (p at or below the screen level
+    before adjustment, which includes the changed ones), most significant
+    first, and the trials a recheck should run.
+    """
+    tested: list[tuple[TaskDelta, float]] = []
+    for row in rows:
+        row.test, row.p_value = two_sample_p_value(
+            a_values[row.task_id], b_values[row.task_id], binary=binary
+        )
+        if row.p_value is not None:
+            tested.append((row, row.p_value))
+    for (row, _p), adjusted in zip(tested, holm_adjusted([p for _row, p in tested]), strict=True):
+        row.p_adjusted = adjusted
+    tested.sort(key=lambda item: (item[1], item[0].task_id))
+    changed = [
+        row.task_id for row, _p in tested
+        if row.p_adjusted is not None and row.p_adjusted <= alpha
+    ]
+    recheck = [row for row, p in tested if p <= _recheck_level(alpha)]
+    if not recheck:
+        return changed, [], None
+    trials = max(max(row.n_baseline, row.n_candidate) for row in recheck)
+    num_runs = min(_RECHECK_MAX_RUNS, max(_RECHECK_MIN_RUNS, _RECHECK_RUNS_FACTOR * trials))
+    return changed, [row.task_id for row in recheck], num_runs
+
+
 __all__ = [
+    "DEFAULT_CONFIDENCE",
+    "DEFAULT_N_BOOTSTRAP",
     "DEFAULT_THRESHOLD",
     "ComparisonError",
     "Direction",
@@ -711,9 +1129,14 @@ __all__ = [
     "TaskAlignmentSummary",
     "TaskDelta",
     "Verdict",
+    "alpha_for",
+    "can_reach_level",
     "compare_runs",
     "decide",
     "excludes_zero",
+    "is_significant",
+    "min_attainable_p",
+    "min_tasks_for",
     "paired_task_effect",
     "short_hash",
 ]

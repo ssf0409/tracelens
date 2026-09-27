@@ -118,7 +118,9 @@ be counted as noise. For that case use `compare_runs(baseline_batch,
 candidate_batch, metric=..., threshold=...)`, the function behind
 `tracelens compare`. It aligns tasks by content through the runs' provenance,
 pairs each task's statistic, bootstraps over tasks, adds a sign-flip p-value,
-and returns a `RunComparison` with a verdict and exit code. The full definition
+and returns a `RunComparison` with a verdict and exit code. The verdict needs
+the interval and the p-value to agree, and enough tasks for the p-value to
+reach the level (six at 95% confidence). The full definition
 is in the [statistical contract](statistical-contract.md#run-versus-run-comparison-tracelens-compare-issue-28);
 the walkthrough is [Comparing Versions](comparing-versions.md).
 
