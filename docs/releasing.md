@@ -137,7 +137,10 @@ to merge, and says so in its job summary.
 For a pre-release, a version the rules above would not pick, or when the
 automatic path is off, the manual path is two clicks and one review.
 
-1. **Run the "Release prepare" workflow** (Actions → Release prepare → Run
+1. **Update the documentation version snippet**:
+   Change `docs/includes/version.txt` to `>=X.Y.Z` (or the new minor version) before or during the release pull request.
+
+2. **Run the "Release prepare" workflow** (Actions → Release prepare → Run
    workflow) with the version, for example `0.5.0`, and an optional
    one-paragraph summary. It checks that the version is well-formed, not
    older than the latest tag, and unused; moves the changelog's
@@ -255,7 +258,7 @@ Downstream projects should depend on TraceLens from PyPI:
 
 ```toml
 dependencies = [
-    "tracelens>=0.3.0",
+    "tracelens--8<-- "includes/version.txt"",
 ]
 ```
 
