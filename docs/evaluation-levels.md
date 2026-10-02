@@ -567,7 +567,7 @@ Tight thresholds. Components should be stable.
 ```python
 from tracelens.baselines.manager import BaselineManager, PromotionPolicy
 
-manager = BaselineManager("baselines/baselines.json")
+manager = BaselineManager("eval/baselines.json")
 
 manager.create_capability_baseline(
     task_id="goal_parser_compound",

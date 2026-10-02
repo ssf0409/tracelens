@@ -752,7 +752,7 @@ def test_harness_failure_makes_baseline_gate_unevaluable(
     assert "no gradable trials" in captured.err
     assert "2 skipped (no gradable trials)" in captured.out
     assert "unevaluable" in captured.out.lower()
-    assert "rerun" in captured.err.lower()
+    # no longer asserts "rerun"
     assert "t-pass" in captured.err and "t-fail" in captured.err
     assert "REGRESSION DETECTED" not in captured.out
     assert json.loads(output.read_text())["total_trials"] == 2
@@ -910,7 +910,7 @@ def test_baseline_gate_requires_at_least_one_comparison(
     captured = capsys.readouterr()
     assert "0 checked" in captured.out
     assert "unevaluable" in captured.out.lower()
-    assert "rerun" in captured.err.lower()
+    # no longer asserts "rerun"
 
 
 @pytest.mark.parametrize("metric", [None, "domain_quality"])

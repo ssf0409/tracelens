@@ -19,7 +19,6 @@ from tracelens.baselines.comparison import (
     RegressionSeverity,
     severity_at_least,
 )
-from tracelens.baselines.manager import BaselineManager
 from tracelens.core.provenance import RunProvenance
 from tracelens.core.trial import TrialBatch
 from tracelens.reporting.gate import GateResult, GateStatus, TaskGateOutcome
@@ -301,7 +300,6 @@ class ReportGenerator:
     def build_report(
         self,
         batch: TrialBatch,
-        baseline_manager: BaselineManager | None = None,
     ) -> ReportData:
         """Build a ReportData from a TrialBatch.
 

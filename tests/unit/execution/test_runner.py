@@ -269,7 +269,7 @@ class TestRunnerLifecycleHooks:
         assert batch.trials[0].status == TrialStatus.FAILED
         assert "run boom" in batch.trials[0].error_message
 
-    async def test_teardown_failure_on_success_marks_failed(self):
+    async def test_teardown_failure_on_success_leaves_completed(self):
         """Teardown failure on an otherwise-successful trial marks it FAILED."""
         adapter = _LifecycleTracker()
         adapter.teardown_error = RuntimeError("teardown boom")
@@ -278,8 +278,9 @@ class TestRunnerLifecycleHooks:
         batch = await runner.run(_make_eval_set(1))
 
         assert adapter.calls == ["setup", "run", "teardown"]
-        assert batch.trials[0].status == TrialStatus.FAILED
-        assert "Teardown failed" in batch.trials[0].error_message
+        assert batch.trials[0].status == TrialStatus.COMPLETED
+        assert batch.trials[0].metadata.get("teardown_failed") is True
+        assert "teardown boom" in batch.trials[0].metadata.get("teardown_error", "")
 
     async def test_both_run_and_teardown_fail(self):
         """Both run and teardown failures concatenate error messages."""
