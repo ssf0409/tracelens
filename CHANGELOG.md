@@ -8,6 +8,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-14
+
 ### Added
 
 - Optional two-sided `MetricBaseline.change_tolerance_absolute` and
