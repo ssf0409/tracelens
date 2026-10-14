@@ -1,11 +1,14 @@
 """`compare_to_baseline` against a metric whose baseline is 0.
 
 A relative change is a fraction of the baseline's magnitude, and a zero
-baseline has none. The comparison used to report ``+inf`` for a move in
-either direction and fed it to the one-sided relative threshold, so a
-higher-is-better metric that fell from 0 passed and a lower-is-better one
-that improved from 0 was flagged. Per-policy P&L and per-reason counters
-start at 0, so this is the common case, not an edge.
+baseline has none, so the number is unavailable. A relative bound on it is
+not: ``r * |0| = 0`` allows no movement, so any move in the worse direction
+exceeds every relative threshold, the same verdict a baseline of 1e-300
+gives. The comparison used to report ``+inf`` for a move in either direction
+and feed it to the one-sided threshold, so a higher-is-better metric that
+fell from 0 passed and a lower-is-better one that improved from 0 was
+flagged. Per-policy P&L and per-reason counters start at 0, so this is the
+common case, not an edge.
 """
 
 import json
@@ -47,9 +50,7 @@ def test_reported_case_flags_the_decline_and_not_the_improvement(tmp_path: Path)
 
     result = manager.compare_to_baseline("t", {"pnl": -50.0, "loss": -5.0})
 
-    # A relative threshold cannot size a decline from zero, so the decline
-    # has no verdict rather than a pass; the improvement is not a regression.
-    assert result["pnl"]["regression"] is None
+    assert result["pnl"]["regression"] is True
     assert result["loss"]["regression"] is False
 
 
@@ -64,58 +65,85 @@ def test_relative_change_from_zero_is_unavailable(
     row = _compare(tmp_path, current, higher_is_better=higher_is_better, relative_threshold=0.1)
 
     assert row["relative_change"] is None
-    assert "relative_change" in row["unavailable_fields"]
+    assert row["unavailable_fields"] == ["relative_change"]
     assert row["delta"] == current
 
 
 @pytest.mark.parametrize(
     ("higher_is_better", "current", "expected"),
     [
-        (True, -50.0, True),   # decline past the absolute limit
-        (True, -0.5, False),   # decline within it
-        (True, 50.0, False),   # improvement
-        (False, 5.0, True),    # worsening past the absolute limit
-        (False, 0.5, False),   # worsening within it
-        (False, -5.0, False),  # improvement
+        (True, -50.0, True),   # worsening: exceeds a bound that allows none
+        (True, -0.01, True),
+        (True, 50.0, False),   # improvement: never a regression
+        (False, 5.0, True),
+        (False, 0.01, True),
+        (False, -5.0, False),
+        (True, 0.0, False),    # no movement
+        (False, 0.0, False),
     ],
     ids=[
-        "higher-down-past", "higher-down-within", "higher-up",
-        "lower-up-past", "lower-up-within", "lower-down",
+        "higher-down", "higher-down-small", "higher-up",
+        "lower-up", "lower-up-small", "lower-down", "higher-flat", "lower-flat",
     ],
 )
-def test_absolute_threshold_alone_decides_from_zero(
+def test_relative_threshold_from_zero_allows_no_worsening(
     tmp_path: Path, higher_is_better: bool, current: float, expected: bool
+) -> None:
+    row = _compare(tmp_path, current, higher_is_better=higher_is_better, relative_threshold=0.1)
+
+    assert row["regression"] is expected
+
+
+@pytest.mark.parametrize("higher_is_better", [True, False])
+def test_zero_baseline_verdict_matches_a_vanishing_one(
+    tmp_path: Path, higher_is_better: bool
+) -> None:
+    worse = -0.5 if higher_is_better else 0.5
+    verdicts = [
+        _compare(
+            tmp_path, worse, higher_is_better=higher_is_better,
+            relative_threshold=0.1, baseline_value=baseline,
+        )["regression"]
+        for baseline in (0.0, 1e-300)
+    ]
+
+    assert verdicts == [True, True]
+
+
+@pytest.mark.parametrize(
+    ("higher_is_better", "current", "relative_threshold", "expected"),
+    [
+        (True, -50.0, None, True),    # past the absolute limit
+        (True, -0.5, None, False),    # within it, nothing else set
+        (True, -0.5, 0.1, True),      # within it, but the relative bound allows none
+        (True, 50.0, 0.1, False),     # improvement
+        (False, 5.0, None, True),
+        (False, 0.5, None, False),
+        (False, 0.5, 0.1, True),
+        (False, -5.0, 0.1, False),
+    ],
+    ids=[
+        "higher-down-past", "higher-down-within", "higher-down-within-relative",
+        "higher-up", "lower-up-past", "lower-up-within", "lower-up-within-relative",
+        "lower-down",
+    ],
+)
+def test_either_threshold_flags_a_worsening_from_zero(
+    tmp_path: Path,
+    higher_is_better: bool,
+    current: float,
+    relative_threshold: float | None,
+    expected: bool,
 ) -> None:
     row = _compare(
         tmp_path,
         current,
         higher_is_better=higher_is_better,
         absolute_threshold=-1.0,
-        relative_threshold=0.1,
+        relative_threshold=relative_threshold,
     )
 
     assert row["regression"] is expected
-
-
-@pytest.mark.parametrize(
-    ("higher_is_better", "current", "expected"),
-    [
-        (True, -50.0, None),   # worsening: nothing configured can size it
-        (True, 50.0, False),   # improvement: never a regression
-        (False, 5.0, None),
-        (False, -5.0, False),
-        (True, 0.0, False),    # no movement
-        (False, 0.0, False),
-    ],
-    ids=["higher-down", "higher-up", "lower-up", "lower-down", "higher-flat", "lower-flat"],
-)
-def test_relative_only_threshold_from_zero_judges_direction_only(
-    tmp_path: Path, higher_is_better: bool, current: float, expected: bool | None
-) -> None:
-    row = _compare(tmp_path, current, higher_is_better=higher_is_better, relative_threshold=0.1)
-
-    assert row["regression"] is expected
-    assert ("regression" in row["unavailable_fields"]) is (expected is None)
 
 
 def test_nonzero_baseline_row_keeps_its_shape(tmp_path: Path) -> None:
