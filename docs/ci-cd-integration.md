@@ -208,6 +208,12 @@ tracebacks on input errors. `unevaluable` takes precedence over `blocked`: an ob
 regression is still recorded, but missing evidence cannot authorize either
 verdict.
 
+When a task's baseline mean is 0, a change has no relative size:
+`delta_percent` is `null` in the JSON and prints as `N/A relative to 0`, and
+`delta` carries the change in the metric's own units. Any move in the worse
+direction from 0 is `severe`, so a significant one blocks at every
+`--fail-on-regression` level.
+
 The `gate` object in `results.json` (abridged):
 
 ```json

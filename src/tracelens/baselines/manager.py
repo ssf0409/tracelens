@@ -204,6 +204,11 @@ class TaskBaseline(BaseModel):
     ) -> None:
         """Add or update a metric baseline.
 
+        Each threshold is the largest allowed worsening: ``absolute_threshold``
+        in metric units written as a negative number (``-0.2``), and
+        ``relative_threshold`` as a positive fraction of the baseline (``0.1``
+        for 10 %), whichever way ``higher_is_better`` points.
+
         ``is_rate`` declares whether the metric is a 0/1 proportion; leave
         it ``None`` to let the comparison infer it from the stored summary.
         """

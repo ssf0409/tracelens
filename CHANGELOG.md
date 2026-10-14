@@ -162,7 +162,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   bound `r × |0|` allows no movement, so any move in the worse direction
   exceeds every relative threshold and every severity bin. That is the
   verdict a baseline of 1e-300 already gave. Anything against a nonzero
-  baseline is unchanged, key for key. (#188, #189)
+  baseline is unchanged, key for key. A metric that stays at 0 now also
+  reads `None` where it read `0.0`, so check for `None` (or read
+  `unavailable_fields`) before formatting these fields. Promotion is
+  unchanged and is the one exception: `try_promote` still skips a metric
+  whose baseline is 0, so a worsening from 0 neither earns nor blocks it;
+  the contract records this as an open deviation. (#188, #189)
   - **`BaselineManager.compare_to_baseline` judged the wrong direction.**
     It applied the one-sided relative threshold to `+inf`. With
     `relative_threshold=0.1`, a higher-is-better P&L that fell from 0 to
@@ -196,9 +201,11 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
     as before.
   - **Python-visible type changes.** `ComparisonResult.relative_delta`,
     `MetricRegression.delta_percent` and `SuiteGateResult.delta_percent` are
-    now `float | None`. Code that formats them must handle `None`, for
-    example with `tracelens.baselines.comparison.format_delta_percent`, and
-    code that reads a direction from them should read `delta` instead.
+    now `float | None`, and the `relative_change` / `relative_delta` keys
+    of the `compare_to_baseline` and `compare_to_baseline_with_ci` rows can
+    be `None`. Code that formats them must handle `None` (the reports print
+    it as `N/A relative to 0`), and code that reads a direction from them
+    should read `delta` instead.
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval

@@ -253,8 +253,9 @@ criterion is formed per metric and they share the suite level through the
 same Holm adjustment the per-task family uses, so that half of the budget is
 spent once rather than once per stored metric. It sees a broad regression
 that no single task can show and does not react to one task among many. Its
-`delta_percent` and severity follow the per-task rules, including a zero
-baseline mean, which leaves both unavailable.
+`delta_percent` and severity follow the per-task rules: against a zero
+baseline mean `delta_percent` is `null` (`N/A relative to 0`) and a decline
+is `severe`.
 
 It is **reported but not blocking by default.** Sign-flipping is valid only
 when the per-task differences are independent under the null, and task
@@ -662,6 +663,7 @@ are never compared across silently different populations.
 | `BaselineManager.compare_to_baseline` reported `relative_change = +inf` for a move off a zero baseline in either direction and applied the one-sided relative threshold to it, so a higher-is-better metric that fell from 0 passed, a lower-is-better one that improved from 0 was flagged, and the result was not valid JSON | the relative change is unavailable; a relative threshold allows no worsening from 0, so any worsening is a regression, and `regression` stays a boolean | #188 (fixed) |
 | `compare_metrics` and `compare_to_baseline_summary`, and through them `BaselineManager.compare_to_baseline_with_ci`, reported `relative_delta = +inf` for a move off a zero mean in either direction, so a decline read as an unbounded rise and the result was not valid JSON (their verdicts use `delta` and were unaffected) | the relative change is unavailable and named in `unavailable_fields` | #189 (fixed) |
 | `RegressionDetector` and the gate's suite criterion reported `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline read `+100.0%`, any move cleared `min_delta_percent`, and its severity was `severe`, blocking a significant move at every `--fail-on-regression` level | `delta_percent` is unavailable; the change is unbounded relative to 0, so its severity stays `severe` and a significant one blocks at every level, without the invented percentage | #188 (fixed; #190 widened #188's scope from `compare_to_baseline` to the gate) |
+| `TaskBaseline.can_promote` (behind `try_promote`) skips a metric whose stored baseline is 0, so a worsening from 0 neither earns nor blocks promotion, even with `require_all_metrics_improve=True` | a worsening from 0 blocks promotion like any other worsening | open (unchanged by #190, so existing promotion ratchets keep their behavior) |
 | `MetricEstimate.se` is `inf` when `n <= 1`, so `ComparisonResult.to_dict()` and the `current` estimate in `compare_to_baseline_with_ci` rows are not strict JSON whenever a side has one sample, whatever its mean | an unavailable standard error is `null`, never `inf` | open |
 
 ## Related pages
