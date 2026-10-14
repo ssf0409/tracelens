@@ -38,7 +38,8 @@ async def replay(input_data: dict[str, Any], scenario: str) -> dict[str, Any]:
     elif scenario == "decrease":
         decisions.pop(0)  # Dropped-request fault.
     if scenario == "new":
-        decisions[-1]["reason"] = "permission"
+        # Unknown-reason fault: an added rejection, so no known count moves.
+        decisions.append({"id": "d", "approved": False, "reason": "permission"})
     elif scenario == "zero-channel":
         decisions[-1]["reason"] = "quota"
     return {
