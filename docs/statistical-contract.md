@@ -581,6 +581,15 @@ A number that was not measured is **unavailable**, never zero:
   reason and the runs required.
 - A suite statistic with zero eligible tasks is `N/A`.
 - An interval that could not be estimated is `N/A`, not `[0, 0]`.
+- A change relative to a zero baseline is unavailable, not `inf`: a ratio to
+  zero has no size, and an unsigned infinity loses the direction too.
+  `BaselineManager.compare_to_baseline` reports `relative_change: null` and
+  does not apply the metric's relative threshold. An absolute threshold,
+  when set, decides. With a relative threshold alone, a move in the worse
+  direction has `regression: null` (no verdict, never a pass), and a move in
+  the better direction, or none, is not a regression. A row names what it
+  could not determine in `unavailable_fields`; rows against a nonzero
+  baseline have no such key.
 - JSON output carries availability explicitly; Markdown, HTML, and the CI
   summary render the same meaning.
 
@@ -627,6 +636,9 @@ are never compared across silently different populations.
 | A spread measured as zero on one side switched the comparison to a pooled-variance t-test, assuming a shared population variance nothing showed | Welch throughout; the pooled test is not used | #111 (fixed) |
 | Whether a metric was a proportion was read off the current sample's endpoints, so an infinitesimal change flipped the test family and the verdict | the baseline decides, by declaration or from its stored summary | #111 (fixed) |
 | Each metric received its own Holm family and the suite criterion its own `alpha`, so the run-level rate grew with the number of stored metrics | one family, one budget; the suite criterion reports by default and splits the budget when switched on | #111 (fixed) |
+| `BaselineManager.compare_to_baseline` reported `relative_change = +inf` for a move off a zero baseline in either direction and applied the one-sided relative threshold to it, so a higher-is-better metric that fell from 0 passed, a lower-is-better one that improved from 0 was flagged, and the result was not valid JSON | the relative change is unavailable; the absolute threshold decides, and a relative threshold alone leaves a worsening without a verdict | #NNN (fixed) |
+| `compare_metrics` and `compare_to_baseline_summary`, and through them `BaselineManager.compare_to_baseline_with_ci`, report `relative_delta = +inf` for a move off a zero mean in either direction (their verdicts use `delta` and are unaffected) | the relative change is unavailable | open |
+| `RegressionDetector` and the gate's suite criterion report `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline reads `+100.0%`, any move clears `min_delta_percent`, and its severity is `severe` | the relative size is unavailable, and severity needs a basis other than `delta_percent` | open |
 
 ## Related pages
 

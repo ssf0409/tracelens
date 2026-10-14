@@ -149,6 +149,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **A metric whose baseline is 0 is judged in the right direction.**
+  `BaselineManager.compare_to_baseline` reported `relative_change` as `+inf`
+  for a move off a zero baseline in either direction and applied the
+  one-sided relative threshold to it. With `relative_threshold=0.1`, a
+  higher-is-better P&L that fell from 0 to -50 passed, a lower-is-better
+  loss that improved from 0 to -5 was flagged, and the result could not be
+  written with `json.dumps(..., allow_nan=False)`. A ratio to zero has no
+  size, so `relative_change` is now `None` and the relative threshold does
+  not apply. An absolute threshold, when set, decides. With a relative
+  threshold alone, a move in the worse direction has `regression: None` (no
+  verdict; set an absolute threshold to judge it), and a move in the better
+  direction, or none, is not a regression. Such rows list the fields they
+  could not determine in `unavailable_fields`. A lower-is-better metric that
+  rose from 0 under a relative-only threshold used to read
+  `regression: True` and now reads `None`. Rows against a nonzero baseline
+  are unchanged, key for key. (#NNN)
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval

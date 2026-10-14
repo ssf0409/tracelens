@@ -659,8 +659,13 @@ class BaselineManager:
             - baseline: baseline value
             - current: current value
             - delta: absolute difference
-            - relative_change: relative difference
-            - regression: True if regression detected
+            - relative_change: delta / |baseline|, or None when the
+                baseline is 0
+            - regression: True if regression detected; None when the
+                baseline is 0, only a relative threshold is set, and the
+                metric moved in the worse direction (no verdict, not a pass)
+            - unavailable_fields: present only when a field is None because
+                it could not be determined; lists those fields
             - z_score: standard score if std available
         """
         baseline = self.get_baseline(task_id)
@@ -679,14 +684,15 @@ class BaselineManager:
             baseline_value = metric_baseline.baseline_value
             delta = current_value - baseline_value
 
-            # Calculate relative change (handle zero baseline)
-            if baseline_value != 0:
-                relative_change = delta / abs(baseline_value)
-            else:
-                relative_change = float("inf") if delta != 0 else 0.0
+            # A relative change is a fraction of the baseline's magnitude, and
+            # a zero baseline has none: the ratio is unavailable, not an
+            # infinity whose sign ignores which way the metric moved.
+            relative_change: float | None = (
+                delta / abs(baseline_value) if baseline_value != 0 else None
+            )
 
             # Check for regression
-            regression = False
+            regression: bool | None = False
 
             # For metrics where higher is better
             if metric_baseline.higher_is_better:
@@ -697,6 +703,7 @@ class BaselineManager:
 
                 # Check relative threshold (negative means decline)
                 if (metric_baseline.regression_threshold_relative is not None and
+                        relative_change is not None and
                         relative_change < -metric_baseline.regression_threshold_relative):
                     regression = True
             else:
@@ -706,13 +713,31 @@ class BaselineManager:
                     regression = True
 
                 if (metric_baseline.regression_threshold_relative is not None and
+                        relative_change is not None and
                         relative_change > metric_baseline.regression_threshold_relative):
                     regression = True
+
+            # From a zero baseline only an absolute threshold can size a
+            # worsening. With a relative threshold alone, a move in the worse
+            # direction has no verdict rather than a pass.
+            worsened = delta < 0 if metric_baseline.higher_is_better else delta > 0
+            if (relative_change is None and worsened and
+                    metric_baseline.regression_threshold_absolute is None and
+                    metric_baseline.regression_threshold_relative is not None):
+                regression = None
 
             # Calculate z-score if std available
             z_score = 0.0
             if metric_baseline.std_deviation > 0:
                 z_score = delta / metric_baseline.std_deviation
+
+            # Named only when something could not be determined, so a row
+            # against a nonzero baseline keeps its shape.
+            unavailable = [
+                field for field, value in (
+                    ("relative_change", relative_change), ("regression", regression)
+                ) if value is None
+            ]
 
             comparisons[metric_name] = {
                 "baseline": baseline_value,
@@ -722,6 +747,7 @@ class BaselineManager:
                 "regression": regression,
                 "z_score": z_score,
                 "higher_is_better": metric_baseline.higher_is_better,
+                **({"unavailable_fields": unavailable} if unavailable else {}),
             }
 
         return comparisons
