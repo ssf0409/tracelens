@@ -12,6 +12,7 @@ import json
 import subprocess
 from datetime import datetime
 from enum import Enum
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -647,12 +648,17 @@ class BaselineManager:
         self,
         task_id: str,
         current_metrics: dict[str, float],
+        *,
+        coverage: str = "intersection",
     ) -> dict[str, Any]:
         """Compare current metrics to baseline.
 
         Args:
             task_id: The task identifier
             current_metrics: Dict of metric_name -> current value
+            coverage: "intersection" preserves the legacy result; "strict"
+                reports missing metrics on either side. Missing rows carry
+                ``regression=None`` and must not be treated as passing.
 
         Returns:
             Dict of metric_name -> comparison dict with:
@@ -663,12 +669,16 @@ class BaselineManager:
             - regression: True if regression detected
             - z_score: standard score if std available
         """
+        self._validate_coverage(coverage)
         baseline = self.get_baseline(task_id)
 
         if not baseline:
             return {"_no_baseline": True}
 
-        comparisons = {}
+        comparisons: dict[str, dict[str, Any]] = {}
+
+        if coverage == "strict":
+            self._validate_finite(baseline, current_metrics)
 
         for metric_name, current_value in current_metrics.items():
             metric_baseline = baseline.get_metric(metric_name)
@@ -724,7 +734,48 @@ class BaselineManager:
                 "higher_is_better": metric_baseline.higher_is_better,
             }
 
+        if coverage == "strict":
+            for row in comparisons.values():
+                row["coverage"] = "matched"
+            comparisons.update(self._coverage_findings(baseline, current_metrics, "regression"))
+
         return comparisons
+
+    @staticmethod
+    def _validate_coverage(coverage: str) -> None:
+        if coverage not in {"intersection", "strict"}:
+            raise ValueError("coverage must be 'intersection' or 'strict'")
+
+    @staticmethod
+    def _validate_finite(baseline: TaskBaseline, current_metrics: dict[str, float]) -> None:
+        for name, value in current_metrics.items():
+            if not isfinite(value):
+                raise ValueError(f"Current metric {name!r} must be finite")
+        for name, metric in baseline.metrics.items():
+            if not isfinite(metric.baseline_value):
+                raise ValueError(f"Baseline metric {name!r} must be finite")
+
+    @staticmethod
+    def _coverage_findings(
+        baseline: TaskBaseline, current_metrics: dict[str, Any], regression_key: str,
+    ) -> dict[str, Any]:
+        """A missing measurement has no comparison verdict or invented zero."""
+        findings: dict[str, Any] = {}
+        for name in sorted(baseline.metrics.keys() - current_metrics.keys()):
+            findings[name] = {
+                "coverage": "missing_from_current",
+                "baseline": baseline.metrics[name].baseline_value,
+                "current": None,
+                regression_key: None,
+            }
+        for name in sorted(current_metrics.keys() - baseline.metrics.keys()):
+            findings[name] = {
+                "coverage": "missing_from_baseline",
+                "baseline": None,
+                "current": current_metrics[name],
+                regression_key: None,
+            }
+        return findings
 
     def create_canary_baseline(
         self,
@@ -1005,6 +1056,8 @@ class BaselineManager:
         current_values: dict[str, list[float]],
         confidence: float = 0.95,
         n_bootstrap: int = 10000,
+        *,
+        coverage: str = "intersection",
     ) -> dict[str, Any]:
         """Compare current metrics to baseline with bootstrap CI.
 
@@ -1016,6 +1069,9 @@ class BaselineManager:
             current_values: Dict of metric_name -> list of sample values
             confidence: Confidence level (default 0.95 for 95% CI)
             n_bootstrap: Number of bootstrap samples
+            coverage: "strict" reports absent metrics and empty sample lists
+                as unmeasured. Missing rows carry ``is_regression=None``;
+                their current field is the raw sample list or None.
 
         Returns:
             Dict of metric_name -> comparison result with:
@@ -1027,12 +1083,23 @@ class BaselineManager:
             - is_regression: True if significant decline
             - cohens_d: Effect size
         """
+        self._validate_coverage(coverage)
         baseline = self.get_baseline(task_id)
 
         if not baseline:
             return {"_no_baseline": True}
 
-        comparisons = {}
+        comparisons: dict[str, dict[str, Any]] = {}
+
+        if coverage == "strict":
+            for name, values in current_values.items():
+                if not all(isfinite(value) for value in values):
+                    raise ValueError(f"Current metric {name!r} must be finite")
+            self._validate_finite(baseline, {})
+            current_values = {
+                name: values for name, values in current_values.items()
+                if values or name not in baseline.metrics
+            }
 
         for metric_name, values in current_values.items():
             metric_baseline = baseline.get_metric(metric_name)
@@ -1083,5 +1150,10 @@ class BaselineManager:
                 "p_value": comparison.p_value,
                 "higher_is_better": metric_baseline.higher_is_better,
             }
+
+        if coverage == "strict":
+            for row in comparisons.values():
+                row["coverage"] = "matched"
+            comparisons.update(self._coverage_findings(baseline, current_values, "is_regression"))
 
         return comparisons

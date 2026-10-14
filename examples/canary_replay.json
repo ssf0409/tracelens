@@ -1,0 +1,15 @@
+{
+  "name": "frozen-workflow-replay",
+  "tasks": [{
+    "task_id": "fixed-workflow",
+    "name": "Replay a frozen approval workflow",
+    "input_data": {
+      "requests": [
+        {"id": "a", "approved": true},
+        {"id": "b", "approved": true},
+        {"id": "c", "approved": false, "reason": "invalid"}
+      ],
+      "known_reasons": ["invalid", "quota"]
+    }
+  }]
+}

@@ -264,6 +264,61 @@ Use the sample report at
 as the shape to aim for when posting CI summaries: include the metric, baseline
 value, current value, delta, regression result, and blocking decision.
 
+## Strict metric coverage for frozen replays
+
+`BaselineManager.compare_to_baseline(task_id, metrics, coverage="strict")`
+reports the union of metric names. Matched rows retain the usual comparison
+fields and add `coverage: "matched"`. A missing row contains `baseline`,
+`current`, `regression: None`, and one of:
+
+- `coverage: "missing_from_current"`: the baseline expected a measurement
+  that this run did not produce; `current` is `None`.
+- `coverage: "missing_from_baseline"`: this run produced an unknown metric;
+  `baseline` is `None`.
+
+A missing row has no numerical verdict. A caller must check `coverage` before
+reading `regression`; `None` is not a pass. A new metric with value zero is
+still unknown, and a missing metric is never filled with zero. Producers of
+sparse counters should explicitly emit zero for known reasons that did not
+occur, and omit a metric only when they did not measure it.
+
+The default `coverage="intersection"` preserves the previous result dictionary
+and skips unmatched metrics. Strict coverage is opt-in, including for CANARY
+baselines: a safety floor and a frozen deterministic replay have different
+measurement expectations. An absent task baseline still returns
+`{"_no_baseline": True}` and must never clear a caller's gate. Empty comparison
+sets carry no passing evidence.
+
+`compare_to_baseline_with_ci(..., coverage="strict")` applies the same coverage
+rule. An empty sample list counts as missing from current; missing rows carry
+`is_regression: None` and the raw current samples or `None`, rather than an
+invented estimate. Strict comparisons reject nonfinite measurements.
+
+The runnable [deterministic canary recipe](https://github.com/ssf0409/tracelens/blob/main/examples/deterministic_canary.py)
+executes the checked-in `examples/canary_replay.json` task through an adapter,
+transcript, and deterministic metric grader. Record the protected baseline once,
+then use fresh output directories for checks:
+
+```bash
+uv run --frozen python examples/deterministic_canary.py record \
+  --baseline /tmp/workflow-canary/baseline.json --output-dir /tmp/workflow-canary/reference
+uv run --frozen python examples/deterministic_canary.py check \
+  --baseline /tmp/workflow-canary/baseline.json --scenario unchanged \
+  --output-dir /tmp/workflow-canary/unchanged
+uv run --frozen python examples/deterministic_canary.py check \
+  --baseline /tmp/workflow-canary/baseline.json --scenario missing \
+  --output-dir /tmp/workflow-canary/missing
+```
+
+The unchanged check exits 0. `missing`, `new`, and `empty` exit 1 with explicit
+coverage findings. Invalid input exits 2 before replay. Each successful replay
+persists `trials.json` and `gate.json`, including metrics, comparisons, task hash,
+and run identity. Checking never promotes or overwrites the baseline; recording
+refuses an existing baseline. The fixture demonstrates a local workflow, not an
+external service integration. Its Python gate policy is separate from
+`tracelens run --baseline-check`, which uses `RegressionDetector` and a limited
+CLI metric set; these API options do not add CLI gate behavior.
+
 ## Baseline Review Checklist
 
 Before committing a baseline change, confirm:
