@@ -2,7 +2,11 @@
 
 import pytest
 
-from tracelens.statistics.availability import MetricValue, unavailable_reason
+from tracelens.statistics.availability import (
+    MetricValue,
+    relative_to_baseline,
+    unavailable_reason,
+)
 from tracelens.statistics.consistency import (
     ConsistencyAnalyzer,
     pass_to_k_estimator,
@@ -137,3 +141,20 @@ class TestPassToKMetric:
         detailed = analyzer.analyze_detailed({"a": [True, True, False]})
         assert detailed["pass^2"].value == 0.5
         assert detailed["pass^5"].value is None and detailed["pass^5"].required_runs == 5
+
+
+class TestRelativeToBaseline:
+    """The one definition of a change relative to a stored baseline (#188)."""
+
+    @pytest.mark.parametrize(
+        ("delta", "baseline", "expected"),
+        [(-0.15, 1.0, -0.15), (0.3, -2.0, 0.15), (0.0, 4.0, 0.0)],
+    )
+    def test_is_a_fraction_of_the_baseline_magnitude(
+        self, delta: float, baseline: float, expected: float
+    ) -> None:
+        assert relative_to_baseline(delta, baseline) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("delta", [-50.0, 0.0, 5.0])
+    def test_zero_baseline_is_unavailable_in_either_direction(self, delta: float) -> None:
+        assert relative_to_baseline(delta, 0.0) is None

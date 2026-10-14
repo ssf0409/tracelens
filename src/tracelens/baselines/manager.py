@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from tracelens.core._time import utc_now
 from tracelens.core.decision_spec import DecisionSpec
+from tracelens.statistics.availability import relative_to_baseline
 from tracelens.statistics.inference import (
     compare_to_baseline_summary,
     estimate_metric,
@@ -684,12 +685,8 @@ class BaselineManager:
             baseline_value = metric_baseline.baseline_value
             delta = current_value - baseline_value
 
-            # A relative change is a fraction of the baseline's magnitude, and
-            # a zero baseline has none: the ratio is unavailable, not an
-            # infinity whose sign ignores which way the metric moved.
-            relative_change: float | None = (
-                delta / abs(baseline_value) if baseline_value != 0 else None
-            )
+            # None against a zero baseline: the ratio has no size there.
+            relative_change = relative_to_baseline(delta, baseline_value)
 
             # Check for regression
             regression: bool | None = False

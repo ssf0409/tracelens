@@ -101,6 +101,18 @@ class MetricValue:
         )
 
 
+def relative_to_baseline(delta: float, baseline: float) -> float | None:
+    """``delta`` as a fraction of the baseline's magnitude, or None.
+
+    A zero baseline has no magnitude, so the ratio is unavailable, not an
+    infinity or a capped stand-in whose sign ignores which way the metric
+    moved; 0 / 0 is undefined too. Every relative change against a stored
+    baseline goes through here so the rule has one definition. Callers
+    decide from the signed ``delta`` when this is None.
+    """
+    return delta / abs(baseline) if baseline != 0 else None
+
+
 def unavailable_reason(kind: str, k: int, total_tasks: int) -> str:
     """Standard reason text for a k-based metric no task can support."""
     if total_tasks == 0:

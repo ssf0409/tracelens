@@ -15,6 +15,8 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
+from tracelens.statistics.availability import relative_to_baseline
+
 
 @dataclass
 class MetricEstimate:
@@ -408,16 +410,6 @@ def permutation_test(
     return float(p_value)
 
 
-def _relative_delta(delta: float, baseline_mean: float) -> float | None:
-    """``delta`` as a fraction of the baseline's magnitude.
-
-    A zero mean has no magnitude, so the ratio is unavailable (None), not an
-    infinity whose sign ignores which way the metric moved; 0 / 0 is
-    undefined too. Verdicts read the signed ``delta`` instead.
-    """
-    return delta / abs(baseline_mean) if baseline_mean != 0 else None
-
-
 def compare_metrics(
     baseline_values: list[float] | np.ndarray,
     current_values: list[float] | np.ndarray,
@@ -449,7 +441,7 @@ def compare_metrics(
         baseline_values, current_values, confidence, n_bootstrap, seed
     )
 
-    relative_delta = _relative_delta(delta, baseline_est.mean)
+    relative_delta = relative_to_baseline(delta, baseline_est.mean)
 
     # Statistical significance: CI doesn't include 0
     is_significant = not (ci_lower <= 0 <= ci_upper)
@@ -521,7 +513,7 @@ def compare_to_baseline_summary(
 
     delta = current_mean - baseline_mean
 
-    relative_delta = _relative_delta(delta, baseline_mean)
+    relative_delta = relative_to_baseline(delta, baseline_mean)
 
     # Welch's t-test CI for difference
     se_diff = np.sqrt(
