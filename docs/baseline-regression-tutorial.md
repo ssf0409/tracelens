@@ -289,6 +289,14 @@ measurement expectations. An absent task baseline still returns
 `{"_no_baseline": True}` and must never clear a caller's gate. Empty comparison
 sets carry no passing evidence.
 
+To accept a reviewed change to the metric set, update the stored baseline.
+`force_promote` and `update_baseline` add a new metric with the run's value, but
+neither ever deletes one. A metric that legitimately no longer exists, such as a
+failure reason that was fixed, keeps reporting `missing_from_current` until you
+remove it: `del baseline.metrics[name]`, then `manager.save()`. Deleting does not
+archive the old value in the baseline's history, so record the reason in the
+change that edits the baseline file.
+
 `compare_to_baseline_with_ci(..., coverage="strict")` applies the same coverage
 rule. An empty sample list counts as missing from current; missing rows carry
 `is_regression: None` and the raw current samples or `None`, rather than an
@@ -353,12 +361,19 @@ Each configured tolerance is a hard bound:
 
 - Absolute: `abs(current - baseline) > change_tolerance_absolute`.
 - Relative: `abs(current - baseline) > change_tolerance_relative * abs(baseline)`.
-- Setting both means exceeding either bound reports a change; equality is within
-  tolerance. A zero baseline allows no nonzero movement under a relative bound.
-  Use an absolute bound when movement away from zero is acceptable.
+- Setting both means exceeding either bound reports a change, so the smaller
+  allowance wins. This is the opposite of `math.isclose` and `pytest.approx`,
+  where the larger one wins: here an absolute bound cannot widen a relative bound
+  near zero. Equality is within tolerance. A zero baseline allows no nonzero
+  movement under a relative bound; use an absolute bound when movement away from
+  zero is acceptable.
 - Tolerances must be finite and nonnegative. Zero requires exact numerical
   equality with no hidden float epsilon; use an explicit nonzero tolerance for
-  calculated floats that need rounding allowance.
+  calculated floats that need rounding allowance. A value kept to a fixed
+  quantum, such as P&L rounded to 1e-6, can move by one quantum and still exceed
+  a tolerance equal to that quantum, because the difference is computed in floats
+  (`36.620401 - 36.6204` is `1.00000000458e-06`). To allow one quantum but not
+  two, set the tolerance between them, for example `1.5e-6`.
 
 Only metrics with a configured tolerance add `changed: True | False` to their
 matched comparison row. The existing `delta`, `relative_change`, `z_score`, and
