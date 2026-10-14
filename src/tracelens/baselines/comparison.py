@@ -57,6 +57,7 @@ from scipy import stats
 from tracelens.baselines.manager import MetricBaseline, TaskBaseline
 from tracelens.core._time import utc_now
 from tracelens.core.decision_spec import DecisionSpec
+from tracelens.statistics.availability import relative_to_baseline
 
 # Default noise band in absolute metric units — i.e. 0.03 means "a score
 # change of 3 percentage points on a 0-1 metric." Comes from Anthropic's
@@ -506,12 +507,12 @@ def severity_at_least(severity: RegressionSeverity, threshold: RegressionSeverit
 def relative_change(delta: float, baseline: float) -> float | None:
     """``delta`` as a percentage of ``|baseline|``; ``None`` when the baseline is 0.
 
+    The percent form of :func:`~tracelens.statistics.availability.relative_to_baseline`.
     A ratio to zero has no size, and any stand-in (the 100 this used to
     return, or an infinity) would be read as a measured one.
     """
-    if baseline != 0:
-        return (delta / abs(baseline)) * 100
-    return None
+    fraction = relative_to_baseline(delta, baseline)
+    return None if fraction is None else fraction * 100
 
 
 def severity_for(delta_percent: float | None) -> RegressionSeverity | None:
