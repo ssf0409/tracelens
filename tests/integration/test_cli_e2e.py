@@ -1639,3 +1639,51 @@ def test_report_format_ci_reprints_the_run_summary(
     assert "Baseline check:" in gated_stdout and "REGRESSION DETECTED" in gated_stdout
     assert cmd_report(build_parser().parse_args(["report", "--results", str(out), "--format", "ci"])) == 0
     assert capsys.readouterr().out == gated_stdout
+
+
+# --- Issues #188/#189: a change from a zero baseline ---------------------------
+
+
+def test_a_significant_rise_from_a_zero_baseline_blocks_in_a_real_process(
+    tmp_path: Path,
+) -> None:
+    """A lower-is-better score stored at 0 that now reads 0.3 on every trial.
+
+    The change has no percentage against 0, but it is unbounded relative to
+    it, so it is severe and blocks at the default threshold (exit 1). The
+    results file says the percentage is unavailable instead of inventing
+    +100 %, and ``report`` renders that from the file.
+    """
+    root = Path(__file__).resolve().parents[2]
+    tasks = tmp_path / "tasks.json"
+    tasks.write_text(json.dumps({"tasks": [
+        {"task_id": "cost", "name": "cost", "input_data": {"value": 0.3}},
+    ]}))
+    baselines = tmp_path / "baselines.json"
+    manager = BaselineManager(baselines)
+    baseline = TaskBaseline(task_id="cost")
+    baseline.add_metric(
+        "mean_score", 0.0, std=0.1, sample_size=20, higher_is_better=False, is_rate=False
+    )
+    manager.set_baseline(baseline)
+    manager.save()
+    out = tmp_path / "results.json"
+
+    run = _tracelens(
+        "run", "--eval-set", str(tasks), "--adapter", ADAPTER, "--graders", GRADER,
+        "--num-runs", "5", "--baseline-check", "--baselines-file", str(baselines),
+        "--output", str(out), cwd=root,
+    )
+
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert "Traceback" not in run.stderr
+    gate = json.loads(out.read_text())["gate"]
+    assert gate["status"] == "blocked" and gate["exit_code"] == 1
+    (finding,) = [r for r in gate["tasks"][0]["regressions"] if r["metric_name"] == "mean_score"]
+    assert finding["delta_percent"] is None and finding["severity"] == "severe"
+    assert gate["tasks"][0]["overall_severity"] == "severe"
+
+    for fmt in ("markdown", "ci"):
+        report = _tracelens("report", "--results", str(out), "--format", fmt, cwd=root)
+        assert report.returncode == 0, report.stdout + report.stderr
+        assert "N/A relative to 0" in report.stdout and "+100.0%" not in report.stdout
