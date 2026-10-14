@@ -164,7 +164,7 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   could not determine in `unavailable_fields`. A lower-is-better metric that
   rose from 0 under a relative-only threshold used to read
   `regression: True` and now reads `None`. Rows against a nonzero baseline
-  are unchanged, key for key. (#NNN)
+  are unchanged, key for key. (#188)
 - **`relative_delta` against a zero mean is unavailable, not `+inf`.**
   `compare_metrics` and `compare_to_baseline_summary`, and through them
   `BaselineManager.compare_to_baseline_with_ci`, reported
