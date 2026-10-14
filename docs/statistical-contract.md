@@ -159,10 +159,12 @@ The run is blocked when a live criterion rejects at or above
   to `|baseline mean|`. A change below `min_delta_percent` (default 5 %) is
   not reported. **Severity is derived from `|delta_percent|` alone** (minor
   below 5 %, moderate 5–15 %, severe from 15 %) and is reported next to the
-  evidence, never combined with it. Against a zero baseline mean the ratio
-  does not exist, so `delta_percent` and severity are both unavailable
-  (`null`; see [Availability](#availability)). There is no relative size to
-  compare with the floor, so every nonzero change from 0 is reported.
+  evidence, never combined with it. Against a zero baseline mean
+  `delta_percent` does not exist (`null`, printed `N/A relative to 0`; see
+  [Availability](#availability)). A nonzero change is still unbounded
+  relative to that baseline, so it is beyond every bin: it is always
+  reported, its severity is `severe`, and a baseline of 1e-300 gives the
+  same verdict.
 - Evidence: a one-sided p-value in the observed direction.
     - Whether a metric *is* a 0/1 proportion is decided by **the baseline**
       alone: a current sample can never promote a continuous score to a
@@ -237,15 +239,6 @@ The run is blocked when a live criterion rejects at or above
   it, or, when the stored baseline is too small for any check to decide it,
   the size on each side (`trials_needed_on_both_sides`). A 0/1 comparison
   whose sizes cannot reject even a total failure is `undetectable`.
-- A significant finding with no severity (a change from a zero baseline
-  mean) is placed only where its size is known. It changed, so it reaches
-  `minor` and blocks at `--fail-on-regression minor`. Whether it reaches
-  anything higher is unknown, so above `minor` the run is **unevaluable**
-  unless another finding blocks. That cause yields to `blocked`: a known
-  block decides the run whatever the unsized finding's size. It does not
-  justify a pass either, since the finding may reach the threshold.
-  `RegressionReport.block_verdict` returns `None` for this case.
-  `should_block_ci`, a boolean with no third answer, returns `True`.
 - With a `DecisionSpec` on both sides, an absolute delta smaller than the
   noise band (default 0.03 on a 0–1 metric) is marked `within_noise_band` and
   does not block; a changed infrastructure configuration is reported as
@@ -595,24 +588,31 @@ A number that was not measured is **unavailable**, never zero:
   reason and the runs required.
 - A suite statistic with zero eligible tasks is `N/A`.
 - An interval that could not be estimated is `N/A`, not `[0, 0]`.
-- A change relative to a zero baseline is unavailable, not `inf`: a ratio to
-  zero has no size, and an unsigned infinity loses the direction too. One
-  function, `tracelens.statistics.availability.relative_to_baseline`,
-  defines the rule, and every relative change against a stored baseline
-  goes through it. `BaselineManager.compare_to_baseline` reports `relative_change: null` and
-  does not apply the metric's relative threshold. An absolute threshold,
-  when set, decides. With a relative threshold alone, a move in the worse
-  direction has `regression: null` (no verdict, never a pass), and a move in
-  the better direction, or none, is not a regression. A row names what it
-  could not determine in `unavailable_fields`; rows against a nonzero
-  baseline have no such key. `compare_metrics` and
-  `compare_to_baseline_summary` apply the same rule to `relative_delta`,
-  even when the current mean is 0 too, since 0 / 0 is undefined:
-  `ComparisonResult.unavailable_fields` lists it, and so do `to_dict()` and
-  `BaselineManager.compare_to_baseline_with_ci` rows. Their verdicts read
-  the signed `delta`. The gate's `delta_percent`, and the severity derived
-  from it, are `null` against a zero mean too (rendered `N/A relative to
-  0`); "Baseline regression detection" says what the decision does then.
+- A change relative to a zero baseline has no number, never `inf` or a
+  stand-in: a ratio to zero has no size, and an unsigned infinity loses the
+  direction too. One function,
+  `tracelens.statistics.availability.relative_to_baseline`, defines the
+  rule, and every relative change against a stored baseline goes through
+  it. The number is unavailable, but a bound on it is not: a relative bound
+  `r × |0| = 0` allows no movement, so any move in the worse direction
+  exceeds every relative threshold and every severity bin, the verdict a
+  baseline of 1e-300 gives. Callers decide from the signed `delta`.
+    - `BaselineManager.compare_to_baseline` reports `relative_change: null`
+      with `unavailable_fields: ["relative_change"]`, and with a relative
+      threshold set any worsening is a regression; `regression` stays a
+      boolean. Rows against a nonzero baseline have no `unavailable_fields`
+      key. Each threshold is the largest allowed worsening:
+      `regression_threshold_absolute` in metric units written as a negative
+      number, `regression_threshold_relative` as a positive fraction of
+      `|baseline|`. With both set, either one flags.
+    - `compare_metrics` and `compare_to_baseline_summary` report
+      `relative_delta: null`, even when the current mean is 0 too, since
+      0 / 0 is undefined. `ComparisonResult.unavailable_fields` lists it,
+      and so do `to_dict()` and `BaselineManager.compare_to_baseline_with_ci`
+      rows. Their verdicts read the signed `delta`.
+    - The gate's `delta_percent` is `null` against a zero mean (printed
+      `N/A relative to 0`), and its severity is `severe`; see "Baseline
+      regression detection".
 - JSON output carries availability explicitly; Markdown, HTML, and the CI
   summary render the same meaning.
 
@@ -659,9 +659,10 @@ are never compared across silently different populations.
 | A spread measured as zero on one side switched the comparison to a pooled-variance t-test, assuming a shared population variance nothing showed | Welch throughout; the pooled test is not used | #111 (fixed) |
 | Whether a metric was a proportion was read off the current sample's endpoints, so an infinitesimal change flipped the test family and the verdict | the baseline decides, by declaration or from its stored summary | #111 (fixed) |
 | Each metric received its own Holm family and the suite criterion its own `alpha`, so the run-level rate grew with the number of stored metrics | one family, one budget; the suite criterion reports by default and splits the budget when switched on | #111 (fixed) |
-| `BaselineManager.compare_to_baseline` reported `relative_change = +inf` for a move off a zero baseline in either direction and applied the one-sided relative threshold to it, so a higher-is-better metric that fell from 0 passed, a lower-is-better one that improved from 0 was flagged, and the result was not valid JSON | the relative change is unavailable; the absolute threshold decides, and a relative threshold alone leaves a worsening without a verdict | #188 (fixed) |
+| `BaselineManager.compare_to_baseline` reported `relative_change = +inf` for a move off a zero baseline in either direction and applied the one-sided relative threshold to it, so a higher-is-better metric that fell from 0 passed, a lower-is-better one that improved from 0 was flagged, and the result was not valid JSON | the relative change is unavailable; a relative threshold allows no worsening from 0, so any worsening is a regression, and `regression` stays a boolean | #188 (fixed) |
 | `compare_metrics` and `compare_to_baseline_summary`, and through them `BaselineManager.compare_to_baseline_with_ci`, reported `relative_delta = +inf` for a move off a zero mean in either direction, so a decline read as an unbounded rise and the result was not valid JSON (their verdicts use `delta` and were unaffected) | the relative change is unavailable and named in `unavailable_fields` | #189 (fixed) |
-| `RegressionDetector` and the gate's suite criterion reported `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline read `+100.0%`, any move cleared `min_delta_percent`, and its severity was `severe`, blocking a significant move at every `--fail-on-regression` level | `delta_percent` and severity are unavailable; the finding blocks at `minor` and leaves the run unevaluable above it unless something else blocks | #188 (fixed) |
+| `RegressionDetector` and the gate's suite criterion reported `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline read `+100.0%`, any move cleared `min_delta_percent`, and its severity was `severe`, blocking a significant move at every `--fail-on-regression` level | `delta_percent` is unavailable; the change is unbounded relative to 0, so its severity stays `severe` and a significant one blocks at every level, without the invented percentage | #188 (fixed; #190 widened #188's scope from `compare_to_baseline` to the gate) |
+| `MetricEstimate.se` is `inf` when `n <= 1`, so `ComparisonResult.to_dict()` and the `current` estimate in `compare_to_baseline_with_ci` rows are not strict JSON whenever a side has one sample, whatever its mean | an unavailable standard error is `null`, never `inf` | open |
 
 ## Related pages
 

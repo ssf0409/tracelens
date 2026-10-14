@@ -149,51 +149,56 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
-- **A change relative to a zero baseline is unavailable, never an invented
-  number.** Three places computed a change relative to a stored baseline,
-  and each substituted a stand-in when the baseline was 0 (`+inf`, or
-  `+100 %`). The stand-in had neither a direction nor a size, and it was
-  then used as a measurement. Metrics that start at 0, such as per-policy
-  P&L or per-reason counters, hit this on every run. One function,
+- **A change relative to a zero baseline has no invented number, and a
+  worsening from 0 is still caught.** Three places computed a change
+  relative to a stored baseline, and each substituted a stand-in when the
+  baseline was 0 (`+inf`, or `+100 %`). The stand-in had neither a
+  direction nor a size, and it was then used as a measurement. Metrics that
+  start at 0, such as per-policy P&L or per-reason counters, hit this on
+  every run. One function,
   `tracelens.statistics.availability.relative_to_baseline`, now defines the
-  rule: against a zero baseline the relative change is `None`, and each
-  caller decides from the signed `delta`. Rows and results list what they
-  could not determine in `unavailable_fields`. Anything against a nonzero
+  rule. Against a zero baseline the relative change is `None`, listed in
+  `unavailable_fields`. A bound on it is not unavailable, though: a relative
+  bound `r × |0|` allows no movement, so any move in the worse direction
+  exceeds every relative threshold and every severity bin. That is the
+  verdict a baseline of 1e-300 already gave. Anything against a nonzero
   baseline is unchanged, key for key. (#188, #189)
   - **`BaselineManager.compare_to_baseline` judged the wrong direction.**
     It applied the one-sided relative threshold to `+inf`. With
     `relative_threshold=0.1`, a higher-is-better P&L that fell from 0 to
     -50 passed, a lower-is-better loss that improved from 0 to -5 was
     flagged, and the result could not be written with
-    `json.dumps(..., allow_nan=False)`. Now `relative_change` is `None` and
-    the relative threshold does not apply. An absolute threshold, when set,
-    decides. With a relative threshold alone, a move in the worse direction
-    has `regression: None` (no verdict; set an absolute threshold to judge
-    it), and a move in the better direction, or none, is not a regression.
-    A lower-is-better metric that rose from 0 under a relative-only
-    threshold used to read `regression: True` and now reads `None`.
+    `json.dumps(..., allow_nan=False)`. Now `relative_change` is `None`, any
+    worsening from 0 is a regression when a relative threshold is set, an
+    improvement or no change is not, and `regression` stays a boolean.
+    Either threshold flags when both are set, so a worsening from 0 within
+    the absolute limit now regresses through the relative one. Each
+    threshold is the largest allowed worsening: the absolute one in metric
+    units written as a negative number (for example `-0.2`), the relative
+    one as a positive fraction (`0.1` for 10 %). The field comment used to
+    show the relative one as `-0.1`.
   - **`compare_metrics` and `compare_to_baseline_summary`, and through them
     `compare_to_baseline_with_ci`, reported `relative_delta = +inf`.** A
     decline from 0 read as an unbounded rise, and the result was not valid
-    strict JSON. `relative_delta` is now `None`, and
+    strict JSON. `relative_delta` is now `None` and
     `ComparisonResult.unavailable_fields` lists it, as do `to_dict()` and
     the `compare_to_baseline_with_ci` row. The verdicts (`is_significant`,
     `is_regression`, `is_improvement`) read the signed `delta` and do not
-    change. `ComparisonResult.relative_delta` is now typed `float | None`,
-    and a zero mean that did not move reads `None` where it read `0.0`,
-    because 0 / 0 is undefined.
-  - **The baseline gate invented a severity.** `RegressionDetector` and the
-    gate's suite criterion reported `+100%` and `severe` for any move off a
-    zero mean, in either direction, so a significant decline (or a rise in
-    a lower-is-better metric) blocked at every `--fail-on-regression` level
-    and read as `+100.0%`. `delta_percent` and `severity` are now `null`
-    there, printed as `N/A relative to 0`. Any nonzero change reaches
-    `minor`; whether it reaches a higher level is unknown. So such a change
-    blocks at `minor` (exit 1), and above that a significant one leaves the
-    gate `unevaluable` (exit 2) with the task and metric named, unless
-    another finding blocks the run. Either way CI fails, as before.
-    `should_block_ci()` still returns `True`, and the new
-    `RegressionReport.block_verdict()` returns `None`.
+    change. Still open: `MetricEstimate.se` is `inf` when a side has one
+    sample, so those results are still not strict JSON then. That is a
+    separate cause, recorded in the contract's known deviations.
+  - **The baseline gate printed `+100%` for any move off a zero mean.**
+    `RegressionDetector` and the gate's suite criterion now report
+    `delta_percent` as `null`, printed `N/A relative to 0`, and a decline no
+    longer reads as a rise. The verdict does not change. A nonzero change
+    from 0 is unbounded relative to it, so its severity is `severe`, and a
+    significant one blocks at every `--fail-on-regression` level (exit 1),
+    as before.
+  - **Python-visible type changes.** `ComparisonResult.relative_delta`,
+    `MetricRegression.delta_percent` and `SuiteGateResult.delta_percent` are
+    now `float | None`. Code that formats them must handle `None`, for
+    example with `tracelens.baselines.comparison.format_delta_percent`, and
+    code that reads a direction from them should read `delta` instead.
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval

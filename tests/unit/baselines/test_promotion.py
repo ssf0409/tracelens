@@ -150,9 +150,13 @@ class TestTaskBaselineCanPromote:
         assert can_promote is True
         assert "criteria met" in reason.lower()
 
-    def test_a_zero_baseline_metric_cannot_show_relative_improvement(self):
-        """A rise from 0 has no relative size, so it neither earns nor blocks
-        promotion; only the metrics with a nonzero baseline are weighed."""
+    def test_a_zero_baseline_metric_is_left_out_of_promotion(self):
+        """Pins current behaviour: a metric whose baseline is 0 is skipped in
+        either direction. A rise from 0 does not earn promotion (alone, it
+        leaves no comparable metric), and a fall from 0 does not prevent it
+        when another metric improved. Downstream promotion ratchets rely on
+        this; the test records the behaviour, not a judgment that a fall from
+        0 should be ignored."""
         baseline = TaskBaseline(
             task_id="test",
             baseline_type=BaselineType.CAPABILITY,
