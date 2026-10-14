@@ -257,7 +257,7 @@ the expensive part). The result fields:
 | Field | Meaning |
 | --- | --- |
 | `delta` | `current.mean - baseline.mean` (here, v2 − v1) |
-| `relative_delta` | `delta / |baseline.mean|` |
+| `relative_delta` | `delta / abs(baseline.mean)`; `None` when the baseline mean is 0, and `unavailable_fields` then lists it |
 | `ci_lower`, `ci_upper` | bootstrap 95% CI **of the difference** |
 | `is_significant` | `True` when the CI excludes 0 |
 | `cohens_d` | effect size (standardized magnitude) |

@@ -165,6 +165,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   rose from 0 under a relative-only threshold used to read
   `regression: True` and now reads `None`. Rows against a nonzero baseline
   are unchanged, key for key. (#NNN)
+- **`relative_delta` against a zero mean is unavailable, not `+inf`.**
+  `compare_metrics` and `compare_to_baseline_summary`, and through them
+  `BaselineManager.compare_to_baseline_with_ci`, reported
+  `relative_delta = +inf` for a move off a zero baseline mean in either
+  direction. A decline from 0 read as an unbounded rise, and the result
+  could not be written with `json.dumps(..., allow_nan=False)`.
+  `relative_delta` is now `None` whenever the baseline mean is 0, and
+  `ComparisonResult.unavailable_fields` lists it. `to_dict()` and the
+  `compare_to_baseline_with_ci` row carry
+  `unavailable_fields: ["relative_delta"]` only then. The verdicts
+  (`is_significant`, `is_regression`, `is_improvement`) read the signed
+  `delta` and do not change. Comparisons against a nonzero mean are
+  unchanged, key for key. Two things consumers may notice:
+  `ComparisonResult.relative_delta` is now typed `float | None`, and a
+  zero mean that did not move reads `None` where it read `0.0`, because
+  0 / 0 is undefined. (#189)
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval

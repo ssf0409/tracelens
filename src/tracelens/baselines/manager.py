@@ -1048,6 +1048,10 @@ class BaselineManager:
             - baseline: MetricEstimate for baseline
             - current: MetricEstimate for current
             - delta: point estimate of difference
+            - relative_delta: delta / |baseline mean|, or None when the
+                baseline mean is 0
+            - unavailable_fields: present only when a field is None because
+                it could not be determined; lists those fields
             - ci_lower, ci_upper: CI bounds for difference
             - is_significant: True if CI doesn't include 0
             - is_regression: True if significant decline
@@ -1108,6 +1112,10 @@ class BaselineManager:
                 "effect_magnitude": comparison.effect_magnitude,
                 "p_value": comparison.p_value,
                 "higher_is_better": metric_baseline.higher_is_better,
+                # Present only when relative_delta is unavailable (a zero
+                # baseline mean), so other rows keep their shape.
+                **({"unavailable_fields": comparison.unavailable_fields}
+                   if comparison.unavailable_fields else {}),
             }
 
         return comparisons
