@@ -594,14 +594,18 @@ A number that was not measured is **unavailable**, never zero:
   direction too. One function,
   `tracelens.statistics.availability.relative_to_baseline`, defines the
   rule, and every relative change against a stored baseline goes through
-  it. The number is unavailable, but a bound on it is not: a relative bound
+  it. (A change tolerance bounds `|delta|` directly instead, and reaches the
+  same verdict at zero; see
+  [Deterministic comparison policy](#deterministic-comparison-policy).)
+  The number is unavailable, but a bound on it is not: a relative bound
   `r × |0| = 0` allows no movement, so any move in the worse direction
   exceeds every relative threshold and every severity bin, the verdict a
   baseline of 1e-300 gives. Callers decide from the signed `delta`.
     - `BaselineManager.compare_to_baseline` reports `relative_change: null`
       with `unavailable_fields: ["relative_change"]`, and with a relative
-      threshold set any worsening is a regression; `regression` stays a
-      boolean. Rows against a nonzero baseline have no `unavailable_fields`
+      threshold set any worsening is a regression; `regression` in a
+      matched row stays a boolean (only a `coverage="strict"` row for a
+      missing metric carries `None`). Rows against a nonzero baseline have no `unavailable_fields`
       key. Each threshold is the largest allowed worsening:
       `regression_threshold_absolute` in metric units written as a negative
       number, `regression_threshold_relative` as a positive fraction of
@@ -676,7 +680,9 @@ zero-filled and carry no regression verdict. An empty current sample list in
 
 Optional metric `change_tolerance_absolute` and `change_tolerance_relative`
 add a two-sided `changed` flag: absolute delta exceeds the absolute limit or
-the relative limit times baseline magnitude. This flag is separate from
+the relative limit times baseline magnitude. At a zero baseline a relative
+tolerance therefore allows no movement, the same rule the availability
+section gives a relative regression threshold. This flag is separate from
 regression direction and statistical significance. In the CI method, it tests
 the current mean only; it makes no distributional or equivalence claim. The
 statistical CLI gate continues to use `RegressionDetector` and its policy above;

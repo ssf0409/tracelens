@@ -326,9 +326,10 @@ refuses an existing baseline. The fixture demonstrates a local workflow, not an
 external service integration. Its Python gate policy is separate from
 `tracelens run --baseline-check`, which uses `RegressionDetector` and a limited
 CLI metric set; these API options do not add CLI gate behavior.
-Unbounded derived values (such as relative change from a zero baseline) are
-written as JSON `null` and named in the row's `unavailable_fields`; the consumer
-decision still uses the actual comparison flags.
+The comparison rows are strict JSON as returned: a value with no number, such
+as the relative change from a zero baseline, is `null` and named in the row's
+`unavailable_fields`, and the gate decides from the comparison flags, not from
+those values.
 
 ## Two-sided change tolerances
 
@@ -379,8 +380,9 @@ Only metrics with a configured tolerance add `changed: True | False` to their
 matched comparison row. The existing `delta`, `relative_change`, `z_score`, and
 `regression` are preserved. Old files without these fields load with tolerances
 disabled and retain the previous comparison dictionary. `None` disables a bound.
-The legacy zero-baseline `relative_change` may still be infinite; the change
-check uses the absolute bound formula above and does not depend on that value.
+Against a zero baseline `relative_change` is `None` and listed in
+`unavailable_fields`; the change check bounds `abs(current - baseline)`
+directly and does not depend on it.
 
 Both comparison methods support tolerances. In `compare_to_baseline_with_ci`,
 `changed` compares the current sample **mean** with the stored value. It is

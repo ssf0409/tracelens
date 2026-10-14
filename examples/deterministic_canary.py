@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import json
 import sys
-from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -74,20 +73,6 @@ class WorkflowMetrics(CodeGrader):
     def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
         # Producing well-formed metrics is distinct from matching the frozen reference.
         return True, 1.0
-
-
-def json_comparisons(comparisons: dict[str, Any]) -> dict[str, Any]:
-    """Preserve verdicts while representing unbounded derived values explicitly."""
-    result = {}
-    for name, row in comparisons.items():
-        unavailable = [
-            key for key, value in row.items()
-            if isinstance(value, float) and not isfinite(value)
-        ]
-        result[name] = {key: None if key in unavailable else value for key, value in row.items()}
-        if unavailable:
-            result[name]["unavailable_fields"] = unavailable
-    return result
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -166,7 +151,7 @@ async def run(args: argparse.Namespace) -> int:
     gate = {
         "status": "blocked" if blocked else "passed", "exit_code": exit_code,
         "coverage": "strict", "scenario": args.scenario, "task_hash": task_hash,
-        "metrics": metrics, "comparisons": json_comparisons(comparisons),
+        "metrics": metrics, "comparisons": comparisons,
         "run_id": batch.provenance.run_id if batch.provenance else None,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
