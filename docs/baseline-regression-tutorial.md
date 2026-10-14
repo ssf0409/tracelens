@@ -318,6 +318,76 @@ refuses an existing baseline. The fixture demonstrates a local workflow, not an
 external service integration. Its Python gate policy is separate from
 `tracelens run --baseline-check`, which uses `RegressionDetector` and a limited
 CLI metric set; these API options do not add CLI gate behavior.
+Unbounded derived values (such as relative change from a zero baseline) are
+written as JSON `null` and named in the row's `unavailable_fields`; the consumer
+decision still uses the actual comparison flags.
+
+## Two-sided change tolerances
+
+One-sided `regression_threshold_absolute` / `regression_threshold_relative`
+remain useful for noisy quality metrics. For a frozen deterministic workflow,
+either an increase or a decrease can be unexpected. Declare that expectation
+when recording a metric:
+
+```python
+baseline.add_metric("accepted", 2.0, change_tolerance_absolute=0.0)
+baseline.add_metric("rejected.invalid", 1.0, change_tolerance_absolute=0.0)
+manager.set_baseline(baseline)
+manager.save()
+```
+
+Each configured tolerance is a hard bound:
+
+- Absolute: `abs(current - baseline) > change_tolerance_absolute`.
+- Relative: `abs(current - baseline) > change_tolerance_relative * abs(baseline)`.
+- Setting both means exceeding either bound reports a change; equality is within
+  tolerance. A zero baseline allows no nonzero movement under a relative bound.
+  Use an absolute bound when movement away from zero is acceptable.
+- Tolerances must be finite and nonnegative. Zero requires exact numerical
+  equality with no hidden float epsilon; use an explicit nonzero tolerance for
+  calculated floats that need rounding allowance.
+
+Only metrics with a configured tolerance add `changed: True | False` to their
+matched comparison row. The existing `delta`, `relative_change`, `z_score`, and
+`regression` are preserved. Old files without these fields load with tolerances
+disabled and retain the previous comparison dictionary. `None` disables a bound.
+The legacy zero-baseline `relative_change` may still be infinite; the change
+check uses the absolute bound formula above and does not depend on that value.
+
+Both comparison methods support tolerances. In `compare_to_baseline_with_ci`,
+`changed` compares the current sample **mean** with the stored value. It is
+independent of `is_significant` and `is_regression`; opposing sample changes can
+cancel in the mean. It does not check each sample, distribution stability, or
+statistical equivalence. For a deterministic replay, the point comparison of
+observed counts is sufficient. For noisy scores, retain the statistical tests
+and their evidence requirements.
+
+`update_baseline(..., keep_thresholds=True)` (the default) and both promotion
+paths preserve the tolerance settings and archive them in history.
+`keep_thresholds=False` explicitly clears regression thresholds and change
+tolerances. CANARY baselines continue to require manual promotion.
+Saving rejects invalid assigned tolerances before opening the baseline file,
+so serialization cannot turn a nonfinite bound into a disabled `null` setting.
+
+The recipe records zero absolute tolerances on all metrics and uses strict
+coverage. Its consumer blocks on either coverage findings, regression, or
+`changed`; it does not silently promote a favorable count change:
+
+```bash
+uv run --frozen python examples/deterministic_canary.py check \
+  --baseline /tmp/workflow-canary/baseline.json --scenario increase \
+  --output-dir /tmp/workflow-canary/increase
+uv run --frozen python examples/deterministic_canary.py check \
+  --baseline /tmp/workflow-canary/baseline.json --scenario decrease \
+  --output-dir /tmp/workflow-canary/decrease
+```
+
+Both exit 1: accepted requests move from 2 to 3 or 1, with `changed: true` even
+though `regression: false` (no one-sided threshold was configured). Baselines
+recorded before adding tolerances must be configured and reviewed explicitly;
+enabling a stricter recipe does not rewrite them automatically.
+The `zero-channel` scenario activates the existing `rejected.quota` counter from
+zero to one; it also exits 1 and persists a gate with unavailable relative change.
 
 ## Baseline Review Checklist
 

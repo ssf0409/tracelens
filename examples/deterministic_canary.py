@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import sys
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -22,18 +23,24 @@ from tracelens import (
     Task,
     Transcript,
 )
-from tracelens.baselines import BaselineManager
+from tracelens.baselines import BaselineManager, TaskBaseline
 from tracelens.core.decision_spec import DecisionSpec
 from tracelens.core.provenance import task_content_hash
 
 REPLAY = Path(__file__).with_name("canary_replay.json")
-SCENARIOS = ("unchanged", "missing", "new", "empty")
+SCENARIOS = ("unchanged", "increase", "decrease", "missing", "new", "empty", "zero-channel")
 
 
 async def replay(input_data: dict[str, Any], scenario: str) -> dict[str, Any]:
     decisions = [dict(request) for request in input_data["requests"]]
+    if scenario == "increase":
+        decisions.append(dict(decisions[0]))  # Duplicate-processing fault.
+    elif scenario == "decrease":
+        decisions.pop(0)  # Dropped-request fault.
     if scenario == "new":
         decisions[-1]["reason"] = "permission"
+    elif scenario == "zero-channel":
+        decisions[-1]["reason"] = "quota"
     return {
         "decisions": decisions,
         "emit_accepted": scenario != "missing",
@@ -67,6 +74,20 @@ class WorkflowMetrics(CodeGrader):
         return True, 1.0
 
 
+def json_comparisons(comparisons: dict[str, Any]) -> dict[str, Any]:
+    """Preserve verdicts while representing unbounded derived values explicitly."""
+    result = {}
+    for name, row in comparisons.items():
+        unavailable = [
+            key for key, value in row.items()
+            if isinstance(value, float) and not isfinite(value)
+        ]
+        result[name] = {key: None if key in unavailable else value for key, value in row.items()}
+        if unavailable:
+            result[name]["unavailable_fields"] = unavailable
+    return result
+
+
 async def run(args: argparse.Namespace) -> int:
     baseline_path: Path = args.baseline
     output_dir: Path = args.output_dir
@@ -79,6 +100,12 @@ async def run(args: argparse.Namespace) -> int:
         raise ValueError("Baseline already exists; recording cannot replace it")
     if args.mode == "check" and not baseline_path.is_file():
         raise ValueError("Baseline file does not exist; record the reference first")
+    if args.mode == "check":
+        stored = json.loads(baseline_path.read_text())
+        if not isinstance(stored, dict):
+            raise ValueError("Baseline file must contain a task mapping")
+        for entry in stored.values():
+            TaskBaseline.model_validate(entry)
 
     eval_set = EvalSet.model_validate(json.loads(REPLAY.read_text()))
     task = eval_set.tasks[0]
@@ -107,6 +134,8 @@ async def run(args: argparse.Namespace) -> int:
         if not metrics:
             raise ValueError("Cannot record an empty measurement set")
         baseline = manager.create_canary_baseline(task.task_id, metrics, decision_spec=spec)
+        for name, value in metrics.items():
+            baseline.add_metric(name, value, change_tolerance_absolute=0.0)
         baseline.task_hash = task_hash
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
         manager.save()
@@ -115,14 +144,14 @@ async def run(args: argparse.Namespace) -> int:
 
     comparisons = manager.compare_to_baseline(task.task_id, metrics, coverage="strict")
     blocked = not comparisons or any(
-        row["coverage"] != "matched" or row["regression"]
+        row["coverage"] != "matched" or row["regression"] or row.get("changed", False)
         for row in comparisons.values()
     )
     exit_code = 1 if blocked else 0
     gate = {
         "status": "blocked" if blocked else "passed", "exit_code": exit_code,
         "coverage": "strict", "scenario": args.scenario, "task_hash": task_hash,
-        "metrics": metrics, "comparisons": comparisons,
+        "metrics": metrics, "comparisons": json_comparisons(comparisons),
         "run_id": batch.provenance.run_id if batch.provenance else None,
     }
     output_dir.mkdir(parents=True, exist_ok=True)

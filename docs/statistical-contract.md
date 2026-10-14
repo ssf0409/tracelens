@@ -628,6 +628,25 @@ are never compared across silently different populations.
 | Whether a metric was a proportion was read off the current sample's endpoints, so an infinitesimal change flipped the test family and the verdict | the baseline decides, by declaration or from its stored summary | #111 (fixed) |
 | Each metric received its own Holm family and the suite criterion its own `alpha`, so the run-level rate grew with the number of stored metrics | one family, one budget; the suite criterion reports by default and splits the budget when switched on | #111 (fixed) |
 
+## Deterministic comparison policy
+
+`BaselineManager.compare_to_baseline` is a point-value policy comparison, not
+a significance test. Opt-in `coverage="strict"` reports a changed metric set
+with `missing_from_current` / `missing_from_baseline`; missing values are not
+zero-filled and carry no regression verdict. An empty current sample list in
+`compare_to_baseline_with_ci` is unmeasured under strict coverage.
+
+Optional metric `change_tolerance_absolute` and `change_tolerance_relative`
+add a two-sided `changed` flag: absolute delta exceeds the absolute limit or
+the relative limit times baseline magnitude. This flag is separate from
+regression direction and statistical significance. In the CI method, it tests
+the current mean only; it makes no distributional or equivalence claim. The
+statistical CLI gate continues to use `RegressionDetector` and its policy above;
+these manager options do not change that gate's estimators or exit codes.
+
+See the [baseline tutorial](baseline-regression-tutorial.md#two-sided-change-tolerances)
+for boundary rules and a runnable downstream consumer.
+
 ## Related pages
 
 - [pass@k vs pass^k](pass-at-k-vs-pass-hat-k.md) — what each metric answers.

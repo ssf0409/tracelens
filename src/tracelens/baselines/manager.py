@@ -102,6 +102,11 @@ class MetricBaseline(BaseModel):
     regression_threshold_absolute: float | None = None
     regression_threshold_relative: float | None = None
 
+    # A frozen replay may require stability in both directions. None keeps
+    # one-sided regression semantics; zero explicitly requires exact equality.
+    change_tolerance_absolute: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    change_tolerance_relative: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
     # Direction indicator for proper comparison
     higher_is_better: bool = True  # False for metrics like drawdown
 
@@ -116,6 +121,36 @@ class MetricBaseline(BaseModel):
     # still compared as a continuous metric, because the exact test would
     # otherwise round it to a count nobody measured.
     is_rate: bool | None = None
+
+    def change_exceeds_tolerance(self, current_value: float) -> bool | None:
+        """Return an opt-in stability verdict, independent of significance.
+
+        Each configured limit is a bound: exceeding either means changed.
+        Relative tolerance uses the baseline magnitude, so its allowed
+        absolute movement is zero when the baseline is zero.
+        """
+        absolute = self.change_tolerance_absolute
+        relative = self.change_tolerance_relative
+        if absolute is None and relative is None:
+            return None
+        for tolerance in (absolute, relative):
+            if tolerance is not None and (not isfinite(tolerance) or tolerance < 0):
+                # Models can be mutated after validation. Never let an assigned
+                # NaN tolerance turn every exceedance comparison into False.
+                raise ValueError("Change tolerance must be finite and nonnegative")
+        if not isfinite(current_value) or not isfinite(self.baseline_value):
+            raise ValueError(f"Metric {self.metric_name!r} values must be finite")
+        magnitude = abs(current_value - self.baseline_value)
+        relative_changed = False
+        if relative is not None:
+            limit = relative * abs(self.baseline_value)
+            if not isfinite(magnitude) and not isfinite(limit):
+                # Both sides can overflow for finite, opposite-sign inputs.
+                # Scaling first avoids the misleading comparison inf > inf.
+                relative_changed = abs(current_value / self.baseline_value - 1.0) > relative
+            else:
+                relative_changed = magnitude > limit
+        return (absolute is not None and magnitude > absolute) or relative_changed
 
 
 class TaskBaseline(BaseModel):
@@ -199,6 +234,8 @@ class TaskBaseline(BaseModel):
         relative_threshold: float | None = None,
         higher_is_better: bool = True,
         is_rate: bool | None = None,
+        change_tolerance_absolute: float | None = None,
+        change_tolerance_relative: float | None = None,
     ) -> None:
         """Add or update a metric baseline.
 
@@ -214,6 +251,8 @@ class TaskBaseline(BaseModel):
             regression_threshold_relative=relative_threshold,
             higher_is_better=higher_is_better,
             is_rate=is_rate,
+            change_tolerance_absolute=change_tolerance_absolute,
+            change_tolerance_relative=change_tolerance_relative,
         )
         self.updated_at = utc_now()
 
@@ -380,6 +419,8 @@ class TaskBaseline(BaseModel):
             rel_threshold = None
             higher_is_better = True
             is_rate = None
+            change_absolute = None
+            change_relative = None
 
             if old_metric:
                 abs_threshold = old_metric.regression_threshold_absolute
@@ -389,6 +430,8 @@ class TaskBaseline(BaseModel):
                 # it decides which test compares the metric, so dropping it
                 # here would silently change the test family on promotion.
                 is_rate = old_metric.is_rate
+                change_absolute = old_metric.change_tolerance_absolute
+                change_relative = old_metric.change_tolerance_relative
 
             self.add_metric(
                 metric_name=metric_name,
@@ -399,6 +442,8 @@ class TaskBaseline(BaseModel):
                 relative_threshold=rel_threshold,
                 higher_is_better=higher_is_better,
                 is_rate=is_rate,
+                change_tolerance_absolute=change_absolute,
+                change_tolerance_relative=change_relative,
             )
 
         # Update metadata
@@ -510,6 +555,11 @@ class BaselineManager:
 
         data = {}
         for task_id, baseline in self._baselines.items():
+            for metric in baseline.metrics.values():
+                # Pydantic JSON serialization maps nonfinite floats to null.
+                # An invalid assigned tolerance must never become a disabled
+                # tolerance on disk. Validate before opening the destination.
+                metric.change_exceeds_tolerance(metric.baseline_value)
             data[task_id] = json.loads(baseline.model_dump_json())
 
         with open(self.baselines_path, "w") as f:
@@ -590,6 +640,8 @@ class BaselineManager:
             abs_threshold = None
             rel_threshold = None
             higher_is_better = True
+            change_absolute = None
+            change_relative = None
             # The metric's type is part of its definition, not of the
             # thresholds, so it follows the metric across an update whether
             # or not the caller asked to keep thresholds.
@@ -599,6 +651,8 @@ class BaselineManager:
                 abs_threshold = old_metric.regression_threshold_absolute
                 rel_threshold = old_metric.regression_threshold_relative
                 higher_is_better = old_metric.higher_is_better
+                change_absolute = old_metric.change_tolerance_absolute
+                change_relative = old_metric.change_tolerance_relative
 
             existing.add_metric(
                 metric_name=metric_name,
@@ -609,6 +663,8 @@ class BaselineManager:
                 relative_threshold=rel_threshold,
                 higher_is_better=higher_is_better,
                 is_rate=is_rate,
+                change_tolerance_absolute=change_absolute,
+                change_tolerance_relative=change_relative,
             )
 
         if decision_spec is not None:
@@ -668,6 +724,8 @@ class BaselineManager:
             - relative_change: relative difference
             - regression: True if regression detected
             - z_score: standard score if std available
+            - changed: present only with a configured two-sided tolerance;
+                True when either limit is exceeded, independently of regression
         """
         self._validate_coverage(coverage)
         baseline = self.get_baseline(task_id)
@@ -733,6 +791,9 @@ class BaselineManager:
                 "z_score": z_score,
                 "higher_is_better": metric_baseline.higher_is_better,
             }
+            changed = metric_baseline.change_exceeds_tolerance(current_value)
+            if changed is not None:
+                comparisons[metric_name]["changed"] = changed
 
         if coverage == "strict":
             for row in comparisons.values():
@@ -1082,6 +1143,8 @@ class BaselineManager:
             - is_significant: True if CI doesn't include 0
             - is_regression: True if significant decline
             - cohens_d: Effect size
+            - changed: opt-in tolerance check on the current mean; independent
+                of is_significant and is_regression, not a per-sample check
         """
         self._validate_coverage(coverage)
         baseline = self.get_baseline(task_id)
@@ -1150,6 +1213,9 @@ class BaselineManager:
                 "p_value": comparison.p_value,
                 "higher_is_better": metric_baseline.higher_is_better,
             }
+            changed = metric_baseline.change_exceeds_tolerance(current_est.mean)
+            if changed is not None:
+                comparisons[metric_name]["changed"] = changed
 
         if coverage == "strict":
             for row in comparisons.values():

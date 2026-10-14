@@ -86,3 +86,45 @@ def test_a_changed_fixture_is_not_the_same_replay(recorded_canary: Path) -> None
     path.write_text(json.dumps(data))
     invoke(project, "check", "--baseline", "baseline.json", "--output-dir", "changed-task", expect=2)
     assert not (project / "changed-task" / "trials.json").exists()
+
+
+@pytest.mark.parametrize("scenario,count", [("increase", 3), ("decrease", 1)])
+def test_value_changes_in_either_direction_block(recorded_canary: Path, scenario: str, count: int) -> None:
+    project = recorded_canary
+    frozen = (project / "baseline.json").read_bytes()
+    invoke(project, "check", "--baseline", "baseline.json", "--scenario", scenario,
+           "--output-dir", scenario, expect=1)
+    gate = json.loads((project / scenario / "gate.json").read_text())
+    row = gate["comparisons"]["accepted"]
+    assert row["coverage"] == "matched"
+    assert row["current"] == count
+    assert row["changed"] is True
+    assert row["regression"] is False
+    assert gate["status"] == "blocked"
+    assert (project / "baseline.json").read_bytes() == frozen
+
+
+@pytest.mark.parametrize("invalid", [[], {"fixed-workflow": []}, {"fixed-workflow": {"metrics": []}}])
+def test_invalid_baseline_structure_is_an_input_error(recorded_canary: Path, invalid: object) -> None:
+    project = recorded_canary
+    (project / "baseline.json").write_text(json.dumps(invalid))
+    invoke(project, "check", "--baseline", "baseline.json", "--output-dir", "bad-shape", expect=2)
+    assert not (project / "bad-shape" / "trials.json").exists()
+
+
+def test_a_known_zero_counter_change_persists_a_blocked_gate(recorded_canary: Path) -> None:
+    project = recorded_canary
+    frozen = (project / "baseline.json").read_bytes()
+    invoke(project, "check", "--baseline", "baseline.json", "--scenario", "zero-channel",
+           "--output-dir", "zero-channel", expect=1)
+    gate = json.loads((project / "zero-channel" / "gate.json").read_text())
+    row = gate["comparisons"]["rejected.quota"]
+    assert row["baseline"] == 0
+    assert row["current"] == 1
+    assert row["changed"] is True
+    assert row["relative_change"] is None
+    assert row["unavailable_fields"] == ["relative_change"]
+    assert gate["status"] == "blocked"
+    assert gate["exit_code"] == 1
+    assert (project / "zero-channel" / "trials.json").is_file()
+    assert (project / "baseline.json").read_bytes() == frozen

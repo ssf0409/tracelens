@@ -25,16 +25,16 @@ gate over a frozen replay. TraceLens remains domain-neutral.
 - [x] Establish a clean `make verify` baseline on current main.
 - [x] #185 RED/GREEN: missing/new metrics, empty input, no task baseline,
   legacy dictionary compatibility, CI coverage and invalid coverage options.
-- [ ] #184 RED/GREEN: both directions, both better-direction declarations,
+- [x] #184 RED/GREEN: both directions, both better-direction declarations,
   zero/nonzero limits, exact boundary, relative negative/zero baselines,
   invalid/nonfinite data, persistence/update/promotion/history, CI mean flags.
-- [ ] Add a frozen task and runnable replay gate. Store baseline once; reload it
+- [x] Add a frozen task and runnable replay gate. Store baseline once; reload it
   on subsequent runs, preserve it byte-for-byte, persist trials and gate evidence.
-- [ ] Subprocess E2E: unchanged, increase, decrease, missing metric, new metric,
+- [x] Subprocess E2E: unchanged, increase, decrease, missing metric, new metric,
   no metrics, invalid baseline. Check exit codes and saved findings.
-- [ ] Run `make verify`, `make docs`, the example directly, and the E2E tests
+- [x] Run `make verify`, `make docs`, the example directly, and the E2E tests
   against a built wheel in a clean environment outside the editable checkout.
-- [ ] Review the final diff and prepare scoped commits and PR descriptions.
+- [x] Review the final diff and prepare scoped commits and PR descriptions.
 
 ## Coordination and evidence
 
@@ -50,3 +50,29 @@ Verification outputs and any changes to these decisions are recorded below.
   Strict documentation build: `Documentation built in 1.88 seconds`.
 - CI coverage also retains an unknown metric with an empty sample list;
   dropping it would silently hide a measurement-set change (RED/GREEN covered).
+- #184 initial API and recipe checks: `70 passed in 26.76s`; full gate before
+  independent review: `1503 passed in 168.99s`, coverage 96.19%.
+- Independent review found three important counterexamples despite those checks:
+  zero-baseline relative change broke JSON persistence, mutated nonfinite
+  tolerances serialized as disabled nulls, and relative limits could overflow.
+  Each has a failing regression followed by a fix; `10 passed in 1.94s`.
+- Persistence validates configured bounds before opening the baseline file;
+  this preserves existing model assignment behavior while preventing an invalid
+  bound from becoming disabled on disk. Relative overflow is scaled before the
+  comparison. The recipe represents nonfinite derived fields as unavailable
+  without changing the legacy API dictionary.
+- Final targeted API and recipe validation: `80 passed in 26.61s`.
+- Rebuilt wheel installed into `/tmp/tracelens-canary-wheel`; its installed
+  manager source matches the checkout byte-for-byte. All installed-package
+  journeys: `15 passed in 66.41s`, run outside the editable checkout.
+- Direct wheel-backed replay: record/check unchanged exit 0; increase, decrease,
+  missing, new, empty, and zero-channel exit 1. All checks leave baseline bytes
+  unchanged and persisted `gate.json` agrees with stdout and the process exit.
+- Review scope: the statistical CLI gate remains separate, CI tolerance checks
+  the mean only, and the example validates an offline workflow. External
+  downstream services are not claimed as exercised by this fixture.
+- Final full regression gate after review fixes: `1513 passed in 154.48s`,
+  coverage 96.20%, `verify passed`; lint and strict typechecking passed.
+  Strict docs build: `Documentation built in 1.82 seconds`.
+- Deliver two review units: strict coverage first, then two-sided tolerance on
+  top of it. Both remain draft until maintainer review and merge.
