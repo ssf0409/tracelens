@@ -16,7 +16,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
   thresholds and promotion retain the settings and their history. The CI method
   checks its current mean. Existing baseline files and unconfigured comparison
   rows retain their behavior. The frozen canary recipe blocks both upward and
-  downward count changes. (#184)
+  downward count changes, and refuses a baseline in which any metric has no
+  tolerance. (#184)
 - Opt-in `coverage="strict"` on both `BaselineManager` comparison methods
   reports metrics missing from current or baseline, including empty current
   sample lists. Missing measurements carry no regression verdict and are never

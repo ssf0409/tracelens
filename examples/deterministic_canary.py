@@ -41,7 +41,8 @@ async def replay(input_data: dict[str, Any], scenario: str) -> dict[str, Any]:
         # Unknown-reason fault: an added rejection, so no known count moves.
         decisions.append({"id": "d", "approved": False, "reason": "permission"})
     elif scenario == "zero-channel":
-        decisions[-1]["reason"] = "quota"
+        # A known counter recorded at zero activates; no other count moves.
+        decisions.append({"id": "d", "approved": False, "reason": "quota"})
     return {
         "decisions": decisions,
         "emit_accepted": scenario != "missing",
@@ -118,6 +119,18 @@ async def run(args: argparse.Namespace) -> int:
             raise ValueError("No populated baseline for this task")
         if baseline.task_hash != task_hash:
             raise ValueError("Frozen task changed; compare only the recorded task")
+        # A metric with no tolerance has no `changed` verdict, so it could move
+        # freely: recorded before tolerances existed, or added by promotion.
+        unprotected = sorted(
+            name for name, metric in baseline.metrics.items()
+            if metric.change_tolerance_absolute is None
+            and metric.change_tolerance_relative is None
+        )
+        if unprotected:
+            raise ValueError(
+                f"Metrics without a change tolerance: {', '.join(unprotected)}; "
+                "review them and set one before checking"
+            )
 
     async def candidate(input_data: dict[str, Any]) -> dict[str, Any]:
         return await replay(input_data, args.scenario)
@@ -135,8 +148,9 @@ async def run(args: argparse.Namespace) -> int:
         if not metrics:
             raise ValueError("Cannot record an empty measurement set")
         baseline = manager.create_canary_baseline(task.task_id, metrics, decision_spec=spec)
-        for name, value in metrics.items():
-            baseline.add_metric(name, value, change_tolerance_absolute=0.0)
+        for metric in baseline.metrics.values():
+            # Assign, not add_metric(): that would replace the whole metric.
+            metric.change_tolerance_absolute = 0.0
         baseline.task_hash = task_hash
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
         manager.save()
@@ -145,7 +159,7 @@ async def run(args: argparse.Namespace) -> int:
 
     comparisons = manager.compare_to_baseline(task.task_id, metrics, coverage="strict")
     blocked = not comparisons or any(
-        row["coverage"] != "matched" or row["regression"] or row.get("changed", False)
+        row["coverage"] != "matched" or row["regression"] or row.get("changed", True)
         for row in comparisons.values()
     )
     exit_code = 1 if blocked else 0

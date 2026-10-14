@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from tracelens.baselines import BaselineManager
+
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 PYTHON = os.environ.get("TRACELENS_CANARY_PYTHON", sys.executable)
 
@@ -109,6 +111,7 @@ def test_value_changes_in_either_direction_block(recorded_canary: Path, scenario
     invoke(project, "check", "--baseline", "baseline.json", "--scenario", scenario,
            "--output-dir", scenario, expect=1)
     gate = json.loads((project / scenario / "gate.json").read_text())
+    assert moved(gate) == {"accepted"}
     row = gate["comparisons"]["accepted"]
     assert row["coverage"] == "matched"
     assert row["current"] == count
@@ -132,6 +135,7 @@ def test_a_known_zero_counter_change_persists_a_blocked_gate(recorded_canary: Pa
     invoke(project, "check", "--baseline", "baseline.json", "--scenario", "zero-channel",
            "--output-dir", "zero-channel", expect=1)
     gate = json.loads((project / "zero-channel" / "gate.json").read_text())
+    assert moved(gate) == {"rejected.quota"}
     row = gate["comparisons"]["rejected.quota"]
     assert row["baseline"] == 0
     assert row["current"] == 1
@@ -142,3 +146,29 @@ def test_a_known_zero_counter_change_persists_a_blocked_gate(recorded_canary: Pa
     assert gate["exit_code"] == 1
     assert (project / "zero-channel" / "trials.json").is_file()
     assert (project / "baseline.json").read_bytes() == frozen
+
+
+@pytest.mark.parametrize("unprotected", ["recorded_before_tolerances", "accepted_by_promotion"])
+def test_a_metric_without_a_change_tolerance_is_refused(recorded_canary: Path, unprotected: str) -> None:
+    project = recorded_canary
+    path = project / "baseline.json"
+    if unprotected == "recorded_before_tolerances":
+        # The shape a coverage-only recording has: no tolerance fields at all.
+        data = json.loads(path.read_text())
+        for metric in data["fixed-workflow"]["metrics"].values():
+            del metric["change_tolerance_absolute"], metric["change_tolerance_relative"]
+        path.write_text(json.dumps(data))
+        name, scenario = "accepted", "increase"
+    else:
+        # A reviewed new reason accepted with force_promote starts with no tolerance.
+        manager = BaselineManager(path)
+        baseline = manager.get_baseline("fixed-workflow")
+        assert baseline is not None
+        values = {name: metric.baseline_value for name, metric in baseline.metrics.items()}
+        manager.force_promote("fixed-workflow", {**values, "rejected.permission": 1.0}, reason="reviewed")
+        manager.save()
+        name, scenario = "rejected.permission", "new"
+    result = invoke(project, "check", "--baseline", "baseline.json", "--scenario", scenario,
+                    "--output-dir", "unprotected", expect=2)
+    assert name in result.stderr
+    assert not (project / "unprotected" / "trials.json").exists()

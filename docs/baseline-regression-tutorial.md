@@ -327,14 +327,27 @@ decision still uses the actual comparison flags.
 One-sided `regression_threshold_absolute` / `regression_threshold_relative`
 remain useful for noisy quality metrics. For a frozen deterministic workflow,
 either an increase or a decrease can be unexpected. Declare that expectation
-when recording a metric:
+on each metric:
 
 ```python
-baseline.add_metric("accepted", 2.0, change_tolerance_absolute=0.0)
-baseline.add_metric("rejected.invalid", 1.0, change_tolerance_absolute=0.0)
-manager.set_baseline(baseline)
+from tracelens.baselines import BaselineManager
+
+manager = BaselineManager("eval/baselines/canary-baselines.json")
+baseline = manager.create_canary_baseline(
+    task_id="fixed-workflow",
+    metrics={"accepted": 2.0, "rejected.invalid": 1.0},
+    fingerprint="workflow-v1-replay-2026-10-13",
+)
+for metric in baseline.metrics.values():
+    metric.change_tolerance_absolute = 0.0
 manager.save()
 ```
+
+Assign the field, as above, on new and existing metrics alike.
+`TaskBaseline.add_metric()` also accepts `change_tolerance_absolute` and
+`change_tolerance_relative`, but it replaces the whole metric: every setting it
+is not given (`std_deviation`, `sample_size`, regression thresholds,
+`higher_is_better`, `is_rate`) returns to its default.
 
 Each configured tolerance is a hard bound:
 
@@ -366,6 +379,10 @@ and their evidence requirements.
 paths preserve the tolerance settings and archive them in history.
 `keep_thresholds=False` explicitly clears regression thresholds and change
 tolerances. CANARY baselines continue to require manual promotion.
+Tolerances are carried forward only for metrics the baseline already had. A
+metric that promotion or `update_baseline` adds for the first time, such as a
+new failure reason accepted with `force_promote`, starts with tolerances
+disabled; set its tolerance as part of that review.
 Saving rejects invalid assigned tolerances before opening the baseline file,
 so serialization cannot turn a nonfinite bound into a disabled `null` setting.
 
@@ -383,9 +400,12 @@ uv run --frozen python examples/deterministic_canary.py check \
 ```
 
 Both exit 1: accepted requests move from 2 to 3 or 1, with `changed: true` even
-though `regression: false` (no one-sided threshold was configured). Baselines
-recorded before adding tolerances must be configured and reviewed explicitly;
-enabling a stricter recipe does not rewrite them automatically.
+though `regression: false` (no one-sided threshold was configured). A metric
+without a tolerance has no `changed` verdict and could move freely, so the check
+refuses, with exit 2 before replay, a baseline in which any metric lacks one:
+a baseline recorded before tolerances existed, or a metric first added by
+promotion. Review those metrics and set their tolerances explicitly; the recipe
+never rewrites the baseline.
 The `zero-channel` scenario activates the existing `rejected.quota` counter from
 zero to one; it also exits 1 and persists a gate with unavailable relative change.
 
