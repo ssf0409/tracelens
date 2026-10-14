@@ -17,10 +17,7 @@ Statuses:
 - ``unevaluable`` -- no task could be compared, a baseline-backed task had
   no gradable trials or no comparable metric, or no test in the run could
   have rejected at these sample sizes. Missing evidence never authorizes a
-  passing gate (exit 2), and it takes precedence over ``blocked``. Also
-  unevaluable, but yielding to ``blocked``: a significant regression from a
-  zero baseline mean, which has no relative size and so no severity to
-  compare with a threshold above ``minor``.
+  passing gate (exit 2), and it takes precedence over ``blocked``.
 
 The decision procedure (``docs/statistical-contract.md``, "Baseline
 regression detection") spends one run-level error budget ``alpha``:
@@ -63,8 +60,8 @@ from tracelens.baselines.comparison import (
     RegressionSeverity,
     format_delta_percent,
     holm_adjusted,
-    reaches_threshold,
     relative_change,
+    severity_at_least,
     severity_for,
 )
 from tracelens.baselines.manager import BaselineManager
@@ -276,8 +273,7 @@ class SuiteGateResult:
     baseline_mean: float
     current_mean: float
     delta: float
-    # ``None`` when the baseline mean is 0, and ``severity`` with it.
-    delta_percent: float | None
+    delta_percent: float | None  # None when the baseline mean is 0
     ci_lower: float | None = None
     ci_upper: float | None = None
     p_value: float | None = None
@@ -285,7 +281,7 @@ class SuiteGateResult:
     confidence: float = _SUITE_CONFIDENCE
     n_bootstrap: int = _SUITE_BOOTSTRAP
     seed: int | None = 0
-    severity: RegressionSeverity | None = RegressionSeverity.NONE
+    severity: RegressionSeverity = RegressionSeverity.NONE
     is_regression: bool = False
     is_significant: bool = False
     within_noise_band: bool = False
@@ -303,11 +299,6 @@ class SuiteGateResult:
             f"{self.metric_name}: {self.baseline_mean:.4f} -> {self.current_mean:.4f} "
             f"({format_delta_percent(self.delta_percent)}) over {self.tasks} task(s)"
         )
-        severity = (
-            "severity N/A (no relative size against a zero baseline mean)"
-            if self.severity is None
-            else self.severity.value
-        )
         if self.ci_lower is not None and self.ci_upper is not None:
             text += (
                 f"; {self.confidence:.0%} CI of the mean difference "
@@ -320,19 +311,17 @@ class SuiteGateResult:
         if not self.is_regression:
             text += "; no drop"
         elif self.blocking:
-            text += f"; significant, {severity}: blocking"
+            text += f"; significant, {self.severity.value}: blocking"
         elif self.within_noise_band:
             text += "; within infra-noise band; not blocking"
         elif self.is_significant and not self.blocking_enabled:
             text += (
-                f"; significant, {severity}: reported only "
+                f"; significant, {self.severity.value}: reported only "
                 "(suite-level blocking is off by default; its level assumes "
                 "independent per-task outcomes)"
             )
-        elif self.is_significant and self.severity is None:
-            text += f"; significant, {severity}, so it cannot be placed against the threshold"
         elif self.is_significant:
-            text += f"; significant, {severity}: below the threshold"
+            text += f"; significant, {self.severity.value}: below the threshold"
         else:
             text += "; not significant"
         return text
@@ -352,7 +341,7 @@ class SuiteGateResult:
             "confidence": self.confidence,
             "n_bootstrap": self.n_bootstrap,
             "seed": self.seed,
-            "severity": None if self.severity is None else self.severity.value,
+            "severity": self.severity.value,
             "is_regression": self.is_regression,
             "is_significant": self.is_significant,
             "within_noise_band": self.within_noise_band,
@@ -364,7 +353,6 @@ class SuiteGateResult:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SuiteGateResult:
         delta_percent = data.get("delta_percent", 0.0)
-        severity = data.get("severity", "none")
         return cls(
             metric_name=str(data["metric_name"]),
             tasks=int(data.get("tasks", 0)),
@@ -379,7 +367,7 @@ class SuiteGateResult:
             confidence=float(data.get("confidence", _SUITE_CONFIDENCE)),
             n_bootstrap=int(data.get("n_bootstrap", _SUITE_BOOTSTRAP)),
             seed=data.get("seed"),
-            severity=None if severity is None else RegressionSeverity(severity),
+            severity=RegressionSeverity(data.get("severity", "none")),
             is_regression=bool(data.get("is_regression", False)),
             is_significant=bool(data.get("is_significant", False)),
             within_noise_band=bool(data.get("within_noise_band", False)),
@@ -667,8 +655,8 @@ def _suite_results(
         if effect.p_value is not None:
             p_one = effect.p_value / 2 if delta < 0 else 1.0 - effect.p_value / 2
             p_one = min(1.0, max(0.0, p_one))
-        # A change from a zero mean has no relative size to hold against the
-        # floor, so any decline is reported (and carries no severity).
+        # A change from a zero mean has no percentage to hold against the
+        # floor, so any decline is reported.
         is_regression = delta < 0 and (
             delta_percent is None or abs(delta_percent) >= min_delta_percent
         )
@@ -694,7 +682,7 @@ def _suite_results(
             blocking_enabled
             and is_significant
             and not entry["within_noise_band"]
-            and reaches_threshold(entry["severity"], threshold) is True
+            and severity_at_least(entry["severity"], threshold)
         )
         results.append(SuiteGateResult(
             **entry,
@@ -889,18 +877,12 @@ def evaluate_gate(
     family_size = sum(len(t.compared_metrics) for t in checked)
     # The strictest level any test in the run is held to, for the messages.
     per_test_level = min(levels.values(), default=task_alpha)
-    # Significant regressions from a zero baseline mean: no relative size,
-    # so no severity to hold against the threshold.
-    unsized: list[str] = []
     for task in checked:
         report = task.regression_report()
         report.recompute()
         task.has_regression = report.has_regression
         task.overall_severity = report.overall_severity
-        verdict = report.block_verdict(threshold)
-        task.blocking = verdict is True
-        if verdict is None:
-            unsized.extend(f"{task.task_id} ({r.metric_name})" for r in report.unsized_regressions)
+        task.blocking = report.should_block_ci(threshold)
         baseline, current_results = checked_inputs[task.task_id]
         detectable = False
         needed: list[int] = []
@@ -941,15 +923,6 @@ def evaluate_gate(
     ]
     blocking = [t for t in checked if t.blocking]
     blocking_suite = [s for s in suite if s.blocking]
-    unsized.extend(
-        f"suite-level {s.metric_name}"
-        for s in suite
-        if s.blocking_enabled
-        and s.is_significant
-        and not s.within_noise_band
-        and s.severity is None
-        and not s.blocking
-    )
     undetectable = [t for t in checked if not t.detectable]
     # The suite criterion can reject only when it is allowed to block at all
     # and enough tasks could move the same way: its sign-flip p-value is at
@@ -1034,7 +1007,7 @@ def evaluate_gate(
                 f"{len(blocking)} blocking regression(s) at threshold "
                 f"'{threshold.value}': "
                 + ", ".join(
-                    f"{t.task_id} ({t.regression_report().severity_text()})" for t in blocking
+                    f"{t.task_id} ({t.overall_severity.value})" for t in blocking
                 )
             )
         if blocking_suite:
@@ -1042,17 +1015,6 @@ def evaluate_gate(
             reasons.append(
                 f"{len(blocking_suite)} suite-level regression(s) at threshold "
                 f"'{threshold.value}': " + "; ".join(s.describe() for s in blocking_suite)
-            )
-        if status is GateStatus.PASSED and unsized:
-            # A known block already decides the run, so this cause yields to
-            # it; without one the run cannot pass, because each of these may
-            # reach the threshold.
-            status = GateStatus.UNEVALUABLE
-            reasons.append(
-                f"{len(unsized)} significant regression(s) from a zero baseline mean, "
-                "where a change has no relative size, so their severity cannot be "
-                f"compared with '{threshold.value}': " + ", ".join(unsized)
-                + "; at 'minor' any change from 0 is enough to block"
             )
         if status is GateStatus.PASSED:
             reasons.append(
