@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tracelens.baselines.manager import BaselineManager, MetricBaseline, TaskBaseline
@@ -188,3 +189,16 @@ def test_invalid_assigned_tolerance_cannot_be_persisted_as_disabled(
     assert path.read_bytes() == frozen
     restored = BaselineManager(path).compare_to_baseline("replay", {"count": 121})
     assert restored["count"]["changed"] is True
+
+
+@pytest.mark.parametrize("current,changed", [
+    (np.float64(121.0), True), (np.float64(120.0), False), (np.int64(121), True),
+])
+def test_changed_is_a_python_bool_for_numpy_inputs(
+    tmp_path: Path, current: float, changed: bool,
+) -> None:
+    # numpy comparisons return numpy.bool_: `is True` and json.dumps both fail on it.
+    row = make_manager(tmp_path).compare_to_baseline("replay", {"count": current})["count"]
+    assert type(row["changed"]) is bool
+    assert row["changed"] is changed
+    json.dumps({"changed": row["changed"]})

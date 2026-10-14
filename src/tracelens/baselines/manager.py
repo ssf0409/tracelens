@@ -150,7 +150,9 @@ class MetricBaseline(BaseModel):
                 relative_changed = abs(current_value / self.baseline_value - 1.0) > relative
             else:
                 relative_changed = magnitude > limit
-        return (absolute is not None and magnitude > absolute) or relative_changed
+        # bool(): numpy inputs make the comparisons numpy.bool_, which fails
+        # `is True` checks and json.dumps.
+        return bool((absolute is not None and magnitude > absolute) or relative_changed)
 
 
 class TaskBaseline(BaseModel):
