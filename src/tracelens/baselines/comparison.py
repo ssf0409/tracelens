@@ -792,11 +792,15 @@ class RegressionReport(BaseModel):
         """
         return self.block_verdict(threshold, ignore_noise_band) is not False
 
-    def severity_label(self) -> str:
-        """``overall_severity`` for headings, or ``SEVERITY N/A`` when only unsized ones block."""
+    def severity_text(self) -> str:
+        """``overall_severity`` for messages, or ``severity N/A`` when only unsized ones block."""
         if self.overall_severity is RegressionSeverity.NONE and self.unsized_regressions:
-            return "SEVERITY N/A"
-        return self.overall_severity.value.upper()
+            return "severity N/A"
+        return self.overall_severity.value
+
+    def severity_label(self) -> str:
+        """:meth:`severity_text` for headings."""
+        return self.severity_text().upper()
 
     def to_ci_output(self) -> str:
         """Generate CI-friendly output."""

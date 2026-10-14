@@ -197,6 +197,9 @@ class TestGate:
         )
         assert gate.status is GateStatus.BLOCKED and gate.exit_code == 1
         assert gate.tasks[0].blocking
+        # The blocking task is named with an unknown severity, not "none".
+        reason = next(r for r in gate.reasons if "blocking regression(s)" in r)
+        assert "cost (severity N/A)" in reason
 
     def test_a_known_block_elsewhere_decides_the_run(self, tmp_path: Path) -> None:
         gate = evaluate_gate(

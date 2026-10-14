@@ -1034,7 +1034,7 @@ def evaluate_gate(
                 f"{len(blocking)} blocking regression(s) at threshold "
                 f"'{threshold.value}': "
                 + ", ".join(
-                    f"{t.task_id} ({t.overall_severity.value})" for t in blocking
+                    f"{t.task_id} ({t.regression_report().severity_text()})" for t in blocking
                 )
             )
         if blocking_suite:
