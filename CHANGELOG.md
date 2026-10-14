@@ -149,47 +149,51 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
-- **A metric whose baseline is 0 is judged in the right direction.**
-  `BaselineManager.compare_to_baseline` reported `relative_change` as `+inf`
-  for a move off a zero baseline in either direction and applied the
-  one-sided relative threshold to it. With `relative_threshold=0.1`, a
-  higher-is-better P&L that fell from 0 to -50 passed, a lower-is-better
-  loss that improved from 0 to -5 was flagged, and the result could not be
-  written with `json.dumps(..., allow_nan=False)`. A ratio to zero has no
-  size, so `relative_change` is now `None` and the relative threshold does
-  not apply. An absolute threshold, when set, decides. With a relative
-  threshold alone, a move in the worse direction has `regression: None` (no
-  verdict; set an absolute threshold to judge it), and a move in the better
-  direction, or none, is not a regression. Such rows list the fields they
-  could not determine in `unavailable_fields`. A lower-is-better metric that
-  rose from 0 under a relative-only threshold used to read
-  `regression: True` and now reads `None`. Rows against a nonzero baseline
-  are unchanged, key for key. (#188)
-- **`relative_delta` against a zero mean is unavailable, not `+inf`.**
-  `compare_metrics` and `compare_to_baseline_summary`, and through them
-  `BaselineManager.compare_to_baseline_with_ci`, reported
-  `relative_delta = +inf` for a move off a zero baseline mean in either
-  direction. A decline from 0 read as an unbounded rise, and the result
-  could not be written with `json.dumps(..., allow_nan=False)`.
-  `relative_delta` is now `None` whenever the baseline mean is 0, and
-  `ComparisonResult.unavailable_fields` lists it. `to_dict()` and the
-  `compare_to_baseline_with_ci` row carry
-  `unavailable_fields: ["relative_delta"]` only then. The verdicts
-  (`is_significant`, `is_regression`, `is_improvement`) read the signed
-  `delta` and do not change. Comparisons against a nonzero mean are
-  unchanged, key for key. Two things consumers may notice:
-  `ComparisonResult.relative_delta` is now typed `float | None`, and a
-  zero mean that did not move reads `None` where it read `0.0`, because
-  0 / 0 is undefined. (#189)
-- **The baseline gate no longer invents a severity for a change from a zero
-  baseline mean.** `RegressionDetector` and the gate's suite criterion
-  reported `+100%` and `severe` for any move off a zero mean, in either
-  direction, so a significant decline blocked at every
-  `--fail-on-regression` level. `delta_percent` and `severity` are now
-  `null` there (`N/A relative to 0`). Such a change blocks at `minor`;
-  above that a significant one leaves the gate `unevaluable` (exit 2)
-  unless another finding blocks. `should_block_ci()` still returns `True`;
-  `RegressionReport.block_verdict()` returns `None`. (#188)
+- **A change relative to a zero baseline is unavailable, never an invented
+  number.** Three places computed a change relative to a stored baseline,
+  and each substituted a stand-in when the baseline was 0 (`+inf`, or
+  `+100 %`). The stand-in had neither a direction nor a size, and it was
+  then used as a measurement. Metrics that start at 0, such as per-policy
+  P&L or per-reason counters, hit this on every run. One function,
+  `tracelens.statistics.availability.relative_to_baseline`, now defines the
+  rule: against a zero baseline the relative change is `None`, and each
+  caller decides from the signed `delta`. Rows and results list what they
+  could not determine in `unavailable_fields`. Anything against a nonzero
+  baseline is unchanged, key for key. (#188, #189)
+  - **`BaselineManager.compare_to_baseline` judged the wrong direction.**
+    It applied the one-sided relative threshold to `+inf`. With
+    `relative_threshold=0.1`, a higher-is-better P&L that fell from 0 to
+    -50 passed, a lower-is-better loss that improved from 0 to -5 was
+    flagged, and the result could not be written with
+    `json.dumps(..., allow_nan=False)`. Now `relative_change` is `None` and
+    the relative threshold does not apply. An absolute threshold, when set,
+    decides. With a relative threshold alone, a move in the worse direction
+    has `regression: None` (no verdict; set an absolute threshold to judge
+    it), and a move in the better direction, or none, is not a regression.
+    A lower-is-better metric that rose from 0 under a relative-only
+    threshold used to read `regression: True` and now reads `None`.
+  - **`compare_metrics` and `compare_to_baseline_summary`, and through them
+    `compare_to_baseline_with_ci`, reported `relative_delta = +inf`.** A
+    decline from 0 read as an unbounded rise, and the result was not valid
+    strict JSON. `relative_delta` is now `None`, and
+    `ComparisonResult.unavailable_fields` lists it, as do `to_dict()` and
+    the `compare_to_baseline_with_ci` row. The verdicts (`is_significant`,
+    `is_regression`, `is_improvement`) read the signed `delta` and do not
+    change. `ComparisonResult.relative_delta` is now typed `float | None`,
+    and a zero mean that did not move reads `None` where it read `0.0`,
+    because 0 / 0 is undefined.
+  - **The baseline gate invented a severity.** `RegressionDetector` and the
+    gate's suite criterion reported `+100%` and `severe` for any move off a
+    zero mean, in either direction, so a significant decline (or a rise in
+    a lower-is-better metric) blocked at every `--fail-on-regression` level
+    and read as `+100.0%`. `delta_percent` and `severity` are now `null`
+    there, printed as `N/A relative to 0`. Any nonzero change reaches
+    `minor`; whether it reaches a higher level is unknown. So such a change
+    blocks at `minor` (exit 1), and above that a significant one leaves the
+    gate `unevaluable` (exit 2) with the task and metric named, unless
+    another finding blocks the run. Either way CI fails, as before.
+    `should_block_ci()` still returns `True`, and the new
+    `RegressionReport.block_verdict()` returns `None`.
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval
