@@ -17,7 +17,9 @@ from tracelens.baselines.comparison import (
     MetricRegression,
     RegressionReport,
     RegressionSeverity,
-    severity_at_least,
+    format_delta_percent,
+    format_severity,
+    reaches_threshold,
 )
 from tracelens.baselines.manager import BaselineManager
 from tracelens.core.provenance import RunProvenance
@@ -525,10 +527,21 @@ class ReportGenerator:
                     lines.append(task.regression_report().to_ci_output())
                     continue
                 for regression in task.regressions:
+                    unsized = (
+                        regression.is_significant
+                        and not regression.within_noise_band
+                        and regression.severity is None
+                    )
+                    label = (
+                        "significant drop, severity N/A (zero baseline mean)"
+                        if unsized
+                        else "observed drop, not blocking"
+                    )
                     lines.append(
-                        f"[tracelens] observed drop, not blocking: {task.task_id} "
+                        f"[tracelens] {label}: {task.task_id} "
                         f"{regression.metric_name} {regression.baseline_mean:.4f} -> "
-                        f"{regression.current_mean:.4f} ({regression.delta_percent:+.1f}%), "
+                        f"{regression.current_mean:.4f} "
+                        f"({format_delta_percent(regression.delta_percent)}), "
                         f"{regression.evidence_text()}"
                     )
             for suite in report.gate.suite:
@@ -546,7 +559,7 @@ class ReportGenerator:
             # Prefer the noise-aware "blocking" count if specs were provided.
             n_blocking = len(report.regression_report.blocking_regressions)
             n_total = len(report.regression_report.regressions)
-            severity = report.regression_report.overall_severity.value.upper()
+            severity = report.regression_report.severity_label()
             if not report.regression_report.has_regression:
                 # Observed but not significant: say so rather than nothing,
                 # so an underpowered check cannot read as a clean run.
@@ -648,7 +661,7 @@ class ReportGenerator:
             confirmed = report.regression_report.has_regression
             heading = "Regression Alert" if confirmed else "Baseline Comparison"
             if confirmed:
-                severity = report.regression_report.overall_severity.value.upper()
+                severity = report.regression_report.severity_label()
             elif report.regression_report.regressions:
                 severity = "NOT SIGNIFICANT"
             else:
@@ -664,8 +677,8 @@ class ReportGenerator:
                     f"<tr><td>{escape(r.metric_name)}</td>"
                     f"<td>{r.baseline_mean:.4f}</td>"
                     f"<td>{r.current_mean:.4f}</td>"
-                    f"<td>{r.delta_percent:+.1f}%</td>"
-                    f"<td>{r.severity.value}</td>"
+                    f"<td>{format_delta_percent(r.delta_percent)}</td>"
+                    f"<td>{format_severity(r.severity)}</td>"
                     f"<td>{escape(r.evidence_text())}</td></tr>\n"
                 )
             imp_rows = ""
@@ -674,7 +687,7 @@ class ReportGenerator:
                     f"<tr><td>{escape(i.metric_name)}</td>"
                     f"<td>{i.baseline_mean:.4f}</td>"
                     f"<td>{i.current_mean:.4f}</td>"
-                    f"<td>{i.delta_percent:+.1f}%</td></tr>\n"
+                    f"<td>{format_delta_percent(i.delta_percent)}</td></tr>\n"
                 )
             # A report built from a summary rather than from findings has no
             # rows at all. Without this the section is a heading and a
@@ -829,7 +842,7 @@ def _finding_blocks(regression: Any, threshold: RegressionSeverity) -> bool:
     return bool(
         not regression.within_noise_band
         and regression.is_significant
-        and severity_at_least(regression.severity, threshold)
+        and reaches_threshold(regression.severity, threshold) is True
     )
 
 
@@ -853,6 +866,11 @@ def _regression_notes(
         notes.append("within infra-noise band; not blocking")
     elif _finding_blocks(regression, threshold):
         notes.append("blocking")
+    elif regression.is_significant and regression.severity is None:
+        notes.append(
+            "significant; severity N/A (no relative size against a zero baseline "
+            "mean), so it cannot be placed against the threshold"
+        )
     elif regression.is_significant:
         notes.append("significant; below the blocking threshold")
     elif regression.p_value is None:
@@ -900,8 +918,8 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
                 regression.metric_name,
                 f"{regression.baseline_mean:.4f}",
                 f"{regression.current_mean:.4f}",
-                f"{regression.delta_percent:+.1f}%",
-                regression.severity.value,
+                format_delta_percent(regression.delta_percent),
+                format_severity(regression.severity),
                 regression.evidence_text(),
                 _regression_notes(
                     task, regression, threshold, contradicts_record=contradicts

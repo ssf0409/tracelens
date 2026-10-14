@@ -159,7 +159,10 @@ The run is blocked when a live criterion rejects at or above
   to `|baseline mean|`. A change below `min_delta_percent` (default 5 %) is
   not reported. **Severity is derived from `|delta_percent|` alone** (minor
   below 5 %, moderate 5–15 %, severe from 15 %) and is reported next to the
-  evidence, never combined with it.
+  evidence, never combined with it. Against a zero baseline mean the ratio
+  does not exist, so `delta_percent` and severity are both unavailable
+  (`null`; see [Availability](#availability)). There is no relative size to
+  compare with the floor, so every nonzero change from 0 is reported.
 - Evidence: a one-sided p-value in the observed direction.
     - Whether a metric *is* a 0/1 proportion is decided by **the baseline**
       alone: a current sample can never promote a continuous score to a
@@ -234,6 +237,15 @@ The run is blocked when a live criterion rejects at or above
   it, or, when the stored baseline is too small for any check to decide it,
   the size on each side (`trials_needed_on_both_sides`). A 0/1 comparison
   whose sizes cannot reject even a total failure is `undetectable`.
+- A significant finding with no severity (a change from a zero baseline
+  mean) is placed only where its size is known. It changed, so it reaches
+  `minor` and blocks at `--fail-on-regression minor`. Whether it reaches
+  anything higher is unknown, so above `minor` the run is **unevaluable**
+  unless another finding blocks. That cause yields to `blocked`: a known
+  block decides the run whatever the unsized finding's size. It does not
+  justify a pass either, since the finding may reach the threshold.
+  `RegressionReport.block_verdict` returns `None` for this case.
+  `should_block_ci`, a boolean with no third answer, returns `True`.
 - With a `DecisionSpec` on both sides, an absolute delta smaller than the
   noise band (default 0.03 on a 0–1 metric) is marked `within_noise_band` and
   does not block; a changed infrastructure configuration is reported as
@@ -247,7 +259,9 @@ of every task have the same trial count, approximate otherwise). One
 criterion is formed per metric and they share the suite level through the
 same Holm adjustment the per-task family uses, so that half of the budget is
 spent once rather than once per stored metric. It sees a broad regression
-that no single task can show and does not react to one task among many.
+that no single task can show and does not react to one task among many. Its
+`delta_percent` and severity follow the per-task rules, including a zero
+baseline mean, which leaves both unavailable.
 
 It is **reported but not blocking by default.** Sign-flipping is valid only
 when the per-task differences are independent under the null, and task
@@ -581,6 +595,10 @@ A number that was not measured is **unavailable**, never zero:
   reason and the runs required.
 - A suite statistic with zero eligible tasks is `N/A`.
 - An interval that could not be estimated is `N/A`, not `[0, 0]`.
+- A change relative to a zero baseline mean has no size. The gate reports
+  `delta_percent: null` and `severity: null`, rendered as `N/A relative to
+  0`, rather than +100 % and `severe`. The decision uses only what is known
+  (see "Baseline regression detection").
 - JSON output carries availability explicitly; Markdown, HTML, and the CI
   summary render the same meaning.
 
@@ -627,6 +645,7 @@ are never compared across silently different populations.
 | A spread measured as zero on one side switched the comparison to a pooled-variance t-test, assuming a shared population variance nothing showed | Welch throughout; the pooled test is not used | #111 (fixed) |
 | Whether a metric was a proportion was read off the current sample's endpoints, so an infinitesimal change flipped the test family and the verdict | the baseline decides, by declaration or from its stored summary | #111 (fixed) |
 | Each metric received its own Holm family and the suite criterion its own `alpha`, so the run-level rate grew with the number of stored metrics | one family, one budget; the suite criterion reports by default and splits the budget when switched on | #111 (fixed) |
+| `RegressionDetector` and the gate's suite criterion reported `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline read `+100.0%`, any move cleared `min_delta_percent`, and its severity was `severe`, blocking a significant move at every `--fail-on-regression` level | `delta_percent` and severity are unavailable; the finding blocks at `minor` and leaves the run unevaluable above it unless something else blocks | #MMM (fixed) |
 
 ## Related pages
 

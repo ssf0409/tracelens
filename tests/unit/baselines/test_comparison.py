@@ -40,7 +40,8 @@ class TestRegressionSeverity:
         assert not severity_at_least(RegressionSeverity.MINOR, RegressionSeverity.MODERATE)
         assert relative_change(-0.2, 0.8) == pytest.approx(-25.0)
         assert relative_change(0.1, -0.5) == pytest.approx(20.0)
-        assert relative_change(0.3, 0.0) == 100.0 and relative_change(0.0, 0.0) == 0.0
+        # A ratio to zero has no size (test_zero_baseline_gate.py).
+        assert relative_change(0.3, 0.0) is None and relative_change(0.0, 0.0) is None
 
 
 class TestRegressionReport:

@@ -30,6 +30,10 @@ evidence for it. The procedure is specified in ``docs/statistical-contract.md``
   ``underpowered`` and carries the number of trials that would decide it;
   a comparison whose sizes cannot reject even a total failure is
   ``undetectable``.
+- Severity comes from the relative change alone, and a change from a zero
+  baseline mean has none: its ``delta_percent`` and ``severity`` are
+  ``None``. Such a change still reaches ``minor``; whether it reaches a
+  higher threshold is unknown (:meth:`RegressionReport.block_verdict`).
 
 Multiplicity across the tasks of one run belongs to the gate
 (:func:`tracelens.reporting.gate.evaluate_gate`), which Holm-adjusts the
@@ -499,15 +503,21 @@ def severity_at_least(severity: RegressionSeverity, threshold: RegressionSeverit
     return SEVERITY_ORDER.index(severity) >= SEVERITY_ORDER.index(threshold)
 
 
-def relative_change(delta: float, baseline: float) -> float:
-    """``delta`` as a percentage of ``|baseline|`` (100 when the baseline is 0)."""
+def relative_change(delta: float, baseline: float) -> float | None:
+    """``delta`` as a percentage of ``|baseline|``; ``None`` when the baseline is 0.
+
+    A ratio to zero has no size, and any stand-in (the 100 this used to
+    return, or an infinity) would be read as a measured one.
+    """
     if baseline != 0:
         return (delta / abs(baseline)) * 100
-    return 100.0 if delta != 0 else 0.0
+    return None
 
 
-def severity_for(delta_percent: float) -> RegressionSeverity:
-    """Severity from the size of a relative change alone."""
+def severity_for(delta_percent: float | None) -> RegressionSeverity | None:
+    """Severity from the size of a relative change alone; ``None`` without one."""
+    if delta_percent is None:
+        return None
     abs_pct = abs(delta_percent)
     if abs_pct >= 15:
         return RegressionSeverity.SEVERE
@@ -518,6 +528,43 @@ def severity_for(delta_percent: float) -> RegressionSeverity:
     return RegressionSeverity.NONE
 
 
+def reaches_threshold(
+    severity: RegressionSeverity | None, threshold: RegressionSeverity
+) -> bool | None:
+    """Whether a finding's severity is at or above ``threshold``.
+
+    ``None`` when that cannot be known: a finding without a severity (its
+    change has no relative size) still changed, so it reaches ``minor``, but
+    nothing says whether it reaches a higher rung.
+    """
+    if severity is not None:
+        return severity_at_least(severity, threshold)
+    return True if severity_at_least(RegressionSeverity.MINOR, threshold) else None
+
+
+def format_delta_percent(delta_percent: float | None) -> str:
+    """``delta_percent`` for reports, with an unavailable one said in words."""
+    return "N/A relative to 0" if delta_percent is None else f"{delta_percent:+.1f}%"
+
+
+def format_severity(severity: RegressionSeverity | None) -> str:
+    """A severity for reports; ``N/A`` when the change has no relative size."""
+    return "N/A" if severity is None else severity.value
+
+
+def _summary_severity(severity: RegressionSeverity | None) -> str:
+    return "severity N/A" if severity is None else severity.value
+
+
+def _worst_known(findings: Sequence[MetricRegression]) -> RegressionSeverity:
+    """The highest severity on the ladder among findings that have one."""
+    return max(
+        (r.severity for r in findings if r.severity is not None),
+        key=SEVERITY_ORDER.index,
+        default=RegressionSeverity.NONE,
+    )
+
+
 class MetricRegression(BaseModel):
     """One observed change in one metric, with the evidence for it."""
 
@@ -525,7 +572,9 @@ class MetricRegression(BaseModel):
     baseline_mean: float
     current_mean: float
     delta: float
-    delta_percent: float
+    # ``None`` against a zero baseline mean, where a relative size does not
+    # exist (``docs/statistical-contract.md``, "Availability").
+    delta_percent: float | None
 
     # Statistical evidence. ``p_value`` is one-sided in the observed
     # direction and ``None`` when no valid test exists — never a fabricated
@@ -538,8 +587,9 @@ class MetricRegression(BaseModel):
     p_value_adjusted: float | None = None
 
     # Severity is derived from ``delta_percent`` alone and reported next to
-    # significance; blocking needs both.
-    severity: RegressionSeverity
+    # significance; blocking needs both. ``None`` when ``delta_percent`` is:
+    # see :func:`reaches_threshold` for what such a finding can decide.
+    severity: RegressionSeverity | None
 
     # Which tasks were affected
     affected_tasks: list[str] = Field(default_factory=list)
@@ -624,7 +674,8 @@ class RegressionReport(BaseModel):
 
     # Overall assessment. ``has_regression`` is True when a significant drop
     # was observed (whether or not it blocks); ``overall_severity`` is the
-    # worst blocking regression, so it agrees with ``should_block_ci``.
+    # worst blocking regression whose severity is known, so it agrees with
+    # ``should_block_ci`` except for ``unsized_regressions``, which have none.
     has_regression: bool = False
     overall_severity: RegressionSeverity = RegressionSeverity.NONE
 
@@ -671,6 +722,11 @@ class RegressionReport(BaseModel):
         """
         return [r for r in self.regressions if r.is_significant and not r.within_noise_band]
 
+    @property
+    def unsized_regressions(self) -> list[MetricRegression]:
+        """Blocking regressions with no severity (a change from a zero mean)."""
+        return [r for r in self.blocking_regressions if r.severity is None]
+
     def recompute(self) -> None:
         """Refresh ``has_regression`` and ``overall_severity`` from the findings.
 
@@ -678,10 +734,37 @@ class RegressionReport(BaseModel):
         Holm adjustment).
         """
         self.has_regression = bool(self.significant_regressions)
-        self.overall_severity = max(
-            (r.severity for r in self.blocking_regressions),
-            default=RegressionSeverity.NONE,
+        self.overall_severity = _worst_known(self.blocking_regressions)
+
+    def block_verdict(
+        self,
+        threshold: RegressionSeverity = RegressionSeverity.MODERATE,
+        ignore_noise_band: bool = True,
+    ) -> bool | None:
+        """Whether a significant regression reaches ``threshold``.
+
+        ``None`` when none is known to but a regression without a severity
+        might: the decision then cannot be made from this report.
+        ``ignore_noise_band`` is as for :meth:`should_block_ci`.
+        """
+        # When the regressions list is populated, recompute severity from
+        # the significant findings — filtered to blocking_regressions on the
+        # lenient path, unfiltered on the strict path — so the stored
+        # overall_severity can't defeat ignore_noise_band=False and an
+        # underpowered drop can never block. When the list is empty (e.g. a
+        # hand-constructed report where the caller only set
+        # overall_severity), fall back to the declared severity so existing
+        # callers keep working.
+        if not self.regressions:
+            return severity_at_least(self.overall_severity, threshold)
+        considered = (
+            self.blocking_regressions if ignore_noise_band else self.significant_regressions
         )
+        if severity_at_least(_worst_known(considered), threshold):
+            return True
+        if any(r.severity is None for r in considered):
+            return reaches_threshold(None, threshold)
+        return False
 
     def should_block_ci(
         self,
@@ -689,6 +772,11 @@ class RegressionReport(BaseModel):
         ignore_noise_band: bool = True,
     ) -> bool:
         """Determine if CI should be blocked based on severity.
+
+        A significant regression without a severity (a change from a zero
+        baseline mean) blocks at every threshold: it cannot be shown to be
+        below one. :meth:`block_verdict` tells that case apart, and
+        ``evaluate_gate`` reports it as unevaluable instead.
 
         Args:
             threshold: Minimum severity to block. Default: MODERATE
@@ -701,25 +789,13 @@ class RegressionReport(BaseModel):
         Returns:
             True if CI should be blocked
         """
-        # When the regressions list is populated, recompute severity from
-        # the significant findings — filtered to blocking_regressions on the
-        # lenient path, unfiltered on the strict path — so the stored
-        # overall_severity can't defeat ignore_noise_band=False and an
-        # underpowered drop can never block. When the list is empty (e.g. a
-        # hand-constructed report where the caller only set
-        # overall_severity), fall back to the declared severity so existing
-        # callers keep working.
-        if self.regressions:
-            considered = (
-                self.blocking_regressions if ignore_noise_band else self.significant_regressions
-            )
-            effective_severity = max(
-                (r.severity for r in considered),
-                default=RegressionSeverity.NONE,
-            )
-        else:
-            effective_severity = self.overall_severity
-        return severity_at_least(effective_severity, threshold)
+        return self.block_verdict(threshold, ignore_noise_band) is not False
+
+    def severity_label(self) -> str:
+        """``overall_severity`` for headings, or ``SEVERITY N/A`` when only unsized ones block."""
+        if self.overall_severity is RegressionSeverity.NONE and self.unsized_regressions:
+            return "SEVERITY N/A"
+        return self.overall_severity.value.upper()
 
     def to_ci_output(self) -> str:
         """Generate CI-friendly output."""
@@ -727,9 +803,7 @@ class RegressionReport(BaseModel):
 
         if self.regressions:
             if self.has_regression:
-                lines.append(
-                    f"REGRESSION DETECTED [{self.overall_severity.value.upper()}]"
-                )
+                lines.append(f"REGRESSION DETECTED [{self.severity_label()}]")
             else:
                 lines.append(
                     f"No significant regression ({len(self.regressions)} observed "
@@ -742,15 +816,13 @@ class RegressionReport(BaseModel):
                     notes += " [within infra-noise band; not blocking]"
                 lines.append(
                     f"  {reg.metric_name}: {reg.baseline_mean:.4f} -> "
-                    f"{reg.current_mean:.4f} ({reg.delta_percent:+.1f}%){notes}"
+                    f"{reg.current_mean:.4f} ({format_delta_percent(reg.delta_percent)}){notes}"
                 )
         elif self.has_regression:
             # A report a caller built from a summary rather than from
             # findings. It still carries a verdict, and ``should_block_ci``
             # still acts on it, so it must not read as a clean run.
-            lines.append(
-                f"REGRESSION DETECTED [{self.overall_severity.value.upper()}]"
-            )
+            lines.append(f"REGRESSION DETECTED [{self.severity_label()}]")
             if self.summary:
                 lines.append("")
                 lines.append(f"  {self.summary}")
@@ -763,7 +835,7 @@ class RegressionReport(BaseModel):
             for imp in self.improvements:
                 lines.append(
                     f"  {imp.metric_name}: {imp.baseline_mean:.4f} -> "
-                    f"{imp.current_mean:.4f} ({imp.delta_percent:+.1f}%) "
+                    f"{imp.current_mean:.4f} ({format_delta_percent(imp.delta_percent)}) "
                     f"[{imp.evidence_text()}]"
                 )
 
@@ -890,8 +962,13 @@ class RegressionDetector:
         delta = sides.mean_c - sides.mean_b
         delta_percent = relative_change(delta, sides.mean_b)
 
-        # Skip if change is too small
-        if abs(delta_percent) < self.min_delta_percent:
+        # Skip if change is too small. A change from a zero mean has no
+        # relative size to hold against the floor, so any nonzero one is
+        # reported rather than hidden.
+        if delta_percent is None:
+            if delta == 0:
+                return None
+        elif abs(delta_percent) < self.min_delta_percent:
             return None
 
         test, p_value = _p_value(sides, _alternative(sides))
@@ -1034,7 +1111,8 @@ class RegressionDetector:
         for r in regressions:
             lines.append(
                 f"  - {r.metric_name}: {r.baseline_mean:.4f} -> {r.current_mean:.4f} "
-                f"({r.delta_percent:+.1f}%, {r.evidence_text()}) [{r.severity.value}]"
+                f"({format_delta_percent(r.delta_percent)}, {r.evidence_text()}) "
+                f"[{_summary_severity(r.severity)}]"
             )
 
         if improvements:
@@ -1042,7 +1120,7 @@ class RegressionDetector:
             for i in improvements:
                 lines.append(
                     f"  + {i.metric_name}: {i.baseline_mean:.4f} -> {i.current_mean:.4f} "
-                    f"({i.delta_percent:+.1f}%, {i.evidence_text()})"
+                    f"({format_delta_percent(i.delta_percent)}, {i.evidence_text()})"
                 )
 
         return "\n".join(lines)

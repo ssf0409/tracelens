@@ -197,7 +197,7 @@ every output: the exit code, the summary on stdout, and a `gate` object in the
 | `not_requested` | 0 | The run had no `--baseline-check`. | Nothing; no gate was evaluated. |
 | `passed` | 0 | At least one task was compared and nothing blocked. | Merge. |
 | `blocked` | 1 | A regression at or above `--fail-on-regression`, or `--require-baselines` with a task that has no baseline. | Read the regression table, decide whether the change is acceptable, then fix the agent or promote the baseline. |
-| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials, no comparable metric, or content that changed since its baseline was stored. Missing evidence never passes. | Fix the harness failure or baseline mismatch named in the reasons (re-store the baseline of an edited task), then rerun. |
+| `unevaluable` | 2 | No task could be compared, or a baseline-backed task had no gradable trials, no comparable metric, or content that changed since its baseline was stored. Missing evidence never passes. Also: nothing else blocked, but a significant regression moved off a zero baseline mean, where a change has no relative size and so no severity to compare with the threshold. | Fix the harness failure or baseline mismatch named in the reasons (re-store the baseline of an edited task), then rerun. For a change from a zero baseline mean, judge the named regression yourself, or gate at `--fail-on-regression minor`, which any significant change from 0 reaches. |
 
 A misconfigured gate (missing `--baselines-file`, an unreadable baselines
 file, or a gate-only flag without `--baseline-check`) also exits 2, before
@@ -206,7 +206,10 @@ result, 2 usage/input error or unevaluable) described in the
 [User Guide](user-guide.md#exit-codes-and-error-output); pass `--debug` for
 tracebacks on input errors. `unevaluable` takes precedence over `blocked`: an observed
 regression is still recorded, but missing evidence cannot authorize either
-verdict.
+verdict. The zero-baseline case is the exception. Its evidence is complete
+and only the regression's size is undefined, so a block elsewhere in the
+run still decides it, and the gate is `blocked`. In the JSON, such a
+regression has `"delta_percent": null` and `"severity": null`.
 
 The `gate` object in `results.json` (abridged):
 

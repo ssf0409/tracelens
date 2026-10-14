@@ -149,6 +149,26 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **The baseline gate no longer invents a severity for a change from a zero
+  baseline mean.** `RegressionDetector` and the gate's suite criterion
+  reported `delta_percent` as `+100` for any move off a zero mean, in either
+  direction. A P&L that fell from 0 to -5 read `+100.0%`, every move
+  cleared `min_delta_percent`, and its severity came out `severe`. A
+  significant decline therefore blocked at every `--fail-on-regression`
+  level, and a non-significant +0.05 improvement was rated severe as well.
+  A ratio to zero has no size, so `delta_percent` and `severity` are now
+  `null` on such findings and suite results, and reports print `N/A
+  relative to 0`. The decision uses only what is known. The change is
+  nonzero, so it blocks at `minor`. Above that, a significant one leaves the
+  gate `unevaluable` (exit 2, naming the task and metric) unless another
+  finding blocks, which still gives `blocked`. Every nonzero change from 0
+  is reported, because no floor can apply.
+  `RegressionReport.block_verdict()` returns `None` for the undecidable
+  case. `should_block_ci()` still returns `True` there, and
+  `overall_severity` covers known severities only. Code that formats
+  `MetricRegression.delta_percent` or reads `.severity.value` must handle
+  `None`; `format_delta_percent()` and `format_severity()` in
+  `tracelens.baselines.comparison` render both. (#MMM)
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval
