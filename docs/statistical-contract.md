@@ -596,8 +596,10 @@ A number that was not measured is **unavailable**, never zero:
 - A suite statistic with zero eligible tasks is `N/A`.
 - An interval that could not be estimated is `N/A`, not `[0, 0]`.
 - A change relative to a zero baseline is unavailable, not `inf`: a ratio to
-  zero has no size, and an unsigned infinity loses the direction too.
-  `BaselineManager.compare_to_baseline` reports `relative_change: null` and
+  zero has no size, and an unsigned infinity loses the direction too. One
+  function, `tracelens.statistics.availability.relative_to_baseline`,
+  defines the rule, and every relative change against a stored baseline
+  goes through it. `BaselineManager.compare_to_baseline` reports `relative_change: null` and
   does not apply the metric's relative threshold. An absolute threshold,
   when set, decides. With a relative threshold alone, a move in the worse
   direction has `regression: null` (no verdict, never a pass), and a move in

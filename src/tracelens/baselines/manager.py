@@ -292,10 +292,9 @@ class TaskBaseline(BaseModel):
                 continue
 
             baseline_value = metric_baseline.baseline_value
-            if baseline_value == 0:
+            relative_change = relative_to_baseline(current_value - baseline_value, baseline_value)
+            if relative_change is None:
                 continue
-
-            relative_change = (current_value - baseline_value) / abs(baseline_value)
 
             # Adjust for direction
             if not metric_baseline.higher_is_better:
