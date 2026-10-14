@@ -159,7 +159,12 @@ The run is blocked when a live criterion rejects at or above
   to `|baseline mean|`. A change below `min_delta_percent` (default 5 %) is
   not reported. **Severity is derived from `|delta_percent|` alone** (minor
   below 5 %, moderate 5–15 %, severe from 15 %) and is reported next to the
-  evidence, never combined with it.
+  evidence, never combined with it. Against a zero baseline mean
+  `delta_percent` does not exist (`null`, printed `N/A relative to 0`; see
+  [Availability](#availability)). A nonzero change is still unbounded
+  relative to that baseline, so it is beyond every bin: it is always
+  reported, its severity is `severe`, and a baseline of 1e-300 gives the
+  same verdict.
 - Evidence: a one-sided p-value in the observed direction.
     - Whether a metric *is* a 0/1 proportion is decided by **the baseline**
       alone: a current sample can never promote a continuous score to a
@@ -247,7 +252,10 @@ of every task have the same trial count, approximate otherwise). One
 criterion is formed per metric and they share the suite level through the
 same Holm adjustment the per-task family uses, so that half of the budget is
 spent once rather than once per stored metric. It sees a broad regression
-that no single task can show and does not react to one task among many.
+that no single task can show and does not react to one task among many. Its
+`delta_percent` and severity follow the per-task rules: against a zero
+baseline mean `delta_percent` is `null` (`N/A relative to 0`) and a decline
+is `severe`.
 
 It is **reported but not blocking by default.** Sign-flipping is valid only
 when the per-task differences are independent under the null, and task
@@ -581,6 +589,31 @@ A number that was not measured is **unavailable**, never zero:
   reason and the runs required.
 - A suite statistic with zero eligible tasks is `N/A`.
 - An interval that could not be estimated is `N/A`, not `[0, 0]`.
+- A change relative to a zero baseline has no number, never `inf` or a
+  stand-in: a ratio to zero has no size, and an unsigned infinity loses the
+  direction too. One function,
+  `tracelens.statistics.availability.relative_to_baseline`, defines the
+  rule, and every relative change against a stored baseline goes through
+  it. The number is unavailable, but a bound on it is not: a relative bound
+  `r × |0| = 0` allows no movement, so any move in the worse direction
+  exceeds every relative threshold and every severity bin, the verdict a
+  baseline of 1e-300 gives. Callers decide from the signed `delta`.
+    - `BaselineManager.compare_to_baseline` reports `relative_change: null`
+      with `unavailable_fields: ["relative_change"]`, and with a relative
+      threshold set any worsening is a regression; `regression` stays a
+      boolean. Rows against a nonzero baseline have no `unavailable_fields`
+      key. Each threshold is the largest allowed worsening:
+      `regression_threshold_absolute` in metric units written as a negative
+      number, `regression_threshold_relative` as a positive fraction of
+      `|baseline|`. With both set, either one flags.
+    - `compare_metrics` and `compare_to_baseline_summary` report
+      `relative_delta: null`, even when the current mean is 0 too, since
+      0 / 0 is undefined. `ComparisonResult.unavailable_fields` lists it,
+      and so do `to_dict()` and `BaselineManager.compare_to_baseline_with_ci`
+      rows. Their verdicts read the signed `delta`.
+    - The gate's `delta_percent` is `null` against a zero mean (printed
+      `N/A relative to 0`), and its severity is `severe`; see "Baseline
+      regression detection".
 - JSON output carries availability explicitly; Markdown, HTML, and the CI
   summary render the same meaning.
 
@@ -627,6 +660,11 @@ are never compared across silently different populations.
 | A spread measured as zero on one side switched the comparison to a pooled-variance t-test, assuming a shared population variance nothing showed | Welch throughout; the pooled test is not used | #111 (fixed) |
 | Whether a metric was a proportion was read off the current sample's endpoints, so an infinitesimal change flipped the test family and the verdict | the baseline decides, by declaration or from its stored summary | #111 (fixed) |
 | Each metric received its own Holm family and the suite criterion its own `alpha`, so the run-level rate grew with the number of stored metrics | one family, one budget; the suite criterion reports by default and splits the budget when switched on | #111 (fixed) |
+| `BaselineManager.compare_to_baseline` reported `relative_change = +inf` for a move off a zero baseline in either direction and applied the one-sided relative threshold to it, so a higher-is-better metric that fell from 0 passed, a lower-is-better one that improved from 0 was flagged, and the result was not valid JSON | the relative change is unavailable; a relative threshold allows no worsening from 0, so any worsening is a regression, and `regression` stays a boolean | #188 (fixed) |
+| `compare_metrics` and `compare_to_baseline_summary`, and through them `BaselineManager.compare_to_baseline_with_ci`, reported `relative_delta = +inf` for a move off a zero mean in either direction, so a decline read as an unbounded rise and the result was not valid JSON (their verdicts use `delta` and were unaffected) | the relative change is unavailable and named in `unavailable_fields` | #189 (fixed) |
+| `RegressionDetector` and the gate's suite criterion reported `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline read `+100.0%`, any move cleared `min_delta_percent`, and its severity was `severe`, blocking a significant move at every `--fail-on-regression` level | `delta_percent` is unavailable; the change is unbounded relative to 0, so its severity stays `severe` and a significant one blocks at every level, without the invented percentage | #188 (fixed; #190 widened #188's scope from `compare_to_baseline` to the gate) |
+| `TaskBaseline.can_promote` (behind `try_promote`) skips a metric whose stored baseline is 0, so a worsening from 0 neither earns nor blocks promotion, even with `require_all_metrics_improve=True` | a worsening from 0 blocks promotion like any other worsening | open (unchanged by #190, so existing promotion ratchets keep their behavior) |
+| `MetricEstimate.se` is `inf` when `n <= 1`, so `ComparisonResult.to_dict()` and the `current` estimate in `compare_to_baseline_with_ci` rows are not strict JSON whenever a side has one sample, whatever its mean | an unavailable standard error is `null`, never `inf` | open |
 
 ## Deterministic comparison policy
 

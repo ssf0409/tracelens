@@ -17,6 +17,7 @@ from tracelens.baselines.comparison import (
     MetricRegression,
     RegressionReport,
     RegressionSeverity,
+    format_delta_percent,
     severity_at_least,
 )
 from tracelens.baselines.manager import BaselineManager
@@ -528,7 +529,8 @@ class ReportGenerator:
                     lines.append(
                         f"[tracelens] observed drop, not blocking: {task.task_id} "
                         f"{regression.metric_name} {regression.baseline_mean:.4f} -> "
-                        f"{regression.current_mean:.4f} ({regression.delta_percent:+.1f}%), "
+                        f"{regression.current_mean:.4f} "
+                        f"({format_delta_percent(regression.delta_percent)}), "
                         f"{regression.evidence_text()}"
                     )
             for suite in report.gate.suite:
@@ -664,7 +666,7 @@ class ReportGenerator:
                     f"<tr><td>{escape(r.metric_name)}</td>"
                     f"<td>{r.baseline_mean:.4f}</td>"
                     f"<td>{r.current_mean:.4f}</td>"
-                    f"<td>{r.delta_percent:+.1f}%</td>"
+                    f"<td>{format_delta_percent(r.delta_percent)}</td>"
                     f"<td>{r.severity.value}</td>"
                     f"<td>{escape(r.evidence_text())}</td></tr>\n"
                 )
@@ -674,7 +676,7 @@ class ReportGenerator:
                     f"<tr><td>{escape(i.metric_name)}</td>"
                     f"<td>{i.baseline_mean:.4f}</td>"
                     f"<td>{i.current_mean:.4f}</td>"
-                    f"<td>{i.delta_percent:+.1f}%</td></tr>\n"
+                    f"<td>{format_delta_percent(i.delta_percent)}</td></tr>\n"
                 )
             # A report built from a summary rather than from findings has no
             # rows at all. Without this the section is a heading and a
@@ -900,7 +902,7 @@ def _gate_rows(gate: GateResult) -> list[tuple[str, ...]]:
                 regression.metric_name,
                 f"{regression.baseline_mean:.4f}",
                 f"{regression.current_mean:.4f}",
-                f"{regression.delta_percent:+.1f}%",
+                format_delta_percent(regression.delta_percent),
                 regression.severity.value,
                 regression.evidence_text(),
                 _regression_notes(

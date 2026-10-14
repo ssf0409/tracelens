@@ -90,14 +90,16 @@ compare_metrics(
 |---|---|
 | `baseline`, `current` | The two `MetricEstimate`s |
 | `delta` | `current.mean - baseline.mean` |
-| `relative_delta` | `delta / abs(baseline.mean)` (`inf` if baseline mean is 0 and delta isn't) |
+| `relative_delta` | `delta / abs(baseline.mean)`; `None` when the baseline mean is 0 |
 | `ci_lower`, `ci_upper` | Bootstrap CI of the **difference** |
 | `confidence` | Confidence level used |
 | `is_significant` | `True` iff the difference CI **excludes 0** |
 | `cohens_d` | Effect size (see below) |
 | `p_value` | Permutation-test p-value, or `None` unless `compute_p_value=True` |
 
-Convenience properties: `is_regression` (significant **and** `delta < 0`), `is_improvement` (significant **and** `delta > 0`), and `effect_magnitude` (a string band derived from `cohens_d`).
+Convenience properties: `is_regression` (significant **and** `delta < 0`), `is_improvement` (significant **and** `delta > 0`), `effect_magnitude` (a string band derived from `cohens_d`), and `unavailable_fields` (the fields that could not be determined).
+
+A ratio to a zero baseline mean has no size, so `relative_delta` is `None` there, even when the current mean is 0 too, and `unavailable_fields` is `["relative_delta"]`. An infinity would also hide which way the metric moved; read the direction from `delta`. `to_dict()` includes the `unavailable_fields` key only when the list is non-empty, so a comparison against a nonzero mean keeps the same keys. `BaselineManager.compare_to_baseline_with_ci` passes both through to its rows.
 
 ### How to read significance
 

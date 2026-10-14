@@ -150,6 +150,27 @@ class TestTaskBaselineCanPromote:
         assert can_promote is True
         assert "criteria met" in reason.lower()
 
+    def test_a_zero_baseline_metric_is_left_out_of_promotion(self):
+        """Pins current behaviour: a metric whose baseline is 0 is skipped in
+        either direction. A rise from 0 does not earn promotion (alone, it
+        leaves no comparable metric), and a fall from 0 does not prevent it
+        when another metric improved. Downstream promotion ratchets rely on
+        this; the test records the behaviour, not a judgment that a fall from
+        0 should be ignored."""
+        baseline = TaskBaseline(
+            task_id="test",
+            baseline_type=BaselineType.CAPABILITY,
+            promotion_policy=PromotionPolicy(min_samples=1),
+        )
+        baseline.add_metric("pnl", 0.0)
+        assert baseline.can_promote({"pnl": 50.0}, sample_size=10) == (
+            False, "No comparable metrics"
+        )
+
+        baseline.add_metric("score", 0.8)
+        can_promote, _ = baseline.can_promote({"pnl": -50.0, "score": 0.88}, sample_size=10)
+        assert can_promote is True
+
 
 class TestTaskBaselinePromote:
     """Tests for TaskBaseline.promote method."""

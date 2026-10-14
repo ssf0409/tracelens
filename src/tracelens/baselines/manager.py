@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from tracelens.core._time import utc_now
 from tracelens.core.decision_spec import DecisionSpec
+from tracelens.statistics.availability import relative_to_baseline
 from tracelens.statistics.inference import (
     compare_to_baseline_summary,
     estimate_metric,
@@ -96,9 +97,11 @@ class MetricBaseline(BaseModel):
     sample_size: int = 1
     computed_at: datetime = Field(default_factory=utc_now)
 
-    # Thresholds for regression detection
-    # absolute: fail if (current - baseline) < threshold (e.g., -0.2)
-    # relative: fail if (current - baseline) / baseline < threshold (e.g., -0.1 for 10% drop)
+    # Thresholds for regression detection, each the largest allowed worsening
+    # (a move in the direction ``higher_is_better`` calls worse):
+    # absolute: in metric units, written as a NEGATIVE number (e.g., -0.2)
+    # relative: as a fraction of |baseline|, written as a POSITIVE number
+    #   (e.g., 0.1 for a 10% drop); a zero baseline allows no worsening
     regression_threshold_absolute: float | None = None
     regression_threshold_relative: float | None = None
 
@@ -241,6 +244,11 @@ class TaskBaseline(BaseModel):
     ) -> None:
         """Add or update a metric baseline.
 
+        Each threshold is the largest allowed worsening: ``absolute_threshold``
+        in metric units written as a negative number (``-0.2``), and
+        ``relative_threshold`` as a positive fraction of the baseline (``0.1``
+        for 10 %), whichever way ``higher_is_better`` points.
+
         ``is_rate`` declares whether the metric is a 0/1 proportion; leave
         it ``None`` to let the comparison infer it from the stored summary.
         """
@@ -333,10 +341,9 @@ class TaskBaseline(BaseModel):
                 continue
 
             baseline_value = metric_baseline.baseline_value
-            if baseline_value == 0:
+            relative_change = relative_to_baseline(current_value - baseline_value, baseline_value)
+            if relative_change is None:
                 continue
-
-            relative_change = (current_value - baseline_value) / abs(baseline_value)
 
             # Adjust for direction
             if not metric_baseline.higher_is_better:
@@ -723,8 +730,13 @@ class BaselineManager:
             - baseline: baseline value
             - current: current value
             - delta: absolute difference
-            - relative_change: relative difference
-            - regression: True if regression detected
+            - relative_change: delta / |baseline|, or None when the
+                baseline is 0
+            - regression: True if regression detected. From a zero
+                baseline a relative threshold allows no worsening, so any
+                move in the worse direction exceeds it
+            - unavailable_fields: ["relative_change"], present only when
+                the baseline is 0
             - z_score: standard score if std available
             - changed: present only with a configured two-sided tolerance;
                 True when either limit is exceeded, independently of regression
@@ -749,14 +761,12 @@ class BaselineManager:
             baseline_value = metric_baseline.baseline_value
             delta = current_value - baseline_value
 
-            # Calculate relative change (handle zero baseline)
-            if baseline_value != 0:
-                relative_change = delta / abs(baseline_value)
-            else:
-                relative_change = float("inf") if delta != 0 else 0.0
+            # None against a zero baseline: the ratio has no size there.
+            relative_change = relative_to_baseline(delta, baseline_value)
 
             # Check for regression
             regression = False
+            relative_threshold = metric_baseline.regression_threshold_relative
 
             # For metrics where higher is better
             if metric_baseline.higher_is_better:
@@ -765,9 +775,12 @@ class BaselineManager:
                         delta < metric_baseline.regression_threshold_absolute):
                     regression = True
 
-                # Check relative threshold (negative means decline)
-                if (metric_baseline.regression_threshold_relative is not None and
-                        relative_change < -metric_baseline.regression_threshold_relative):
+                # Check relative threshold. A zero baseline allows no relative
+                # movement (r * |0| = 0), so any decline from it exceeds it.
+                if relative_threshold is not None and (
+                    delta < 0 if relative_change is None
+                    else relative_change < -relative_threshold
+                ):
                     regression = True
             else:
                 # For metrics where lower is better (e.g., drawdown)
@@ -775,8 +788,10 @@ class BaselineManager:
                         delta > -metric_baseline.regression_threshold_absolute):
                     regression = True
 
-                if (metric_baseline.regression_threshold_relative is not None and
-                        relative_change > metric_baseline.regression_threshold_relative):
+                if relative_threshold is not None and (
+                    delta > 0 if relative_change is None
+                    else relative_change > relative_threshold
+                ):
                     regression = True
 
             # Calculate z-score if std available
@@ -792,6 +807,10 @@ class BaselineManager:
                 "regression": regression,
                 "z_score": z_score,
                 "higher_is_better": metric_baseline.higher_is_better,
+                # Present only when relative_change is unavailable (a zero
+                # baseline), so other rows keep their shape.
+                **({"unavailable_fields": ["relative_change"]}
+                   if relative_change is None else {}),
             }
             changed = metric_baseline.change_exceeds_tolerance(current_value)
             if changed is not None:
@@ -1141,6 +1160,10 @@ class BaselineManager:
             - baseline: MetricEstimate for baseline
             - current: MetricEstimate for current
             - delta: point estimate of difference
+            - relative_delta: delta / |baseline mean|, or None when the
+                baseline mean is 0
+            - unavailable_fields: present only when a field is None because
+                it could not be determined; lists those fields
             - ci_lower, ci_upper: CI bounds for difference
             - is_significant: True if CI doesn't include 0
             - is_regression: True if significant decline
@@ -1216,6 +1239,10 @@ class BaselineManager:
                 "effect_magnitude": comparison.effect_magnitude,
                 "p_value": comparison.p_value,
                 "higher_is_better": metric_baseline.higher_is_better,
+                # Present only when relative_delta is unavailable (a zero
+                # baseline mean), so other rows keep their shape.
+                **({"unavailable_fields": comparison.unavailable_fields}
+                   if comparison.unavailable_fields else {}),
             }
             changed = metric_baseline.change_exceeds_tolerance(current_est.mean)
             if changed is not None:

@@ -30,6 +30,9 @@ evidence for it. The procedure is specified in ``docs/statistical-contract.md``
   ``underpowered`` and carries the number of trials that would decide it;
   a comparison whose sizes cannot reject even a total failure is
   ``undetectable``.
+- Against a zero baseline mean the change has no percentage
+  (``delta_percent`` is ``None``, printed ``N/A relative to 0``), but a
+  nonzero change is unbounded relative to it, so its severity is ``severe``.
 
 Multiplicity across the tasks of one run belongs to the gate
 (:func:`tracelens.reporting.gate.evaluate_gate`), which Holm-adjusts the
@@ -53,6 +56,7 @@ from scipy import stats
 from tracelens.baselines.manager import MetricBaseline, TaskBaseline
 from tracelens.core._time import utc_now
 from tracelens.core.decision_spec import DecisionSpec
+from tracelens.statistics.availability import relative_to_baseline
 
 # Default noise band in absolute metric units — i.e. 0.03 means "a score
 # change of 3 percentage points on a 0-1 metric." Comes from Anthropic's
@@ -499,15 +503,28 @@ def severity_at_least(severity: RegressionSeverity, threshold: RegressionSeverit
     return SEVERITY_ORDER.index(severity) >= SEVERITY_ORDER.index(threshold)
 
 
-def relative_change(delta: float, baseline: float) -> float:
-    """``delta`` as a percentage of ``|baseline|`` (100 when the baseline is 0)."""
-    if baseline != 0:
-        return (delta / abs(baseline)) * 100
-    return 100.0 if delta != 0 else 0.0
+def relative_change(delta: float, baseline: float) -> float | None:
+    """``delta`` as a percentage of ``|baseline|``; ``None`` when the baseline is 0.
+
+    The percent form of :func:`~tracelens.statistics.availability.relative_to_baseline`.
+    """
+    fraction = relative_to_baseline(delta, baseline)
+    return None if fraction is None else fraction * 100
 
 
-def severity_for(delta_percent: float) -> RegressionSeverity:
-    """Severity from the size of a relative change alone."""
+def format_delta_percent(delta_percent: float | None) -> str:
+    """``delta_percent`` for reports, with an unavailable one said in words."""
+    return "N/A relative to 0" if delta_percent is None else f"{delta_percent:+.1f}%"
+
+
+def severity_for(delta_percent: float | None) -> RegressionSeverity:
+    """Severity from the size of a relative change alone.
+
+    ``None`` is a nonzero change from a zero baseline: it has no percentage,
+    but it is unbounded relative to the baseline, so it is beyond every bin.
+    """
+    if delta_percent is None:
+        return RegressionSeverity.SEVERE
     abs_pct = abs(delta_percent)
     if abs_pct >= 15:
         return RegressionSeverity.SEVERE
@@ -525,7 +542,9 @@ class MetricRegression(BaseModel):
     baseline_mean: float
     current_mean: float
     delta: float
-    delta_percent: float
+    # ``None`` against a zero baseline mean, where a percentage does not exist
+    # (``docs/statistical-contract.md``, "Availability").
+    delta_percent: float | None
 
     # Statistical evidence. ``p_value`` is one-sided in the observed
     # direction and ``None`` when no valid test exists — never a fabricated
@@ -742,7 +761,7 @@ class RegressionReport(BaseModel):
                     notes += " [within infra-noise band; not blocking]"
                 lines.append(
                     f"  {reg.metric_name}: {reg.baseline_mean:.4f} -> "
-                    f"{reg.current_mean:.4f} ({reg.delta_percent:+.1f}%){notes}"
+                    f"{reg.current_mean:.4f} ({format_delta_percent(reg.delta_percent)}){notes}"
                 )
         elif self.has_regression:
             # A report a caller built from a summary rather than from
@@ -763,7 +782,7 @@ class RegressionReport(BaseModel):
             for imp in self.improvements:
                 lines.append(
                     f"  {imp.metric_name}: {imp.baseline_mean:.4f} -> "
-                    f"{imp.current_mean:.4f} ({imp.delta_percent:+.1f}%) "
+                    f"{imp.current_mean:.4f} ({format_delta_percent(imp.delta_percent)}) "
                     f"[{imp.evidence_text()}]"
                 )
 
@@ -890,8 +909,12 @@ class RegressionDetector:
         delta = sides.mean_c - sides.mean_b
         delta_percent = relative_change(delta, sides.mean_b)
 
-        # Skip if change is too small
-        if abs(delta_percent) < self.min_delta_percent:
+        # Skip if change is too small. A change from a zero mean has no
+        # percentage to hold against the floor, so any nonzero one is reported.
+        if delta_percent is None:
+            if delta == 0:
+                return None
+        elif abs(delta_percent) < self.min_delta_percent:
             return None
 
         test, p_value = _p_value(sides, _alternative(sides))
@@ -1034,7 +1057,8 @@ class RegressionDetector:
         for r in regressions:
             lines.append(
                 f"  - {r.metric_name}: {r.baseline_mean:.4f} -> {r.current_mean:.4f} "
-                f"({r.delta_percent:+.1f}%, {r.evidence_text()}) [{r.severity.value}]"
+                f"({format_delta_percent(r.delta_percent)}, {r.evidence_text()}) "
+                f"[{r.severity.value}]"
             )
 
         if improvements:
@@ -1042,7 +1066,7 @@ class RegressionDetector:
             for i in improvements:
                 lines.append(
                     f"  + {i.metric_name}: {i.baseline_mean:.4f} -> {i.current_mean:.4f} "
-                    f"({i.delta_percent:+.1f}%, {i.evidence_text()})"
+                    f"({format_delta_percent(i.delta_percent)}, {i.evidence_text()})"
                 )
 
         return "\n".join(lines)

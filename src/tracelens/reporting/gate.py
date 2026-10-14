@@ -58,6 +58,7 @@ from tracelens.baselines.comparison import (
     RegressionDetector,
     RegressionReport,
     RegressionSeverity,
+    format_delta_percent,
     holm_adjusted,
     relative_change,
     severity_at_least,
@@ -272,7 +273,7 @@ class SuiteGateResult:
     baseline_mean: float
     current_mean: float
     delta: float
-    delta_percent: float
+    delta_percent: float | None  # None when the baseline mean is 0
     ci_lower: float | None = None
     ci_upper: float | None = None
     p_value: float | None = None
@@ -296,7 +297,7 @@ class SuiteGateResult:
         """One line for the reports."""
         text = (
             f"{self.metric_name}: {self.baseline_mean:.4f} -> {self.current_mean:.4f} "
-            f"({self.delta_percent:+.1f}%) over {self.tasks} task(s)"
+            f"({format_delta_percent(self.delta_percent)}) over {self.tasks} task(s)"
         )
         if self.ci_lower is not None and self.ci_upper is not None:
             text += (
@@ -351,13 +352,14 @@ class SuiteGateResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SuiteGateResult:
+        delta_percent = data.get("delta_percent", 0.0)
         return cls(
             metric_name=str(data["metric_name"]),
             tasks=int(data.get("tasks", 0)),
             baseline_mean=float(data.get("baseline_mean", 0.0)),
             current_mean=float(data.get("current_mean", 0.0)),
             delta=float(data.get("delta", 0.0)),
-            delta_percent=float(data.get("delta_percent", 0.0)),
+            delta_percent=None if delta_percent is None else float(delta_percent),
             ci_lower=data.get("ci_lower"),
             ci_upper=data.get("ci_upper"),
             p_value=data.get("p_value"),
@@ -653,7 +655,11 @@ def _suite_results(
         if effect.p_value is not None:
             p_one = effect.p_value / 2 if delta < 0 else 1.0 - effect.p_value / 2
             p_one = min(1.0, max(0.0, p_one))
-        is_regression = delta < 0 and abs(delta_percent) >= min_delta_percent
+        # A change from a zero mean has no percentage to hold against the
+        # floor, so any decline is reported.
+        is_regression = delta < 0 and (
+            delta_percent is None or abs(delta_percent) >= min_delta_percent
+        )
         severity = severity_for(delta_percent) if is_regression else RegressionSeverity.NONE
         within_noise = is_regression and any_infra_mismatch and abs(delta) < noise_band
         draft.append({
