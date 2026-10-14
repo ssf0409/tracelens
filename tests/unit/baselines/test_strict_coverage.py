@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tracelens.baselines.manager import BaselineManager, TaskBaseline
@@ -99,4 +100,24 @@ def test_an_unknown_empty_sample_list_is_still_a_new_metric(manager: BaselineMan
     result = manager.compare_to_baseline_with_ci("replay", {"new_reason": []}, coverage="strict")
     assert result["new_reason"]["coverage"] == "missing_from_baseline"
     assert result["new_reason"]["current"] == []
+
+
+def test_ci_numpy_samples_are_measured_by_length_not_truthiness(manager: BaselineManager) -> None:
+    # A one-element array of 0.0 is falsy; a longer array has no truth value.
+    result = manager.compare_to_baseline_with_ci(
+        "replay", {"decisions": np.array([0.0]), "settled": np.array([10.0, 10.0])},
+        coverage="strict", n_bootstrap=100,
+    )
+    assert result["decisions"]["coverage"] == "matched"
+    assert result["decisions"]["current"]["mean"] == 0.0
+    assert result["decisions"]["is_regression"] is True
+    assert result["settled"]["coverage"] == "matched"
+
+
+def test_ci_an_empty_numpy_sample_is_unmeasured(manager: BaselineManager) -> None:
+    result = manager.compare_to_baseline_with_ci(
+        "replay", {"decisions": np.array([]), "settled": np.array([10.0])},
+        coverage="strict", n_bootstrap=100,
+    )
+    assert result["decisions"]["coverage"] == "missing_from_current"
 

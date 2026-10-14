@@ -1098,7 +1098,9 @@ class BaselineManager:
             self._validate_finite(baseline, {})
             current_values = {
                 name: values for name, values in current_values.items()
-                if values or name not in baseline.metrics
+                # len(), not truthiness: np.array([0.0]) is a measurement, and
+                # a longer array has no truth value.
+                if len(values) > 0 or name not in baseline.metrics
             }
 
         for metric_name, values in current_values.items():

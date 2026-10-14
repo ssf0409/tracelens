@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,20 +37,33 @@ def recorded_canary(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("scenario,exit_code,missing", [
-    ("unchanged", 0, {}),
-    ("missing", 1, {"accepted": "missing_from_current"}),
-    ("new", 1, {"rejected.permission": "missing_from_baseline"}),
-    ("empty", 1, {"accepted": "missing_from_current"}),
+def moved(gate: dict[str, Any]) -> set[str]:
+    """Metrics that differ from the reference: absent on one side, or a nonzero delta."""
+    return {
+        name for name, row in gate["comparisons"].items()
+        if row["coverage"] != "matched" or row["delta"] != 0
+    }
+
+
+# Each fault moves only the metrics it is named for, so a blocked gate is
+# attributable to that signal rather than to a side effect of the injection.
+@pytest.mark.parametrize("scenario,exit_code,missing,moved_metrics", [
+    ("unchanged", 0, {}, set()),
+    ("missing", 1, {"accepted": "missing_from_current"}, {"accepted"}),
+    ("new", 1, {"rejected.permission": "missing_from_baseline"}, {"rejected.permission"}),
+    ("empty", 1, {"accepted": "missing_from_current"},
+     {"accepted", "rejected.invalid", "rejected.quota"}),
 ])
 def test_replay_coverage_gate(
     recorded_canary: Path, scenario: str, exit_code: int, missing: dict[str, str],
+    moved_metrics: set[str],
 ) -> None:
     project = recorded_canary
     frozen = (project / "baseline.json").read_bytes()
     invoke(project, "check", "--baseline", "baseline.json", "--scenario", scenario,
            "--output-dir", scenario, expect=exit_code)
     gate = json.loads((project / scenario / "gate.json").read_text())
+    assert moved(gate) == moved_metrics
     assert gate["exit_code"] == exit_code
     assert gate["status"] == ("passed" if exit_code == 0 else "blocked")
     assert gate["coverage"] == "strict"

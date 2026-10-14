@@ -33,7 +33,8 @@ SCENARIOS = ("unchanged", "missing", "new", "empty")
 async def replay(input_data: dict[str, Any], scenario: str) -> dict[str, Any]:
     decisions = [dict(request) for request in input_data["requests"]]
     if scenario == "new":
-        decisions[-1]["reason"] = "permission"
+        # Unknown-reason fault: an added rejection, so no known count moves.
+        decisions.append({"id": "d", "approved": False, "reason": "permission"})
     return {
         "decisions": decisions,
         "emit_accepted": scenario != "missing",
