@@ -15,6 +15,8 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
+from tracelens.statistics.availability import relative_to_baseline
+
 
 @dataclass
 class MetricEstimate:
@@ -74,13 +76,22 @@ class ComparisonResult:
     baseline: MetricEstimate
     current: MetricEstimate
     delta: float  # current.mean - baseline.mean
-    relative_delta: float  # (current - baseline) / |baseline|
+    relative_delta: float | None  # (current - baseline) / |baseline|; None at a zero mean
     ci_lower: float | None  # CI of the difference
     ci_upper: float | None
     confidence: float
     is_significant: bool  # CI doesn't include 0
     cohens_d: float | None  # Effect size
     p_value: float | None  # From permutation test (if computed)
+
+    @property
+    def unavailable_fields(self) -> list[str]:
+        """Fields that are None because they could not be determined.
+
+        ``relative_delta`` is unavailable when the baseline mean is 0: a ratio
+        to zero has no size, and an infinity would hide the direction.
+        """
+        return ["relative_delta"] if self.relative_delta is None else []
 
     @property
     def is_regression(self) -> bool:
@@ -131,6 +142,10 @@ class ComparisonResult:
             "cohens_d": self.cohens_d,
             "effect_magnitude": self.effect_magnitude,
             "p_value": self.p_value,
+            # Named only when something is unavailable, so a comparison
+            # against a nonzero mean keeps its shape.
+            **({"unavailable_fields": self.unavailable_fields}
+               if self.unavailable_fields else {}),
         }
 
 
@@ -426,11 +441,7 @@ def compare_metrics(
         baseline_values, current_values, confidence, n_bootstrap, seed
     )
 
-    # Relative delta (handle zero baseline)
-    if baseline_est.mean != 0:
-        relative_delta = delta / abs(baseline_est.mean)
-    else:
-        relative_delta = float("inf") if delta != 0 else 0.0
+    relative_delta = relative_to_baseline(delta, baseline_est.mean)
 
     # Statistical significance: CI doesn't include 0
     is_significant = not (ci_lower <= 0 <= ci_upper)
@@ -502,11 +513,7 @@ def compare_to_baseline_summary(
 
     delta = current_mean - baseline_mean
 
-    # Relative delta
-    if baseline_mean != 0:
-        relative_delta = delta / abs(baseline_mean)
-    else:
-        relative_delta = float("inf") if delta != 0 else 0.0
+    relative_delta = relative_to_baseline(delta, baseline_mean)
 
     # Welch's t-test CI for difference
     se_diff = np.sqrt(

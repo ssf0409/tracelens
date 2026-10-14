@@ -149,26 +149,47 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **A metric whose baseline is 0 is judged in the right direction.**
+  `BaselineManager.compare_to_baseline` reported `relative_change` as `+inf`
+  for a move off a zero baseline in either direction and applied the
+  one-sided relative threshold to it. With `relative_threshold=0.1`, a
+  higher-is-better P&L that fell from 0 to -50 passed, a lower-is-better
+  loss that improved from 0 to -5 was flagged, and the result could not be
+  written with `json.dumps(..., allow_nan=False)`. A ratio to zero has no
+  size, so `relative_change` is now `None` and the relative threshold does
+  not apply. An absolute threshold, when set, decides. With a relative
+  threshold alone, a move in the worse direction has `regression: None` (no
+  verdict; set an absolute threshold to judge it), and a move in the better
+  direction, or none, is not a regression. Such rows list the fields they
+  could not determine in `unavailable_fields`. A lower-is-better metric that
+  rose from 0 under a relative-only threshold used to read
+  `regression: True` and now reads `None`. Rows against a nonzero baseline
+  are unchanged, key for key. (#188)
+- **`relative_delta` against a zero mean is unavailable, not `+inf`.**
+  `compare_metrics` and `compare_to_baseline_summary`, and through them
+  `BaselineManager.compare_to_baseline_with_ci`, reported
+  `relative_delta = +inf` for a move off a zero baseline mean in either
+  direction. A decline from 0 read as an unbounded rise, and the result
+  could not be written with `json.dumps(..., allow_nan=False)`.
+  `relative_delta` is now `None` whenever the baseline mean is 0, and
+  `ComparisonResult.unavailable_fields` lists it. `to_dict()` and the
+  `compare_to_baseline_with_ci` row carry
+  `unavailable_fields: ["relative_delta"]` only then. The verdicts
+  (`is_significant`, `is_regression`, `is_improvement`) read the signed
+  `delta` and do not change. Comparisons against a nonzero mean are
+  unchanged, key for key. Two things consumers may notice:
+  `ComparisonResult.relative_delta` is now typed `float | None`, and a
+  zero mean that did not move reads `None` where it read `0.0`, because
+  0 / 0 is undefined. (#189)
 - **The baseline gate no longer invents a severity for a change from a zero
   baseline mean.** `RegressionDetector` and the gate's suite criterion
-  reported `delta_percent` as `+100` for any move off a zero mean, in either
-  direction. A P&L that fell from 0 to -5 read `+100.0%`, every move
-  cleared `min_delta_percent`, and its severity came out `severe`. A
-  significant decline therefore blocked at every `--fail-on-regression`
-  level, and a non-significant +0.05 improvement was rated severe as well.
-  A ratio to zero has no size, so `delta_percent` and `severity` are now
-  `null` on such findings and suite results, and reports print `N/A
-  relative to 0`. The decision uses only what is known. The change is
-  nonzero, so it blocks at `minor`. Above that, a significant one leaves the
-  gate `unevaluable` (exit 2, naming the task and metric) unless another
-  finding blocks, which still gives `blocked`. Every nonzero change from 0
-  is reported, because no floor can apply.
-  `RegressionReport.block_verdict()` returns `None` for the undecidable
-  case. `should_block_ci()` still returns `True` there, and
-  `overall_severity` covers known severities only. Code that formats
-  `MetricRegression.delta_percent` or reads `.severity.value` must handle
-  `None`; `format_delta_percent()` and `format_severity()` in
-  `tracelens.baselines.comparison` render both. (#MMM)
+  reported `+100%` and `severe` for any move off a zero mean, in either
+  direction, so a significant decline blocked at every
+  `--fail-on-regression` level. `delta_percent` and `severity` are now
+  `null` there (`N/A relative to 0`). Such a change blocks at `minor`;
+  above that a significant one leaves the gate `unevaluable` (exit 2)
+  unless another finding blocks. `should_block_ci()` still returns `True`;
+  `RegressionReport.block_verdict()` returns `None`. (#188)
 - **A more certain regression no longer passes as "below the threshold".**
   `tracelens compare` returned `significant_below_threshold` (exit 0) for any
   significant change smaller than the threshold, even when the interval
