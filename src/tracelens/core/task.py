@@ -193,6 +193,11 @@ class EvalSet(BaseModel):
     default_num_runs: int = 1  # For pass@k
     default_timeout_seconds: float = 300.0
 
+    # Run scope metadata
+    is_subset: bool = False
+    selected_task_ids: list[str] | None = None
+    total_eval_set_tasks: int | None = None
+
     def filter_tasks(
         self,
         tags: list[str] | None = None,
