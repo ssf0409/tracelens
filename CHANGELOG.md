@@ -8,6 +8,32 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Changed
+
+- Task summaries and the results JSON gain `scored_trials`, per task and
+  overall. The reports show next to the mean how many gradable trials had no
+  score (`0.9000 (1 unscored)`). A task or run with no scored trial now has
+  `mean_score: null`, rendered `n/a`; it used to read 0.0. Artifacts written
+  before this still load with the values they recorded. (#114)
+
+### Fixed
+
+- **`mean_score` means the same thing in the report, the baseline gate and
+  `compare`.** A gradable trial without a score is a timeout, or an agent
+  failure before any grader ran.
+  - **Before:** the gate imputed 0.0 for such a trial, while the report's
+    task summaries and `compare` left it out. A baseline stored from
+    `task_summaries[]` therefore read an unchanged agent that timed out once
+    in five runs as `0.9000 -> 0.7200` SEVERE. At 40 runs a side the gate
+    blocked it (p = 0.021).
+  - **Now:** all three apply one rule, `Trial.mean_score_value`. Such a trial
+    is left out of the mean and counted, and `pass_rate` still records it as
+    a failure.
+  - *Baseline semantics:* a `mean_score` baseline's `sample_size` is the new
+    `scored_trials`, not `num_trials`.
+
+  (#114)
+
 ## [0.7.0] - 2026-10-14
 
 ### Added

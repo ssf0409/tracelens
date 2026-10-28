@@ -38,12 +38,18 @@ class TaskSummary:
     fewer gradable runs than ``k``). ``gradable_trials`` counts the trials
     that are agent evidence; ``None`` means a legacy report that did not
     record it.
+
+    ``mean_score`` follows ``Trial.mean_score_value``: the mean over the
+    ``scored_trials`` gradable trials that have a score, ``None`` when none
+    has one (never 0.0). ``gradable_trials - scored_trials`` is the count
+    excluded for having no score. ``scored_trials`` is ``None`` in a legacy
+    report that did not record it.
     """
 
     task_id: str
     num_trials: int
     pass_rate: float
-    mean_score: float
+    mean_score: float | None
     std_score: float
     pass_at_k: dict[str, float | None] = field(default_factory=dict)
     reliability: dict[str, float | None] = field(default_factory=dict)
@@ -52,6 +58,7 @@ class TaskSummary:
     # batch carried none. Store it on a baseline so the gate can tell a
     # changed task from a regressed one.
     task_hash: str | None = None
+    scored_trials: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +66,7 @@ class TaskSummary:
             "num_trials": self.num_trials,
             "gradable_trials": self.gradable_trials,
             "pass_rate": self.pass_rate,
+            "scored_trials": self.scored_trials,
             "mean_score": self.mean_score,
             "std_score": self.std_score,
             "pass_at_k": self.pass_at_k,
@@ -82,7 +90,11 @@ class ReportData:
     total_trials: int = 0
     total_tasks: int = 0
     overall_pass_rate: float = 0.0
-    overall_mean_score: float = 0.0
+    # Mean over every scored gradable trial (``Trial.mean_score_value``);
+    # ``None`` when no trial has a score. ``scored_trials`` counts them
+    # (``None`` in a legacy report that did not record it).
+    overall_mean_score: float | None = None
+    scored_trials: int | None = None
 
     # Trials that are agent evidence (``Trial.is_gradable``): the
     # denominator of ``overall_pass_rate``. Harness failures and trials
@@ -141,6 +153,7 @@ class ReportData:
             "gradable_trials": self.gradable_trials,
             "overall_pass_rate": self.overall_pass_rate,
             "overall_mean_score": self.overall_mean_score,
+            "scored_trials": self.scored_trials,
             "infra_error_count": self.infra_error_count,
             "infra_error_rate": self.infra_error_rate,
             "grader_error_count": self.grader_error_count,
@@ -262,7 +275,8 @@ class ReportData:
             total_tasks=data.get("total_tasks", 0),
             gradable_trials=total_trials if gradable is None else gradable,
             overall_pass_rate=data.get("overall_pass_rate", 0.0),
-            overall_mean_score=data.get("overall_mean_score", 0.0),
+            overall_mean_score=data.get("overall_mean_score"),
+            scored_trials=data.get("scored_trials"),
             infra_error_count=data.get("infra_error_count", 0),
             infra_error_rate=data.get("infra_error_rate", 0.0),
             grader_error_count=data.get("grader_error_count", 0),
@@ -330,14 +344,14 @@ class ReportGenerator:
             gradable = [t for t in trials if t.is_gradable]
             passes = pass_results[task_id]
 
+            # One rule for every mean score (report, gate, compare): a
+            # gradable trial without a score is excluded and counted.
             scores = [
-                t.aggregate_score
-                for t in gradable
-                if t.aggregate_score is not None
+                score for t in gradable if (score := t.mean_score_value) is not None
             ]
 
             pass_rate = sum(passes) / len(passes) if passes else 0.0
-            mean_score = float(np.mean(scores)) if scores else 0.0
+            mean_score = float(np.mean(scores)) if scores else None
             std_score = float(np.std(scores, ddof=1)) if len(scores) > 1 else 0.0
 
             task_pass_at_k = {
@@ -363,6 +377,7 @@ class ReportGenerator:
                 reliability=task_reliability,
                 gradable_trials=len(gradable),
                 task_hash=task_hashes.get(task_id),
+                scored_trials=len(scores),
             ))
 
             all_scores.extend(scores)
@@ -376,7 +391,8 @@ class ReportGenerator:
             total_tasks=len(task_ids),
             gradable_trials=batch.gradable_count,
             overall_pass_rate=batch.pass_rate,
-            overall_mean_score=float(np.mean(all_scores)) if all_scores else 0.0,
+            overall_mean_score=float(np.mean(all_scores)) if all_scores else None,
+            scored_trials=len(all_scores),
             infra_error_count=batch.infra_error_count,
             infra_error_rate=batch.infra_error_rate,
             grader_error_count=batch.grader_error_count,
@@ -402,7 +418,7 @@ class ReportGenerator:
             f"- **Tasks**: {report.total_tasks}",
             f"- **Trials**: {report.total_trials}",
             f"- **Pass Rate**: {_format_pass_rate(report)}",
-            f"- **Mean Score**: {report.overall_mean_score:.4f}",
+            f"- **Mean Score**: {_format_mean_score(report)}",
         ]
         if report.infra_error_count > 0:
             lines.append(
@@ -446,7 +462,7 @@ class ReportGenerator:
                     _md_cell(s.task_id),
                     _md_cell(_format_trial_count(s)),
                     _md_cell(_format_task_pass_rate(s, report)),
-                    _md_cell(f"{s.mean_score:.4f}"),
+                    _md_cell(_format_task_mean_score(s)),
                 ]
                 lines.append("| " + " | ".join(row) + " |")
             lines.append("")
@@ -503,7 +519,8 @@ class ReportGenerator:
             f"TraceLens: {report.total_tasks} tasks, "
             f"{report.total_trials} trials, "
             f"pass_rate={pass_rate_text}, "
-            f"mean_score={report.overall_mean_score:.4f}",
+            "mean_score="
+            + ("n/a" if report.overall_mean_score is None else f"{report.overall_mean_score:.4f}"),
         ]
 
         for key, val in sorted(report.pass_at_k.items()):
@@ -582,7 +599,11 @@ class ReportGenerator:
             _html_card("Tasks", str(report.total_tasks), "#3b82f6")
             + _html_card("Trials", str(report.total_trials), "#6366f1")
             + _html_card("Pass Rate", pass_rate_text, pass_rate_color)
-            + _html_card("Mean Score", f"{report.overall_mean_score:.4f}", "#8b5cf6")
+            + _html_card(
+                "Mean Score",
+                "n/a" if report.overall_mean_score is None else f"{report.overall_mean_score:.4f}",
+                "#8b5cf6",
+            )
         )
         # Only surface the infra-error card when there's something to
         # see — zero infra errors shouldn't clutter the dashboard.
@@ -616,8 +637,8 @@ class ReportGenerator:
                 f"<td>{escape(_format_trial_count(s))}</td>"
                 f'<td style="color:{pr_color};font-weight:600">'
                 f"{escape(_format_task_pass_rate(s, report))}</td>"
-                f"<td>{s.mean_score:.4f}</td>"
-                f"<td>{s.std_score:.4f}</td></tr>\n"
+                f"<td>{escape(_format_task_mean_score(s))}</td>"
+                f"<td>{'n/a' if s.mean_score is None else f'{s.std_score:.4f}'}</td></tr>\n"
             )
 
         # --- Pass rate distribution chart ---
@@ -630,7 +651,7 @@ class ReportGenerator:
 
         # --- Score distribution histogram ---
         all_scores = [
-            s.mean_score for s in report.task_summaries if s.mean_score > 0
+            s.mean_score for s in report.task_summaries if s.mean_score is not None
         ]
         score_histogram = ""
         if all_scores:
@@ -1006,6 +1027,33 @@ def _format_pass_rate(report: ReportData) -> str:
             f" (over {report.gradable_trials} gradable trials; "
             f"{report.excluded_trials} excluded as harness failures or never run)"
         )
+    return text
+
+
+def _format_mean_score(report: ReportData) -> str:
+    """Suite mean score, with the gradable trials it leaves out for having no score."""
+    if report.overall_mean_score is None:
+        return "n/a (no scored trials)"
+    text = f"{report.overall_mean_score:.4f}"
+    if report.scored_trials is not None and report.scored_trials < report.gradable_trials:
+        unscored = report.gradable_trials - report.scored_trials
+        text += (
+            f" (over {report.scored_trials} scored trials; {unscored} gradable "
+            f"trial(s) without a score excluded)"
+        )
+    return text
+
+
+def _format_task_mean_score(summary: TaskSummary) -> str:
+    if summary.mean_score is None:
+        return "n/a"
+    text = f"{summary.mean_score:.4f}"
+    if (
+        summary.scored_trials is not None
+        and summary.gradable_trials is not None
+        and summary.scored_trials < summary.gradable_trials
+    ):
+        text += f" ({summary.gradable_trials - summary.scored_trials} unscored)"
     return text
 
 

@@ -376,7 +376,11 @@ How to read it:
   at least one gradable sample; this does not imply adequate statistical
   power. Agent failures and runner timeouts remain comparison observations.
 - The current CLI compares task-level `pass_rate` and `mean_score` against
-  baselines. Each baseline-backed task must share at least one of these
+  baselines. `mean_score` uses the report's rule: a gradable trial without
+  a score (a timeout) counts as a failure in `pass_rate` and is left out of
+  `mean_score`, so store a `mean_score` baseline with
+  `sample_size=task["scored_trials"]`, not `num_trials`. Each baseline-backed
+  task must share at least one of these
   metrics, otherwise it is counted as `skipped (no comparable metrics)` and
   the gate exits 2. An unevaluable check takes precedence over exit 1, while
   still printing any observed regressions and exclusion counts. Diagnostic

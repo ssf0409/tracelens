@@ -120,18 +120,20 @@ def per_trial_results(trials: Sequence[Trial]) -> list[dict[str, float]]:
     Only gradable trials contribute (statistical contract): harness
     failures and trials that never ran are excluded and surfaced separately.
     ``TIMEOUT`` stays included as a failure -- blowing the time budget is an
-    agent-quality signal.
+    agent-quality signal. A trial without a score contributes ``pass_rate``
+    only: ``mean_score`` follows ``Trial.mean_score_value``, the rule the
+    report's task summaries (and so stored baselines) use, never an imputed
+    0.0.
     """
     results: list[dict[str, float]] = []
     for trial in trials:
         if not trial.is_gradable:
             continue
-        results.append({
-            "pass_rate": 1.0 if trial.passed else 0.0,
-            "mean_score": (
-                trial.aggregate_score if trial.aggregate_score is not None else 0.0
-            ),
-        })
+        result = {"pass_rate": 1.0 if trial.passed else 0.0}
+        score = trial.mean_score_value
+        if score is not None:
+            result["mean_score"] = score
+        results.append(result)
     return results
 
 

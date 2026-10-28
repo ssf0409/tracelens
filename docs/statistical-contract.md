@@ -109,8 +109,17 @@ unweighted mean over eligible tasks, with eligible/total counts.
 
 - **Pass rate** = passed gradable trials / gradable trials. Harness failures
   are not in the denominator.
-- **Mean score** = mean over gradable trials of the trial's
-  `aggregate_score`, which is the mean of its outcomes' scores.
+- **Mean score** = mean of `aggregate_score` (the mean of the trial's
+  outcome scores) over the gradable trials that have a finite one. A
+  gradable trial without a score (a timeout, or an agent failure before any
+  grader ran) is excluded from the mean and counted (`scored_trials`, shown
+  next to the mean); `pass_rate` already records it as a failure, and
+  imputing 0.0 would count that one event in both metrics. A task with no
+  scored trial has no mean score (`null`, rendered `n/a`), never 0.0. The
+  report's task summaries, the baseline gate's samples and `tracelens
+  compare` apply this one rule (`Trial.mean_score_value`), so a baseline
+  stored from `task_summaries[]` means in the gate what it meant in the
+  report; its `sample_size` for `mean_score` is `scored_trials`.
 
 Both are trial-level descriptive numbers. Use them for reading a run; use
 pass@k and pass^k with intervals for decisions.
@@ -376,7 +385,8 @@ input. Each artifact's provenance decides comparability
 - `pass_rate` (default; higher is better): a trial's value is 1 if it
   passed, else 0.
 - `mean_score` (higher is better): a trial's value is its
-  `aggregate_score`.
+  `aggregate_score`; a gradable trial without a score has no value (see
+  "Pass rate and mean score").
 - `<grader_id>.<metric_name>`: the named outcome metric, with
   `--direction higher|lower` stating which way is better (a latency budget
   metric, for example, is `lower`).
@@ -667,6 +677,7 @@ are never compared across silently different populations.
 | `BaselineManager.compare_to_baseline` reported `relative_change = +inf` for a move off a zero baseline in either direction and applied the one-sided relative threshold to it, so a higher-is-better metric that fell from 0 passed, a lower-is-better one that improved from 0 was flagged, and the result was not valid JSON | the relative change is unavailable; a relative threshold allows no worsening from 0, so any worsening is a regression, and `regression` stays a boolean | #188 (fixed) |
 | `compare_metrics` and `compare_to_baseline_summary`, and through them `BaselineManager.compare_to_baseline_with_ci`, reported `relative_delta = +inf` for a move off a zero mean in either direction, so a decline read as an unbounded rise and the result was not valid JSON (their verdicts use `delta` and were unaffected) | the relative change is unavailable and named in `unavailable_fields` | #189 (fixed) |
 | `RegressionDetector` and the gate's suite criterion reported `delta_percent = +100` for a move off a zero baseline mean in either direction, so a decline read `+100.0%`, any move cleared `min_delta_percent`, and its severity was `severe`, blocking a significant move at every `--fail-on-regression` level | `delta_percent` is unavailable; the change is unbounded relative to 0, so its severity stays `severe` and a significant one blocks at every level, without the invented percentage | #188 (fixed; #190 widened #188's scope from `compare_to_baseline` to the gate) |
+| The gate imputed 0.0 for a gradable trial without a score while the report and `compare` excluded it, so a baseline stored from the report's task summaries read an unchanged agent with one timeout in five as a severe drop (0.90 → 0.72; blocked at 40 runs a side, p = 0.021) | one rule: excluded and counted (`scored_trials`); no scored trial means no mean score, never 0.0 | #114 (fixed) |
 | `TaskBaseline.can_promote` (behind `try_promote`) skips a metric whose stored baseline is 0, so a worsening from 0 neither earns nor blocks promotion, even with `require_all_metrics_improve=True` | a worsening from 0 blocks promotion like any other worsening | open (unchanged by #190, so existing promotion ratchets keep their behavior) |
 | `MetricEstimate.se` is `inf` when `n <= 1`, so `ComparisonResult.to_dict()` and the `current` estimate in `compare_to_baseline_with_ci` rows are not strict JSON whenever a side has one sample, whatever its mean | an unavailable standard error is `null`, never `inf` | open |
 
