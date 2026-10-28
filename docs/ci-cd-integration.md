@@ -379,7 +379,10 @@ How to read it:
   baselines. `mean_score` uses the report's rule: a gradable trial without
   a score (a timeout) counts as a failure in `pass_rate` and is left out of
   `mean_score`, so store a `mean_score` baseline with
-  `sample_size=task["scored_trials"]`, not `num_trials`. Each baseline-backed
+  `sample_size=task["scored_trials"]`, not `num_trials`, and skip it for a
+  task whose `mean_score` is `null` (no trial had a score). A stored metric
+  the run could not measure makes the gate unevaluable (exit 2) unless the
+  task already blocks on a metric it did measure. Each baseline-backed
   task must share at least one of these
   metrics, otherwise it is counted as `skipped (no comparable metrics)` and
   the gate exits 2. An unevaluable check takes precedence over exit 1, while

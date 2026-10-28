@@ -137,6 +137,15 @@ def per_trial_results(trials: Sequence[Trial]) -> list[dict[str, float]]:
     return results
 
 
+def _unmeasured_text(metrics: Sequence[str], unscored: int) -> str:
+    """Why each stored metric has no sample in this run."""
+    return ", ".join(
+        f"{m}: none of the {unscored} gradable trial(s) had a score"
+        if m == "mean_score" else f"{m}: no sample"
+        for m in metrics
+    )
+
+
 def spec_from_trials(
     trials: Sequence[Trial],
 ) -> tuple[DecisionSpec | None, str | None]:
@@ -196,6 +205,13 @@ class TaskGateResult:
     # ``None`` for tasks that were not checked.
     detectable: bool | None = None
     trials_needed: int | None = None
+    # Gradable trials without a score (``Trial.mean_score_value`` is None):
+    # pass_rate samples (as failures) but not mean_score samples.
+    unscored_trials: int = 0
+    # CLI metrics the baseline stores but the run produced no sample for
+    # (mean_score when no gradable trial had a score). Unless the task blocks
+    # on a metric it did measure, the gate is unevaluable rather than passing.
+    unmeasured_metrics: list[str] = field(default_factory=list)
 
     def regression_report(self) -> RegressionReport:
         """Rebuild the detector's report so all text comes from one formatter."""
@@ -231,6 +247,8 @@ class TaskGateResult:
             "improvements": [r.model_dump(mode="json") for r in self.improvements],
             "detectable": self.detectable,
             "trials_needed": self.trials_needed,
+            "unscored_trials": self.unscored_trials,
+            "unmeasured_metrics": list(self.unmeasured_metrics),
         }
 
     @classmethod
@@ -258,6 +276,8 @@ class TaskGateResult:
             ],
             detectable=None if detectable is None else bool(detectable),
             trials_needed=None if trials_needed is None else int(trials_needed),
+            unscored_trials=int(data.get("unscored_trials", 0)),
+            unmeasured_metrics=list(data.get("unmeasured_metrics", [])),
         )
 
 
@@ -812,17 +832,31 @@ def evaluate_gate(
             ))
             continue
         current_metrics = sorted({name for result in current_results for name in result})
+        unscored = sum(1 for t in task_trials if t.is_gradable and t.mean_score_value is None)
+        # A stored CLI metric with no sample this run (mean_score when no
+        # gradable trial had a score) is unmeasured, not unchanged.
+        unmeasured = [
+            m for m in CLI_METRICS
+            if baseline.get_metric(m) is not None and m not in current_metrics
+        ]
         if not baseline.metrics.keys() & set(current_metrics):
+            reason = (
+                "baseline shares no metric with the CLI metrics "
+                f"({', '.join(current_metrics)})"
+            )
+            if unmeasured:
+                reason = "the run measured none of the baseline's metrics: " + _unmeasured_text(
+                    unmeasured, unscored
+                )
             tasks.append(TaskGateResult(
                 task_id=task_id,
                 outcome=TaskGateOutcome.NO_COMPARABLE_METRICS,
-                reason=(
-                    "baseline shares no metric with the CLI metrics "
-                    f"({', '.join(current_metrics)})"
-                ),
+                reason=reason,
                 compared_trials=len(current_results),
                 excluded_trials=excluded,
                 available_metrics=current_metrics,
+                unscored_trials=unscored,
+                unmeasured_metrics=unmeasured,
             ))
             continue
         current_spec = decision_spec
@@ -856,6 +890,8 @@ def evaluate_gate(
             infra_config_diff=dict(report.infra_config_diff),
             regressions=list(report.regressions),
             improvements=list(report.improvements),
+            unscored_trials=unscored,
+            unmeasured_metrics=unmeasured,
         ))
 
     # Split the budget only when the suite criterion can really take a share:
@@ -958,12 +994,19 @@ def evaluate_gate(
             + ", ".join(t.task_id for t in undetectable) + advice
         )
 
+    # An unmeasured stored metric only matters when the task did not already
+    # block on a metric it did measure: an agent that crashes on every trial
+    # still blocks on pass_rate (agent failures are regression evidence),
+    # but a task the measured metrics would pass cannot pass on what was
+    # never measured.
+    unmeasured_tasks = [t for t in checked if t.unmeasured_metrics and not t.blocking]
     reasons: list[str] = []
     if (
         not checked
         or no_gradable
         or no_comparable
         or content_changed
+        or unmeasured_tasks
         or (undetectable and len(undetectable) == len(checked) and not suite_can_reject)
     ):
         status = GateStatus.UNEVALUABLE
@@ -983,6 +1026,14 @@ def evaluate_gate(
             reasons.append(
                 f"{len(no_comparable)} task(s) with no comparable metrics: "
                 + ", ".join(t.task_id for t in no_comparable)
+            )
+        if unmeasured_tasks:
+            reasons.append(
+                f"{len(unmeasured_tasks)} task(s) with a stored metric the run did not measure: "
+                + "; ".join(
+                    f"{t.task_id} ({_unmeasured_text(t.unmeasured_metrics, t.unscored_trials)})"
+                    for t in unmeasured_tasks
+                )
             )
         if checked and undetectable and len(undetectable) == len(checked) and not suite_can_reject:
             needed = [t.trials_needed for t in undetectable if t.trials_needed is not None]

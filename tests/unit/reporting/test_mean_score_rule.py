@@ -68,10 +68,11 @@ def _store_from_report(report: ReportData, path: Path) -> BaselineManager:
             "pass_rate", task["pass_rate"], std=0.0,
             sample_size=task["gradable_trials"], is_rate=True,
         )
-        baseline.add_metric(
-            "mean_score", task["mean_score"], std=task["std_score"],
-            sample_size=task["scored_trials"],
-        )
+        if task["mean_score"] is not None:
+            baseline.add_metric(
+                "mean_score", task["mean_score"], std=task["std_score"],
+                sample_size=task.get("scored_trials", task["gradable_trials"]),
+            )
         manager.set_baseline(baseline)
     return manager
 
@@ -202,3 +203,116 @@ def _nan_scored() -> Trial:
 )
 def test_mean_score_value(trial: Trial, expected: float | None) -> None:
     assert trial.mean_score_value == expected
+
+
+def _baseline(tmp_path: Path, **metrics: tuple[float, int]) -> BaselineManager:
+    manager = BaselineManager(tmp_path / "baselines.json")
+    baseline = TaskBaseline(task_id="t")
+    for name, (value, n) in metrics.items():
+        baseline.add_metric(name, value, std=0.1, sample_size=n, is_rate=name == "pass_rate")
+    manager.set_baseline(baseline)
+    return manager
+
+
+def test_a_stored_mean_score_the_run_did_not_measure_is_never_a_pass(tmp_path: Path) -> None:
+    """Task t always failed but was graded; now every run of it times out.
+
+    Its pass_rate cannot move (0/10 -> 0/10) and none of its trials has a
+    score. With a healthy task u beside it, leaving mean_score out of t's
+    comparison passed the gate with exit 0 (as did v0.7.0's imputed zeros).
+    """
+    manager = BaselineManager(tmp_path / "baselines.json")
+    for task_id, pass_rate, mean_score in (("t", 0.0, 0.4), ("u", 1.0, 0.9)):
+        baseline = TaskBaseline(task_id=task_id)
+        baseline.add_metric("pass_rate", pass_rate, std=0.1, sample_size=10, is_rate=True)
+        baseline.add_metric("mean_score", mean_score, std=0.1, sample_size=10)
+        manager.set_baseline(baseline)
+    batch = _run(scored=0, timeouts=10)
+    for i in range(10):
+        batch.add_trial(_scored("u", i, 0.9))
+
+    gate = evaluate_gate(batch, manager)
+
+    t = next(task for task in gate.tasks if task.task_id == "t")
+    assert t.compared_metrics == ["pass_rate"]
+    assert t.unmeasured_metrics == ["mean_score"] and t.unscored_trials == 10
+    assert gate.status is GateStatus.UNEVALUABLE and gate.exit_code == 2
+    assert (
+        "1 task(s) with a stored metric the run did not measure: t (mean_score: "
+        "none of the 10 gradable trial(s) had a score)"
+    ) in gate.reasons
+
+
+def test_a_mean_score_only_baseline_names_the_missing_scores(tmp_path: Path) -> None:
+    manager = _baseline(tmp_path, mean_score=(0.9, 10))
+
+    gate = evaluate_gate(_run(scored=0, timeouts=5), manager)
+
+    task = gate.tasks[0]
+    assert task.outcome.value == "no_comparable_metrics"
+    assert task.reason == (
+        "the run measured none of the baseline's metrics: "
+        "mean_score: none of the 5 gradable trial(s) had a score"
+    )
+    assert gate.status is GateStatus.UNEVALUABLE
+
+
+def test_the_gate_records_the_unscored_count_and_round_trips_it(tmp_path: Path) -> None:
+    manager = _baseline(tmp_path, pass_rate=(0.8, 40), mean_score=(0.9, 32))
+
+    gate = evaluate_gate(_run(scored=32, timeouts=8), manager)
+
+    task = gate.tasks[0]
+    assert task.unscored_trials == 8 and task.unmeasured_metrics == []
+    assert gate.status is GateStatus.PASSED
+    data = json.loads(json.dumps(gate.to_dict()))
+    assert data["tasks"][0]["unscored_trials"] == 8
+    assert data["tasks"][0]["unmeasured_metrics"] == []
+    restored = type(gate).from_dict(data).tasks[0]
+    assert (restored.unscored_trials, restored.unmeasured_metrics) == (8, [])
+
+
+def test_the_ci_line_and_the_html_card_carry_the_unscored_count() -> None:
+    generator = ReportGenerator()
+    report = generator.build_report(_run(scored=4, timeouts=4))
+
+    assert report.unscored_trials == 4
+    assert "mean_score=0.9000, unscored_trials=4" in generator.render_ci_summary(report)
+    assert '<div class="label">Mean Score (4 unscored)</div>' in generator.render_html(report)
+    full = generator.build_report(_run(scored=3, timeouts=0))
+    assert "unscored" not in generator.render_ci_summary(full)
+
+
+def test_a_task_with_no_scored_trial_gets_no_mean_score_baseline(tmp_path: Path) -> None:
+    batch = _run(scored=0, timeouts=3)
+    for i in range(4):
+        batch.add_trial(_scored("u", i, 0.7))
+    report = ReportGenerator().build_report(batch)
+
+    manager = _store_from_report(report, tmp_path / "baselines.json")
+
+    unscored = manager.get_baseline("t")
+    scored = manager.get_baseline("u")
+    assert unscored is not None and scored is not None
+    assert set(unscored.metrics) == {"pass_rate"}
+    assert scored.metrics["mean_score"].sample_size == 4
+
+
+def test_a_measured_zero_mean_is_drawn_in_the_score_histogram() -> None:
+    batch = TrialBatch()
+    for i in range(3):
+        batch.add_trial(_scored("t", i, 0.0, passed=False))
+    html = ReportGenerator().render_html(ReportGenerator().build_report(batch))
+
+    assert "<h2>Score Distribution</h2>" in html
+
+
+def test_a_task_that_blocks_on_pass_rate_still_blocks_without_scores(tmp_path: Path) -> None:
+    """Agent failures are regression evidence: a total collapse blocks (exit 1)."""
+    manager = _baseline(tmp_path, pass_rate=(1.0, 20), mean_score=(0.9, 20))
+
+    gate = evaluate_gate(_run(scored=0, timeouts=10), manager)
+
+    task = gate.tasks[0]
+    assert task.unmeasured_metrics == ["mean_score"] and task.blocking
+    assert gate.status is GateStatus.BLOCKED and gate.exit_code == 1

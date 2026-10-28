@@ -50,7 +50,7 @@ class TaskSummary:
     num_trials: int
     pass_rate: float
     mean_score: float | None
-    std_score: float
+    std_score: float | None
     pass_at_k: dict[str, float | None] = field(default_factory=dict)
     reliability: dict[str, float | None] = field(default_factory=dict)
     gradable_trials: int | None = None
@@ -91,10 +91,9 @@ class ReportData:
     total_tasks: int = 0
     overall_pass_rate: float = 0.0
     # Mean over every scored gradable trial (``Trial.mean_score_value``);
-    # ``None`` when no trial has a score. ``scored_trials`` counts them
-    # (``None`` in a legacy report that did not record it).
+    # ``None`` when no trial has a score. ``scored_trials`` (at the end of
+    # the fields) counts them.
     overall_mean_score: float | None = None
-    scored_trials: int | None = None
 
     # Trials that are agent evidence (``Trial.is_gradable``): the
     # denominator of ``overall_pass_rate``. Harness failures and trials
@@ -140,6 +139,17 @@ class ReportData:
     # ``TrialBatch.provenance``. ``None`` for legacy artifacts and hand-built
     # batches; rendered in Markdown and HTML and round-tripped via JSON.
     provenance: RunProvenance | None = None
+
+    # Gradable trials with a score, the sample behind ``overall_mean_score``;
+    # ``None`` in a legacy report that did not record it.
+    scored_trials: int | None = None
+
+    @property
+    def unscored_trials(self) -> int | None:
+        """Gradable trials left out of the mean score for having no score."""
+        if self.scored_trials is None:
+            return None
+        return self.gradable_trials - self.scored_trials
 
     @property
     def excluded_trials(self) -> int:
@@ -352,7 +362,10 @@ class ReportGenerator:
 
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             mean_score = float(np.mean(scores)) if scores else None
-            std_score = float(np.std(scores, ddof=1)) if len(scores) > 1 else 0.0
+            if not scores:
+                std_score: float | None = None
+            else:
+                std_score = float(np.std(scores, ddof=1)) if len(scores) > 1 else 0.0
 
             task_pass_at_k = {
                 name: mv.value
@@ -522,6 +535,8 @@ class ReportGenerator:
             "mean_score="
             + ("n/a" if report.overall_mean_score is None else f"{report.overall_mean_score:.4f}"),
         ]
+        if report.unscored_trials:
+            lines[0] += f", unscored_trials={report.unscored_trials}"
 
         for key, val in sorted(report.pass_at_k.items()):
             lines[0] += f", {key}=" + ("n/a" if val is None else f"{val:.4f}")
@@ -600,7 +615,8 @@ class ReportGenerator:
             + _html_card("Trials", str(report.total_trials), "#6366f1")
             + _html_card("Pass Rate", pass_rate_text, pass_rate_color)
             + _html_card(
-                "Mean Score",
+                "Mean Score"
+                + (f" ({report.unscored_trials} unscored)" if report.unscored_trials else ""),
                 "n/a" if report.overall_mean_score is None else f"{report.overall_mean_score:.4f}",
                 "#8b5cf6",
             )
@@ -638,7 +654,7 @@ class ReportGenerator:
                 f'<td style="color:{pr_color};font-weight:600">'
                 f"{escape(_format_task_pass_rate(s, report))}</td>"
                 f"<td>{escape(_format_task_mean_score(s))}</td>"
-                f"<td>{'n/a' if s.mean_score is None else f'{s.std_score:.4f}'}</td></tr>\n"
+                f"<td>{'n/a' if s.std_score is None else f'{s.std_score:.4f}'}</td></tr>\n"
             )
 
         # --- Pass rate distribution chart ---
@@ -1035,8 +1051,8 @@ def _format_mean_score(report: ReportData) -> str:
     if report.overall_mean_score is None:
         return "n/a (no scored trials)"
     text = f"{report.overall_mean_score:.4f}"
-    if report.scored_trials is not None and report.scored_trials < report.gradable_trials:
-        unscored = report.gradable_trials - report.scored_trials
+    unscored = report.unscored_trials
+    if unscored:
         text += (
             f" (over {report.scored_trials} scored trials; {unscored} gradable "
             f"trial(s) without a score excluded)"
