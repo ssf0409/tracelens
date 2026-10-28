@@ -8,6 +8,56 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Changed
+
+- **Mean score reports the trials it leaves out.**
+  - Task summaries and the results JSON gain `scored_trials`, per task and
+    overall.
+  - The reports show beside the mean how many gradable trials had no score:
+    `0.9000 (1 unscored)` in the tables and the summary, `Mean Score (N
+    unscored)` on the HTML card, and `unscored_trials=N` on the CI line.
+  - A task or run with no scored trial now has `mean_score: null` (and
+    `std_score: null`), rendered `n/a`. It used to read 0.0. The fields are
+    typed `float | None`, and `ReportData()` now defaults
+    `overall_mean_score` to `None`. Scripts that copy
+    `task_summaries[].mean_score` into a baseline must skip `null`.
+  - Artifacts written before this still load with the values they recorded.
+
+  (#114)
+- **A stored metric the run did not measure is no longer silently skipped.**
+  The baseline gate records per task `unscored_trials` and
+  `unmeasured_metrics`. A metric the baseline stores but the run produced no
+  sample for makes the gate `UNEVALUABLE` (exit 2) and names the task, unless
+  the task already blocks on a metric it did measure. An agent that fails
+  every trial still blocks on `pass_rate`. In practice the unmeasured metric
+  is a `mean_score` baseline whose task had no scored trial.
+  Before, the metric dropped out of the comparison: a task that went from
+  graded failures to timeouts every run could pass with exit 0 beside a
+  healthy task. A `mean_score`-only baseline in the same situation now says
+  that no trial had a score, instead of "shares no metric". (#114)
+
+### Fixed
+
+- **`mean_score` means the same thing in the report, the baseline gate and
+  `compare`.** The trials at issue are gradable but have no score: a
+  timeout, or an agent failure before any grader ran.
+  - Before: the gate imputed 0.0 for such a trial, while the report's task
+    summaries and `compare` left it out. A baseline stored from
+    `task_summaries[]` therefore read an unchanged agent that timed out once
+    in five runs as `0.9000 -> 0.7200` SEVERE. At 40 runs a side the gate
+    blocked it (p ≈ 0.02).
+  - Now: all three apply one rule, `Trial.mean_score_value`. Such a trial is
+    left out of the mean and counted, and `pass_rate` still records it as a
+    failure.
+  - *Baseline semantics:* a `mean_score` baseline's `sample_size` is the new
+    `scored_trials`, not `num_trials`.
+  - The price: `mean_score` measures the trials that produced something to
+    grade. A candidate that turns scored failures into timeouts keeps its
+    `pass_rate` and can raise its `mean_score`, so read the unscored count
+    beside it.
+
+  (#114)
+
 ## [0.7.0] - 2026-10-14
 
 ### Added

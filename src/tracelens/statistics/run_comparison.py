@@ -202,7 +202,7 @@ class MetricSelector:
             return 1.0 if outcome.passed else 0.0
         if self.name == "mean_score":
             if self.grader_id is None:
-                return _finite(trial.aggregate_score)
+                return trial.mean_score_value
             outcome = _outcome_for(trial, self.grader_id)
             return None if outcome is None else _finite(float(outcome.score))
         grader_id, _, metric_name = self.name.partition(".")

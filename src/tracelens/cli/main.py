@@ -379,6 +379,13 @@ def _print_gate_diagnostics(gate: GateResult) -> None:
                 f"for task '{task.task_id}'",
                 file=sys.stderr,
             )
+        if task.unscored_trials and task.outcome is TaskGateOutcome.CHECKED:
+            print(
+                f"[tracelens] note: {task.unscored_trials} gradable trial(s) of task "
+                f"'{task.task_id}' had no score: they count as failures in "
+                f"pass_rate and are left out of mean_score",
+                file=sys.stderr,
+            )
         if task.outcome is TaskGateOutcome.NO_GRADABLE_TRIALS:
             print(
                 f"[tracelens] warning: no gradable trials for task "
@@ -387,12 +394,18 @@ def _print_gate_diagnostics(gate: GateResult) -> None:
                 file=sys.stderr,
             )
         elif task.outcome is TaskGateOutcome.NO_COMPARABLE_METRICS:
-            print(
-                f"[tracelens] warning: no comparable metrics for task "
-                f"'{task.task_id}'; store a baseline for at least "
-                f"one CLI metric: {', '.join(task.available_metrics)}",
-                file=sys.stderr,
-            )
+            if task.unmeasured_metrics:
+                print(
+                    f"[tracelens] warning: task '{task.task_id}': {task.reason}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[tracelens] warning: no comparable metrics for task "
+                    f"'{task.task_id}'; store a baseline for at least "
+                    f"one CLI metric: {', '.join(task.available_metrics)}",
+                    file=sys.stderr,
+                )
         elif task.infra_config_mismatch:
             diff = ", ".join(
                 f"{key}: {b} -> {c}"
