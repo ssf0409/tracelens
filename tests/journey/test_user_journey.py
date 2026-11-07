@@ -441,7 +441,14 @@ for task in results["task_summaries"]:
     baseline.add_metric(
         "pass_rate", task["pass_rate"], std=0.0, sample_size=graded, is_rate=True
     )
-    baseline.add_metric("mean_score", task["mean_score"], std=0.0, sample_size=graded)
+    # A trial without a score is a pass_rate failure but not a mean_score
+    # sample: the mean_score baseline's sample size is the scored count, and
+    # a task with no scored trial (mean_score null) gets no mean_score baseline.
+    if task["mean_score"] is not None:
+        baseline.add_metric(
+            "mean_score", task["mean_score"], std=0.0,
+            sample_size=task.get("scored_trials", graded),
+        )
     manager.set_baseline(baseline)
 manager.save()
 """

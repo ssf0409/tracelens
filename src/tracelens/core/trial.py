@@ -6,6 +6,7 @@ A Trial represents a single execution of a Task, including:
 - Status and timing information
 """
 
+import math
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -195,6 +196,25 @@ class Trial(BaseModel):
         pass^k and reported separately. See ``docs/statistical-contract.md``.
         """
         return self.status in _GRADABLE_STATUSES and not self.has_grader_error
+
+    @property
+    def mean_score_value(self) -> float | None:
+        """This trial's contribution to ``mean_score``, or ``None`` if it has none.
+
+        The one rule behind every mean score (the report, the baseline gate,
+        and ``tracelens compare``; statistical contract, "Pass rate and mean
+        score"): a gradable trial contributes its finite ``aggregate_score``.
+        A gradable trial without one (a timeout, or an agent failure before
+        any grader ran) is excluded from the mean and counted, because
+        ``pass_rate`` already records it as a failure. Harness failures and
+        trials that never ran contribute to neither metric.
+        """
+        if not self.is_gradable:
+            return None
+        score = self.aggregate_score
+        if score is None or not math.isfinite(score):
+            return None
+        return float(score)
 
     @property
     def fingerprint(self) -> str | None:
