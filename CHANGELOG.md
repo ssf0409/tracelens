@@ -8,6 +8,8 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-07
+
 ### Changed
 
 - **Mean score reports the trials it leaves out.**
