@@ -104,10 +104,14 @@ class TestJSONTaskLoader:
     def test_load_single_task(self, tmp_path: Path):
         """Test loading a single task from JSON."""
         task_file = tmp_path / "task.json"
-        task_file.write_text(json.dumps({
-            "name": "Test Task",
-            "input_data": {"goal": "Test"},
-        }))
+        task_file.write_text(
+            json.dumps(
+                {
+                    "name": "Test Task",
+                    "input_data": {"goal": "Test"},
+                }
+            )
+        )
 
         loader = JSONTaskLoader()
         tasks = loader.load(task_file)
@@ -118,12 +122,16 @@ class TestJSONTaskLoader:
     def test_load_tasks_array(self, tmp_path: Path):
         """Test loading tasks from array format."""
         task_file = tmp_path / "tasks.json"
-        task_file.write_text(json.dumps({
-            "tasks": [
-                {"name": "Task 1", "input_data": {"goal": "Goal 1"}},
-                {"name": "Task 2", "input_data": {"goal": "Goal 2"}},
-            ]
-        }))
+        task_file.write_text(
+            json.dumps(
+                {
+                    "tasks": [
+                        {"name": "Task 1", "input_data": {"goal": "Goal 1"}},
+                        {"name": "Task 2", "input_data": {"goal": "Goal 2"}},
+                    ]
+                }
+            )
+        )
 
         loader = JSONTaskLoader()
         tasks = loader.load(task_file)
@@ -134,17 +142,36 @@ class TestJSONTaskLoader:
 
     def test_load_from_directory(self, tmp_path: Path):
         """Test loading tasks from directory."""
-        (tmp_path / "task1.json").write_text(json.dumps({
-            "name": "Task 1", "input_data": {"goal": "Goal 1"}
-        }))
-        (tmp_path / "task2.json").write_text(json.dumps({
-            "name": "Task 2", "input_data": {"goal": "Goal 2"}
-        }))
+        (tmp_path / "task1.json").write_text(
+            json.dumps({"name": "Task 1", "input_data": {"goal": "Goal 1"}})
+        )
+        (tmp_path / "task2.json").write_text(
+            json.dumps({"name": "Task 2", "input_data": {"goal": "Goal 2"}})
+        )
 
         loader = JSONTaskLoader()
         tasks = loader.load(tmp_path)
 
         assert len(tasks) == 2
+
+    def test_load_json_rejects_duplicate_tasks(self, tmp_path: Path):
+        """JSONTaskLoader rejects duplicate task IDs in JSON file."""
+        import pytest
+
+        file = tmp_path / "dup.json"
+        file.write_text(
+            json.dumps(
+                {
+                    "tasks": [
+                        {"task_id": "t-dup", "name": "Task 1", "input_data": {}},
+                        {"task_id": "t-dup", "name": "Task 2", "input_data": {}},
+                    ]
+                }
+            )
+        )
+        loader = JSONTaskLoader()
+        with pytest.raises(ValueError, match=r"duplicate task ID\(s\) in eval set: 't-dup'"):
+            loader.load(file)
 
     def test_save_tasks(self, tmp_path: Path):
         """Test saving tasks to JSON."""
@@ -254,3 +281,24 @@ class TestEvalSet:
         assert result.name == "Test Suite"
         assert result.default_num_runs == 5
         assert result.default_grader_ids == ["g1"]
+
+    def test_eval_set_rejects_duplicate_task_ids(self):
+        """EvalSet rejects tasks with duplicate IDs."""
+        import pytest
+
+        t1 = Task(task_id="dup-id", name="Task 1", input_data={})
+        t2 = Task(task_id="dup-id", name="Task 2", input_data={})
+
+        with pytest.raises(ValueError, match=r"duplicate task ID\(s\) in eval set: 'dup-id'"):
+            EvalSet(name="Dupe Suite", tasks=[t1, t2])
+
+    def test_eval_set_add_task_rejects_duplicate_task_id(self):
+        """EvalSet.add_task rejects duplicate task ID."""
+        import pytest
+
+        t1 = Task(task_id="dup-id", name="Task 1", input_data={})
+        t2 = Task(task_id="dup-id", name="Task 2", input_data={})
+
+        eval_set = EvalSet(name="Suite", tasks=[t1])
+        with pytest.raises(ValueError, match=r"duplicate task ID\(s\) in eval set: 'dup-id'"):
+            eval_set.add_task(t2)

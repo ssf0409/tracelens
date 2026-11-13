@@ -32,15 +32,18 @@ and filters read (TraceLens itself doesn't interpret them).
 ```python
 from tracelens import Task, EvalSet
 
-eval_set = EvalSet(name="support-suite", tasks=[
-    Task(
-        name="refund within policy",
-        input_data={"ticket": "I want a refund for order #5512"},
-        metadata={"expected_action": "refund"},   # your grader reads this
-        category="task",
-        tags=["billing", "refund"],
-    ),
-])
+eval_set = EvalSet(
+    name="support-suite",
+    tasks=[
+        Task(
+            name="refund within policy",
+            input_data={"ticket": "I want a refund for order #5512"},
+            metadata={"expected_action": "refund"},  # your grader reads this
+            category="task",
+            tags=["billing", "refund"],
+        ),
+    ],
+)
 ```
 
 **Inline vs. from JSON.** Small suites can be inline; real suites live in a
@@ -82,8 +85,10 @@ by how your agent is exposed:
 ```python
 from tracelens import SimpleAdapter
 
+
 async def my_agent(input_data: dict) -> dict:
     return {"action": decide(input_data["ticket"])}
+
 
 adapter = SimpleAdapter(my_agent)
 ```
@@ -97,6 +102,7 @@ downstream is identical regardless of which adapter you pick.
 from datetime import UTC, datetime
 
 from tracelens import AgentAdapter, Task, Transcript
+
 
 class MyAdapter(AgentAdapter):
     provenance_version = "agent-2.3.0"  # bump when the agent code or prompt under test changes
@@ -114,6 +120,12 @@ under test changes, so a comparison can name what changed; a `SimpleAdapter`
 instance takes it too (`adapter.provenance_version = "agent-2.3.0"`). It is
 attribution evidence, not proof that the code is identical: see
 [Run provenance](reproducibility.md#run-provenance).
+
+**JSON Serialisability.** `transcript.final_output`, `intermediate_outputs`, and step
+content should be JSON-serialisable. If an adapter returns raw bytes or arbitrary Python
+objects, TraceLens safely coerces them at record time (e.g. decoding valid UTF-8 strings
+or preserving a readable string representation) so saving checkpoints and `--save-trials`
+never fails and artifacts remain safely inspectable via `tracelens inspect`.
 
 → A custom HTTP adapter end to end: [Evaluating a Real Agent](real-agent.md).
 
@@ -138,6 +150,7 @@ pass/score:
 
 ```python
 from tracelens import CodeGrader
+
 
 class ActionGrader(CodeGrader):
     provenance_version = "rubric-v1"  # bump when the rubric changes
@@ -244,7 +257,7 @@ from tracelens import ReportGenerator
 
 gen = ReportGenerator(k_values=[1, 3, 5], consistency_k_values=[2, 3, 5])
 report = gen.build_report(batch)
-print(gen.render_ci_summary(report))   # also render_markdown / render_html
+print(gen.render_ci_summary(report))  # also render_markdown / render_html
 ```
 
 **Gating CI on regressions** — once a run looks good, freeze it as a baseline and

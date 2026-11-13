@@ -52,9 +52,7 @@ def _validate_csv_header(path: Path, fieldnames: Sequence[str], input_field: str
     if blank_columns:
         raise ValueError(f"{path}: blank CSV column names are not allowed")
 
-    duplicate_columns = [
-        name for name, count in Counter(fieldnames).items() if count > 1
-    ]
+    duplicate_columns = [name for name, count in Counter(fieldnames).items() if count > 1]
     if duplicate_columns:
         names = ", ".join(repr(name) for name in duplicate_columns)
         raise ValueError(f"{path}: duplicate CSV column names: {names}")
@@ -109,6 +107,7 @@ class CSVTaskLoader(TaskLoader):
 
     def load(self, source: str | Path) -> list[Task]:
         tasks: list[Task] = []
+        seen: set[str] = set()
         for path in source_files(source, ".csv"):
             with open(path, newline="", encoding="utf-8") as file:
                 reader = csv.DictReader(file)
@@ -117,15 +116,19 @@ class CSVTaskLoader(TaskLoader):
                 _validate_csv_header(path, reader.fieldnames, self.input_field)
                 for line_number, row in enumerate(reader, start=2):
                     try:
-                        tasks.append(
-                            map_record(
-                                _decode_csv_record(row, self.input_field),
-                                input_field=self.input_field,
-                                metadata_fields=self.metadata_fields,
-                            )
+                        task = map_record(
+                            _decode_csv_record(row, self.input_field),
+                            input_field=self.input_field,
+                            metadata_fields=self.metadata_fields,
                         )
                     except ValueError as error:
                         raise ValueError(f"{path}:{line_number}: {error}") from error
+                    if task.task_id in seen:
+                        raise ValueError(
+                            f"{path}:{line_number}: duplicate task id: {task.task_id!r}"
+                        )
+                    seen.add(task.task_id)
+                    tasks.append(task)
         return tasks
 
     def save(self, tasks: list[Task], destination: str | Path) -> None:
