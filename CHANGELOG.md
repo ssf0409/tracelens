@@ -58,6 +58,12 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
   (#114)
 
+### Removed
+
+- **`ReportGenerator.build_report` no longer accepts a `baseline_manager`
+  argument.** The parameter was accepted and ignored; baseline comparison
+  happens in the gate. Callers that passed it must drop the argument. (#139)
+
 ## [0.7.0] - 2026-10-14
 
 ### Added
