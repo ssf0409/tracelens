@@ -612,9 +612,7 @@ class TestCSVTaskLoader:
             CSVTaskLoader().load(csv_file)
 
     @pytest.mark.parametrize("duplicate", ["input", "name", "metadata"])
-    def test_load_duplicate_column_names_raises(
-        self, tmp_path: Path, duplicate: str
-    ) -> None:
+    def test_load_duplicate_column_names_raises(self, tmp_path: Path, duplicate: str) -> None:
         csv_file = tmp_path / "duplicate-header.csv"
         csv_file.write_text(
             f"input,name,metadata,{duplicate}\nprompt,T,{{}},duplicate value\n",
@@ -925,11 +923,21 @@ class TestLoadTasksDispatch:
         from tracelens.loaders import load_tasks  # noqa: F401  (import check)
 
         json_path = tmp_path / "tasks.json"
-        json_path.write_text(json.dumps({"tasks": [
-            {"task_id": r["task_id"], "name": r["name"], "input_data": r["input"],
-             "metadata": {"subject": r["subject"]}}
-            for r in self.RECORDS
-        ]}))
+        json_path.write_text(
+            json.dumps(
+                {
+                    "tasks": [
+                        {
+                            "task_id": r["task_id"],
+                            "name": r["name"],
+                            "input_data": r["input"],
+                            "metadata": {"subject": r["subject"]},
+                        }
+                        for r in self.RECORDS
+                    ]
+                }
+            )
+        )
         jsonl_path = tmp_path / "tasks.jsonl"
         jsonl_path.write_text("\n".join(json.dumps(r) for r in self.RECORDS) + "\n")
         csv_path = tmp_path / "tasks.csv"
@@ -1013,3 +1021,29 @@ class TestLoadTasksDispatch:
         weird.write_text("tasks: []\n")
         with pytest.raises(EvalSetLoadError, match="unsupported eval-set file type '.yaml'"):
             load_tasks(weird)
+
+    def test_duplicate_task_ids_rejected_in_jsonl_and_csv(self, tmp_path: Path) -> None:
+        from tracelens.loaders import EvalSetLoadError, load_tasks
+
+        jsonl_path = tmp_path / "dup.jsonl"
+        _write_jsonl(
+            jsonl_path,
+            [
+                {"task_id": "dup-1", "input": "first"},
+                {"task_id": "dup-1", "input": "second"},
+            ],
+        )
+        with pytest.raises(EvalSetLoadError, match="duplicate task id: 'dup-1'"):
+            load_tasks(jsonl_path)
+
+        csv_path = tmp_path / "dup.csv"
+        _write_csv(
+            csv_path,
+            [
+                {"task_id": "dup-2", "input": "first"},
+                {"task_id": "dup-2", "input": "second"},
+            ],
+            ["task_id", "input"],
+        )
+        with pytest.raises(EvalSetLoadError, match="duplicate task id: 'dup-2'"):
+            load_tasks(csv_path)

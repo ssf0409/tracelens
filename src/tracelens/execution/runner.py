@@ -99,9 +99,7 @@ class RunnerConfig:
     # your environment makes broader classes unambiguous infra, e.g.
     # ``DEFAULT_INFRA_EXCEPTION_TYPES + (OSError,)``. The runner's own
     # budget timeout is classified TIMEOUT before this set is consulted.
-    infra_exception_types: tuple[type[BaseException], ...] = (
-        DEFAULT_INFRA_EXCEPTION_TYPES
-    )
+    infra_exception_types: tuple[type[BaseException], ...] = DEFAULT_INFRA_EXCEPTION_TYPES
 
     # Trials that end INFRA_ERROR are re-attempted up to this many extra
     # times. FAILED and TIMEOUT never retry: those are observations about
@@ -154,6 +152,12 @@ class EvaluationRunner:
 
     async def run(self, eval_set: EvalSet) -> TrialBatch:
         """Run all tasks × runs and grade results."""
+        seen_task_ids: set[str] = set()
+        for task in eval_set.tasks:
+            if task.task_id in seen_task_ids:
+                raise ValueError(f"duplicate task id: {task.task_id!r}")
+            seen_task_ids.add(task.task_id)
+
         batch = TrialBatch(started_at=utc_now())
         # Record what is about to be measured (task content, graders, runner
         # settings) and which candidate is under test, before any trial
@@ -254,8 +258,7 @@ class EvaluationRunner:
             identity = data.get("identity")
             if not isinstance(identity, dict):
                 raise CheckpointError(
-                    f"Corrupt checkpoint file {path}: envelope is missing its "
-                    "run identity."
+                    f"Corrupt checkpoint file {path}: envelope is missing its run identity."
                 )
         else:
             # Bare-TrialBatch checkpoint written by TraceLens <= 0.3.x.
@@ -272,8 +275,7 @@ class EvaluationRunner:
             loaded = TrialBatch.from_dict(batch_data)  # type: ignore[arg-type]
         except ValidationError as exc:
             raise CheckpointError(
-                f"Corrupt checkpoint file {path}: does not contain a valid "
-                f"trial batch ({exc})."
+                f"Corrupt checkpoint file {path}: does not contain a valid trial batch ({exc})."
             ) from exc
 
         if identity is not None:
@@ -308,27 +310,19 @@ class EvaluationRunner:
         current = self._checkpoint_identity
         assert current is not None  # set at the top of run()
         if not isinstance(identity, dict):
-            raise CheckpointError(
-                f"Corrupt checkpoint file {path}: malformed run identity."
-            )
+            raise CheckpointError(f"Corrupt checkpoint file {path}: malformed run identity.")
         mismatches: list[str] = []
         if identity.get("eval_set_hash") != current["eval_set_hash"]:
             mismatches.append(
                 "eval set content (note: checkpointing requires stable, "
                 "explicit task_ids — auto-generated ids change every run)"
             )
-        if identity.get("decision_spec_fingerprint") != current[
-            "decision_spec_fingerprint"
-        ]:
+        if identity.get("decision_spec_fingerprint") != current["decision_spec_fingerprint"]:
             mismatches.append("decision spec")
         if identity.get("adapter") != current["adapter"]:
-            mismatches.append(
-                f"adapter ({identity.get('adapter')!r} vs {current['adapter']!r})"
-            )
+            mismatches.append(f"adapter ({identity.get('adapter')!r} vs {current['adapter']!r})")
         # Order-insensitive: reordering graders doesn't change what was graded.
-        if sorted(map(str, identity.get("graders") or [])) != sorted(
-            current["graders"]
-        ):
+        if sorted(map(str, identity.get("graders") or [])) != sorted(current["graders"]):
             mismatches.append("graders")
         if mismatches:
             raise CheckpointError(
@@ -397,8 +391,7 @@ class EvaluationRunner:
             retried_errors.append(trial.error_message or "")
             backoff = self.config.infra_retry_backoff_seconds * 2 ** (attempt - 1)
             logger.warning(
-                "Infra error on task %s run %d (attempt %d/%d): %s — "
-                "retrying in %.1fs",
+                "Infra error on task %s run %d (attempt %d/%d): %s — retrying in %.1fs",
                 task.task_id,
                 run_index,
                 attempt,
@@ -425,8 +418,7 @@ class EvaluationRunner:
         if (
             stop_event is not None
             and not stop_event.is_set()
-            and trial.status
-            in (TrialStatus.FAILED, TrialStatus.INFRA_ERROR, TrialStatus.TIMEOUT)
+            and trial.status in (TrialStatus.FAILED, TrialStatus.INFRA_ERROR, TrialStatus.TIMEOUT)
             and not trial.metadata.get("teardown_failed")
         ):
             stop_event.set()
@@ -493,9 +485,7 @@ class EvaluationRunner:
             except Exception as exc:
                 setup_failed = True
                 is_infra = isinstance(exc, self.config.infra_exception_types)
-                trial.status = (
-                    TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
-                )
+                trial.status = TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                 trial.error_message = f"Setup failed: {exc}"
                 trial.error_traceback = traceback.format_exc()
                 logger.error(
@@ -522,9 +512,7 @@ class EvaluationRunner:
                     # adapter-raised TimeoutError is wrapped by
                     # _call_adapter_run so it classifies below instead.
                     trial.status = TrialStatus.TIMEOUT
-                    trial.error_message = (
-                        f"Trial timed out after {self.config.timeout_seconds}s"
-                    )
+                    trial.error_message = f"Trial timed out after {self.config.timeout_seconds}s"
                     logger.warning(
                         "Trial timed out for task %s run %d after %.1fs",
                         task.task_id,
@@ -535,9 +523,7 @@ class EvaluationRunner:
                     if isinstance(exc, _AdapterTimeoutError):
                         exc = exc.original
                     is_infra = isinstance(exc, self.config.infra_exception_types)
-                    trial.status = (
-                        TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
-                    )
+                    trial.status = TrialStatus.INFRA_ERROR if is_infra else TrialStatus.FAILED
                     trial.error_message = str(exc)
                     trial.error_traceback = traceback.format_exc()
                     logger.error(
@@ -554,17 +540,14 @@ class EvaluationRunner:
             except Exception as teardown_exc:
                 if trial.status == TrialStatus.COMPLETED:
                     trial.status = TrialStatus.FAILED
-                    trial.error_message = (
-                        f"Teardown failed: {teardown_exc}"
-                    )
+                    trial.error_message = f"Teardown failed: {teardown_exc}"
                     trial.error_traceback = traceback.format_exc()
                     # The run itself succeeded; record the distinction so
                     # fail_fast doesn't abort a suite over cleanup flakiness.
                     trial.metadata["teardown_failed"] = True
                 else:
                     trial.error_message = (
-                        f"{trial.error_message}; "
-                        f"Teardown also failed: {teardown_exc}"
+                        f"{trial.error_message}; Teardown also failed: {teardown_exc}"
                     )
                 logger.error(
                     "Teardown failed for task %s run %d: %s",
@@ -595,12 +578,14 @@ class EvaluationRunner:
                     trial.trial_id,
                     exc,
                 )
-                trial.add_outcome(Outcome(
-                    trial_id=trial.trial_id,
-                    grader_id=grader.grader_id,
-                    passed=False,
-                    score=0.0,
-                    metrics={"_grader_error": 1.0},
-                    feedback=f"GRADER CRASH (not an agent failure): {exc}",
-                    grader_error=True,
-                ))
+                trial.add_outcome(
+                    Outcome(
+                        trial_id=trial.trial_id,
+                        grader_id=grader.grader_id,
+                        passed=False,
+                        score=0.0,
+                        metrics={"_grader_error": 1.0},
+                        feedback=f"GRADER CRASH (not an agent failure): {exc}",
+                        grader_error=True,
+                    )
+                )
