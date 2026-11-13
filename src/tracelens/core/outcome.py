@@ -4,15 +4,18 @@ An Outcome represents the result of grading a Trial - whether it passed,
 the score achieved, and detailed metrics.
 """
 
+import logging
 import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from tracelens.core._time import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class GradeLevel(str, Enum):
@@ -57,6 +60,17 @@ class Outcome(BaseModel):
             feedback="Tasks are specific but could use more context references",
         )
     """
+    @model_validator(mode="before")
+    @classmethod
+    def _log_dropped_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            dropped = set(data) - set(cls.model_fields)
+            if dropped:
+                logger.warning(
+                    "ignoring unknown fields in Outcome: %s",
+                    ", ".join(sorted(dropped)),
+                )
+        return data
 
     outcome_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     trial_id: str
