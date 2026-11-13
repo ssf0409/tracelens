@@ -44,7 +44,11 @@ CLI = (
 def tracelens(*args: str, cwd: Path, expect: int) -> subprocess.CompletedProcess[str]:
     """Run one documented command and assert its exit code, with context on failure."""
     result = subprocess.run(
-        [*CLI, *args], cwd=cwd, capture_output=True, text=True, timeout=300,
+        [*CLI, *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     assert result.returncode == expect, (
         f"tracelens {' '.join(args)}\nexit {result.returncode}, expected {expect}\n"
@@ -66,7 +70,7 @@ def enable_gate(config: Path) -> None:
     for i in range(start + 1, len(lines)):
         if not lines[i].startswith("  #   "):
             break
-        lines[i] = "    " + lines[i][len("  #   "):]
+        lines[i] = "    " + lines[i][len("  #   ") :]
     config.write_text("".join(lines))
 
 
@@ -97,25 +101,42 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     # 1. Scaffold, and refuse to clobber it.
     init = tracelens("init", ".", cwd=project, expect=0)
     assert "Next: tracelens run --config tracelens.yaml" in init.stdout
-    for relative in ("tracelens.yaml", "eval/tasks.json", "eval/adapter.py", "eval/grader.py",
-                     "eval/README.md", ".github/workflows/eval.yml"):
+    for relative in (
+        "tracelens.yaml",
+        "eval/tasks.json",
+        "eval/adapter.py",
+        "eval/grader.py",
+        "eval/README.md",
+        ".github/workflows/eval.yml",
+    ):
         assert (project / relative).is_file(), relative
     assert (project / "pyproject.toml").read_text().startswith("[project]")
+    eval_workflow = (project / ".github/workflows/eval.yml").read_text()
+    assert "push:\n    branches: [main]" in eval_workflow
     tracelens("init", ".", cwd=project, expect=2)
 
     # 2. The one documented command: outputs land where the config says.
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
     assert run.stdout.startswith("TraceLens: 2 tasks, 10 trials, pass_rate=100.0%")
     assert f"[tracelens] wrote results: {results}" in run.stderr
-    assert trials.is_file() and report.is_file() and (project / "eval/results/report.html").is_file()
+    assert (
+        trials.is_file() and report.is_file() and (project / "eval/results/report.html").is_file()
+    )
     data = load(results)
     assert data["gate"]["status"] == "not_requested"
-    assert set(data["provenance"]["measurement"]["task_hashes"]) == {"starter-capital", "starter-math"}
+    assert set(data["provenance"]["measurement"]["task_hashes"]) == {
+        "starter-capital",
+        "starter-math",
+    }
 
     # 3. Store baselines exactly as the README says.
     snippet = subprocess.run(
-        [sys.executable, "-"], input=readme_snippet(project / "eval/README.md"),
-        cwd=project, capture_output=True, text=True, timeout=120,
+        [sys.executable, "-"],
+        input=readme_snippet(project / "eval/README.md"),
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     assert snippet.returncode == 0, snippet.stderr
     baselines = load(project / "eval/baselines.json")
@@ -124,10 +145,14 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     # 4. Enable the gate in tracelens.yaml; the trusted agent passes it.
     enable_gate(config)
     init_force = tracelens("init", ".", "--force", cwd=project, expect=0)
-    assert "kept tracelens.yaml (edited); pass --overwrite-edited to replace it" in init_force.stdout
+    assert (
+        "kept tracelens.yaml (edited); pass --overwrite-edited to replace it" in init_force.stdout
+    )
     assert "baseline:" in config.read_text()
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=0)
-    assert "Baseline check: 2 checked, 0 skipped (no baseline), 0 blocking regression(s)" in run.stdout
+    assert (
+        "Baseline check: 2 checked, 0 skipped (no baseline), 0 blocking regression(s)" in run.stdout
+    )
     assert load(results)["gate"]["status"] == "passed"
     trusted_trials = project / "eval/results/trusted-trials.json"
     trusted_trials.write_text(trials.read_text())
@@ -141,6 +166,12 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     gate = load(results)["gate"]
     assert gate["status"] == "blocked" and gate["exit_code"] == 1
     assert gate["blocking_regressions"] == 2
+    # Issue #118: one-trial baselines have no dispersion; the recorded
+    # regressions carry an honest p-value (never a fabricated 0.0), and the
+    # gate still blocks on the drop.
+    for task_gate in gate["tasks"]:
+        for reg in task_gate["regressions"]:
+            assert reg["p_value"] is None or reg["p_value"] > 0.0
     assert "BLOCKED" in report.read_text()
 
     # 6. inspect explains the failure from the trials file, validating task content.
@@ -164,8 +195,15 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     # Restoring original task content allows inspect with --eval-set to succeed.
     tasks.write_text(orig_tasks)
     inspect = tracelens(
-        "inspect", "eval/results/trials.json", "--failures", "--eval-set", "eval/tasks.json",
-        "--html", "eval/results/failures.html", cwd=project, expect=0,
+        "inspect",
+        "eval/results/trials.json",
+        "--failures",
+        "--eval-set",
+        "eval/tasks.json",
+        "--html",
+        "eval/results/failures.html",
+        cwd=project,
+        expect=0,
     )
     assert "passed 0, agent failure 10, infra error 0, grader error 0, not run 0" in inspect.stdout
     assert "starter-capital run 0  agent failure  status=completed" in inspect.stdout
@@ -255,27 +293,47 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     # 8. Fix it and rerun only the affected task; the gate checks just that task.
     adapter.write_text(source)
     run = tracelens(
-        "run", "--config", "tracelens.yaml", "--task-id", "starter-capital", cwd=project, expect=0,
+        "run",
+        "--config",
+        "tracelens.yaml",
+        "--task-id",
+        "starter-capital",
+        cwd=project,
+        expect=0,
     )
     assert "[tracelens] running 1 of 2 task(s): starter-capital" in run.stderr
     data = load(results)
-    assert data["total_tasks"] == 1 and data["gate"]["status"] == "passed" and data["gate"]["checked"] == 1
+    assert (
+        data["total_tasks"] == 1
+        and data["gate"]["status"] == "passed"
+        and data["gate"]["checked"] == 1
+    )
     tracelens(
-        "run", "--config", "tracelens.yaml", "--task-id", "no-such-task", cwd=project, expect=2,
+        "run",
+        "--config",
+        "tracelens.yaml",
+        "--task-id",
+        "no-such-task",
+        cwd=project,
+        expect=2,
     )
 
     # 9. An infra outage on one task is unevaluable, not a failure of the agent.
-    adapter.write_text(source.replace(
-        TRUSTED,
-        'if input_data["question"].startswith("What is 2"):\n'
-        '        raise ConnectionError("connection refused")\n'
-        f"    {TRUSTED}",
-    ))
+    adapter.write_text(
+        source.replace(
+            TRUSTED,
+            'if input_data["question"].startswith("What is 2"):\n'
+            '        raise ConnectionError("connection refused")\n'
+            f"    {TRUSTED}",
+        )
+    )
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=2)
     assert "UNEVALUABLE" in run.stdout
     gate = load(results)["gate"]
     assert gate["status"] == "unevaluable" and gate["skipped_no_gradable"] == 1
-    inspect = tracelens("inspect", "eval/results/trials.json", "--kind", "infra", cwd=project, expect=0)
+    inspect = tracelens(
+        "inspect", "eval/results/trials.json", "--kind", "infra", cwd=project, expect=0
+    )
     assert "starter-math run 0  infra error  status=infra_error" in inspect.stdout
     assert "error:    connection refused" in inspect.stdout
     assert "starter-capital" not in inspect.stdout
@@ -283,11 +341,13 @@ def test_documented_user_journey(tmp_path: Path) -> None:
 
     # 10. A grader crash is unevaluable too, and never counted against the agent.
     grader_source = grader.read_text()
-    anchor = "    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:\n"
+    anchor = (
+        "    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:\n"
+    )
     assert anchor in grader_source
-    grader.write_text(grader_source.replace(
-        anchor, anchor + '        raise ValueError("rubric missing")\n'
-    ))
+    grader.write_text(
+        grader_source.replace(anchor, anchor + '        raise ValueError("rubric missing")\n')
+    )
     run = tracelens("run", "--config", "tracelens.yaml", cwd=project, expect=2)
     assert load(results)["gate"]["status"] == "unevaluable"
     assert load(results)["grader_error_count"] == 10
@@ -308,17 +368,26 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     assert "unknown key(s) under run: num_run" in run.stderr and run.stdout == ""
 
     # 12. Checkpoint and resume: the second run re-executes nothing.
-    adapter.write_text(source.replace(
-        TRUSTED,
-        "from pathlib import Path\n"
-        '    with Path("calls.log").open("a", encoding="utf-8") as log:\n'
-        '        log.write(input_data["question"] + "\\n")\n'
-        f"    {TRUSTED}",
-    ))
+    adapter.write_text(
+        source.replace(
+            TRUSTED,
+            "from pathlib import Path\n"
+            '    with Path("calls.log").open("a", encoding="utf-8") as log:\n'
+            '        log.write(input_data["question"] + "\\n")\n'
+            f"    {TRUSTED}",
+        )
+    )
     checkpoint_args = (
-        "run", "--config", "tracelens.yaml", "--no-baseline-check", "--num-runs", "2",
-        "--checkpoint", "eval/results/checkpoint.json",
-        "--output", "eval/results/checkpoint-results.json",
+        "run",
+        "--config",
+        "tracelens.yaml",
+        "--no-baseline-check",
+        "--num-runs",
+        "2",
+        "--checkpoint",
+        "eval/results/checkpoint.json",
+        "--output",
+        "eval/results/checkpoint-results.json",
     )
     tracelens(*checkpoint_args, cwd=project, expect=0)
     calls = (project / "calls.log").read_text().splitlines()
@@ -344,13 +413,25 @@ def test_documented_user_journey(tmp_path: Path) -> None:
 
     # 14. The saved artifacts are readable by the other documented commands.
     rendered = tracelens(
-        "report", "--results", "eval/results/results.json", "--format", "markdown",
-        cwd=project, expect=0,
+        "report",
+        "--results",
+        "eval/results/results.json",
+        "--format",
+        "markdown",
+        cwd=project,
+        expect=0,
     )
     assert "## Baseline Gate" in rendered.stdout and "## Run Provenance" in rendered.stdout
     tracelens(
-        "sample", "--trials", "eval/results/trials.json", "--size", "2",
-        "--output", "eval/results/review.json", cwd=project, expect=0,
+        "sample",
+        "--trials",
+        "eval/results/trials.json",
+        "--size",
+        "2",
+        "--output",
+        "eval/results/review.json",
+        cwd=project,
+        expect=0,
     )
     worksheet = load(project / "eval/results/review.json")
     assert isinstance(worksheet, list)
@@ -360,8 +441,11 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     # 15. The human-evaluation loop: fill worksheet and reconcile.
     # Empty worksheet without human_score exits 2 (no usable rows).
     tracelens(
-        "reconcile", "--annotations", "eval/results/review.json",
-        cwd=project, expect=2,
+        "reconcile",
+        "--annotations",
+        "eval/results/review.json",
+        cwd=project,
+        expect=2,
     )
 
     # Agreeing review worksheet: human agrees with grader with sufficient variance to compute Pearson r.
@@ -383,11 +467,19 @@ def test_documented_user_journey(tmp_path: Path) -> None:
             "notes": "Agree fail",
         },
     ]
-    (project / "eval/results/review-agree.json").write_text(json.dumps(agreeing_worksheet, indent=2))
+    (project / "eval/results/review-agree.json").write_text(
+        json.dumps(agreeing_worksheet, indent=2)
+    )
     reconcile_pass = tracelens(
-        "reconcile", "--annotations", "eval/results/review-agree.json",
-        "--threshold", "0.7", "--output", "eval/results/calibration-pass.json",
-        cwd=project, expect=0,
+        "reconcile",
+        "--annotations",
+        "eval/results/review-agree.json",
+        "--threshold",
+        "0.7",
+        "--output",
+        "eval/results/calibration-pass.json",
+        cwd=project,
+        expect=0,
     )
     assert "Pearson r:" in reconcile_pass.stdout
     assert "Calibrated:           YES" in reconcile_pass.stdout
@@ -414,11 +506,19 @@ def test_documented_user_journey(tmp_path: Path) -> None:
             "notes": "Disagree",
         },
     ]
-    (project / "eval/results/review-disagree.json").write_text(json.dumps(disagreeing_worksheet, indent=2))
+    (project / "eval/results/review-disagree.json").write_text(
+        json.dumps(disagreeing_worksheet, indent=2)
+    )
     reconcile_fail = tracelens(
-        "reconcile", "--annotations", "eval/results/review-disagree.json",
-        "--threshold", "0.7", "--output", "eval/results/calibration-fail.json",
-        cwd=project, expect=1,
+        "reconcile",
+        "--annotations",
+        "eval/results/review-disagree.json",
+        "--threshold",
+        "0.7",
+        "--output",
+        "eval/results/calibration-fail.json",
+        cwd=project,
+        expect=1,
     )
     assert "Pearson r:" in reconcile_fail.stdout
     assert "Calibrated:           NO - DRIFT DETECTED" in reconcile_fail.stdout

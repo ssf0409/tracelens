@@ -109,6 +109,10 @@ run:
   adapter: eval.adapter.StarterAdapter
   graders:
     - eval.grader.StarterGrader
+  # num_runs: 5 gives the gate dispersion to measure regressions against.
+  # num_runs: 1 is fine for a deterministic starter agent (docs/accuracy.md),
+  # but a single-trial gate can only detect complete pass/fail breaks; it
+  # cannot establish statistical significance and reports insufficient_data.
   num_runs: 5
   outputs:
     results: eval/results/results.json
@@ -150,15 +154,16 @@ construction: it proves the wiring, not your agent.
 ## 2. What the CI workflow does
 
 `.github/workflows/eval.yml` runs the same `tracelens run --config
-tracelens.yaml` on every pull request to `main` (and on manual dispatch),
-posts the Markdown report to the job summary, and uploads the results as
-artifacts. Until you enable the gate in step 4 it is an integration smoke
-test: it fails only if the run itself errors.
+tracelens.yaml` on push to `main` and every pull request to `main` (and on manual
+dispatch), posts the Markdown report to the job summary, and uploads the
+results as artifacts. Until you enable the gate in step 4 it is an integration
+smoke test: it fails only if the run itself errors.
 
 Installation in CI:
 
-- an existing uv project is installed from `uv.lock` (`uv sync --frozen`),
+- an existing uv project with a lockfile is installed from `uv.lock` (`uv sync --frozen`),
   so CI matches your local environment;
+- a project without `uv.lock` syncs from `pyproject.toml` (`uv sync`);
 - a bare repository gets a fresh environment;
 - TraceLens is installed only if the project does not already provide it,
   pinned to `__REQUIREMENT__`. Bump the pin on purpose.
@@ -205,16 +210,21 @@ could not have blocked at all exits 2 instead of passing.
        # baseline's sample size has to be that same count: pairing it with
        # num_trials would credit the baseline with infra-errored runs it
        # never graded, and the exact test would round the success count up
-       # to match.
+       # to match. No std is stored: a one-trial baseline has no dispersion
+       # to measure, and inventing one would fabricate a p-value.
        graded = task.get("gradable_trials") or task["num_trials"]
        baseline.add_metric(
-           "pass_rate", task["pass_rate"], std=0.05,
-           sample_size=graded, is_rate=True
+           "pass_rate", task["pass_rate"], sample_size=graded, is_rate=True
        )
        manager.set_baseline(baseline)
    manager.save()
    EOF
    ```
+
+   Note on sample size: for a single trial (`num_runs: 1`), the gate can detect
+   outright failures based on thresholds, but will flag `insufficient_data`
+   (reporting no statistical p-value). For non-deterministic agents, run with
+   multiple trials (e.g. `num_runs: 5`) to establish dispersion.
 
 2. In `tracelens.yaml`, uncomment the `baseline:` block:
 
@@ -252,6 +262,8 @@ WORKFLOW_TEMPLATE = """name: TraceLens Evaluation
 # eval suite runs on every pull request and fails only if the run errors.
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
     # Every pull request is evaluated so agent code changes never skip the
@@ -349,9 +361,7 @@ def render_readme(requirement: str | None = None) -> str:
 
 def render_workflow(requirement: str | None = None) -> str:
     """The generated ``.github/workflows/eval.yml`` for the given requirement."""
-    return WORKFLOW_TEMPLATE.replace(
-        "__REQUIREMENT__", requirement or tracelens_requirement()
-    )
+    return WORKFLOW_TEMPLATE.replace("__REQUIREMENT__", requirement or tracelens_requirement())
 
 
 def add_init_parser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
