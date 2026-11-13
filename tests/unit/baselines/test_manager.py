@@ -237,9 +237,7 @@ class TestBaselineDecisionSpecRoundTrip:
             task_id="t1",
             decision_spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)),
         )
-        baseline.add_metric(
-            metric_name="mean_score", value=0.2, std=0.001, sample_size=10
-        )
+        baseline.add_metric(metric_name="mean_score", value=0.2, std=0.001, sample_size=10)
         manager.set_baseline(baseline)
         manager.save()
 
@@ -266,9 +264,7 @@ class TestDecisionSpecWritePath:
     def test_update_baseline_stores_decision_spec(self, tmp_path: Path) -> None:
         manager = BaselineManager(tmp_path / "baselines.json")
 
-        baseline = manager.update_baseline(
-            "t1", {"pass_rate": 1.0}, decision_spec=self._spec(2048)
-        )
+        baseline = manager.update_baseline("t1", {"pass_rate": 1.0}, decision_spec=self._spec(2048))
 
         assert baseline.decision_spec is not None
         assert baseline.fingerprint == self._spec(2048).fingerprint
@@ -279,9 +275,7 @@ class TestDecisionSpecWritePath:
         manager = BaselineManager(tmp_path / "baselines.json")
         spec = self._spec(2048)
 
-        baseline = manager.create_capability_baseline(
-            "t1", {"pass_rate": 1.0}, decision_spec=spec
-        )
+        baseline = manager.create_capability_baseline("t1", {"pass_rate": 1.0}, decision_spec=spec)
 
         assert baseline.decision_spec == spec
         assert baseline.fingerprint == spec.fingerprint
@@ -292,25 +286,19 @@ class TestDecisionSpecWritePath:
         manager = BaselineManager(tmp_path / "baselines.json")
         spec = self._spec(2048)
 
-        baseline = manager.create_canary_baseline(
-            "t1", {"pass_rate": 1.0}, decision_spec=spec
-        )
+        baseline = manager.create_canary_baseline("t1", {"pass_rate": 1.0}, decision_spec=spec)
 
         assert baseline.fingerprint == spec.fingerprint
         assert baseline.decision_spec == spec
 
-    def test_promote_refreshes_spec_and_archives_the_old_one(
-        self, tmp_path: Path
-    ) -> None:
+    def test_promote_refreshes_spec_and_archives_the_old_one(self, tmp_path: Path) -> None:
         manager = BaselineManager(tmp_path / "baselines.json")
         old_spec, new_spec = self._spec(2048), self._spec(512)
         baseline = manager.create_capability_baseline(
             "t1", {"pass_rate": 1.0}, sample_size=20, decision_spec=old_spec
         )
 
-        baseline.promote(
-            {"pass_rate": 1.0}, sample_size=20, decision_spec=new_spec
-        )
+        baseline.promote({"pass_rate": 1.0}, sample_size=20, decision_spec=new_spec)
 
         assert baseline.decision_spec == new_spec
         assert baseline.fingerprint == new_spec.fingerprint
@@ -320,13 +308,35 @@ class TestDecisionSpecWritePath:
 
     def test_force_promote_threads_decision_spec(self, tmp_path: Path) -> None:
         manager = BaselineManager(tmp_path / "baselines.json")
-        manager.create_capability_baseline(
-            "t1", {"pass_rate": 1.0}, decision_spec=self._spec(2048)
-        )
+        manager.create_capability_baseline("t1", {"pass_rate": 1.0}, decision_spec=self._spec(2048))
 
-        promoted = manager.force_promote(
-            "t1", {"pass_rate": 1.0}, decision_spec=self._spec(512)
-        )
+        promoted = manager.force_promote("t1", {"pass_rate": 1.0}, decision_spec=self._spec(512))
 
         assert promoted.decision_spec == self._spec(512)
         assert promoted.fingerprint == self._spec(512).fingerprint
+
+    def test_compare_to_baseline_with_ci_no_baseline(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        res = manager.compare_to_baseline_with_ci("nonexistent", {"accuracy": [1.0, 1.0]})
+        assert res == {"_no_baseline": True}
+
+    def test_compare_to_baseline_with_ci_success(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / "baselines.json")
+        manager.create_capability_baseline(
+            "t1",
+            {"accuracy": 0.8},
+            sample_size=10,
+        )
+        res = manager.compare_to_baseline_with_ci(
+            "t1",
+            {"accuracy": [0.85, 0.9, 0.8, 0.85, 0.9], "unknown_metric": [1.0]},
+            confidence=0.95,
+            n_bootstrap=100,
+        )
+        assert "accuracy" in res
+        assert "unknown_metric" not in res
+        assert "delta" in res["accuracy"]
+        assert "is_significant" in res["accuracy"]
+        assert "is_regression" in res["accuracy"]
+        assert res["accuracy"]["baseline"]["mean"] == 0.8
+        assert res["accuracy"]["higher_is_better"] is True
