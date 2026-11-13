@@ -176,6 +176,8 @@ automatic path is off, the manual path is two clicks and one review.
    mkdocs build --strict                           # docs still build
    ```
 
+   Also ensure `docs/snippets/dependency_pin.toml` reflects the newly released version constraint (e.g. `tracelens>=X.Y.Z`).
+
 4. **Smoke test from a clean environment** once PyPI lists the version:
 
    ```bash
@@ -254,9 +256,7 @@ If the workflows are unavailable, the tag-driven path still works on its own:
 Downstream projects should depend on TraceLens from PyPI:
 
 ```toml
-dependencies = [
-    "tracelens>=0.3.0",
-]
+--8<-- "docs/snippets/dependency_pin.toml"
 ```
 
 Public GitHub or PyPI dependencies do not need a CI secret. A secret is only
