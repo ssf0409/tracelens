@@ -25,10 +25,15 @@ summary report. Pass `--save-trials`:
 tracelens run \
   --eval-set tasks.json \
   --adapter my.Adapter \
-  --graders my.Grader \
+  --graders examples.graders.quality_grader.QualityGrader \
   --num-runs 5 \
   --save-trials trials.json
 ```
+
+`QualityGrader` in [`examples/graders/quality_grader.py`](https://github.com/ssf0409/tracelens/blob/main/examples/graders/quality_grader.py)
+is a runnable, zero-argument `LLMGrader` example that reads provider configuration
+from environment variables (`TRACELENS_JUDGE_PROVIDER`) and falls back offline to an in-memory
+mock, making it ideal for testing this workflow.
 
 `trials.json` is a serialized `TrialBatch`: every trial with its transcript and
 grader outcome. That is all `sample` needs.

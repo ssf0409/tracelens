@@ -8,6 +8,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI-loadable, environment-driven `QualityGrader` example.**
+  Updated `QualityGrader` in `examples/graders/quality_grader.py` to be
+  zero-argument loadable by `tracelens run --graders`. It builds its
+  `LLMProvider` dynamically from environment variables
+  (`TRACELENS_JUDGE_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and
+  falls back to an offline `InMemoryProvider` for offline calibration and CI.
+  Documented in `docs/grader-library.md` and `docs/human-eval.md`. (#138)
+
 ### Changed
 
 - **Mean score reports the trials it leaves out.**
