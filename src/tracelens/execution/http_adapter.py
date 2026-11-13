@@ -17,14 +17,14 @@ from pydantic import BaseModel, Field, model_validator
 
 from tracelens.core.task import Task
 from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
+from tracelens.core.trial import InfraError
 from tracelens.execution.agent_adapter import AgentAdapter
 
 if TYPE_CHECKING:
     import httpx
 
 _HTTPX_REQUIRED_MESSAGE = (
-        "httpx is required for HTTPAPIAdapter. "
-        "Install it with: pip install tracelens[http]"
+    "httpx is required for HTTPAPIAdapter. Install it with: pip install tracelens[http]"
 )
 
 
@@ -39,6 +39,7 @@ def _require_httpx() -> Any:
 
 class AuthScheme(StrEnum):
     """Supported authentication schemes."""
+
     BEARER = "bearer"
     API_KEY = "api_key"
     CUSTOM = "custom"
@@ -46,6 +47,7 @@ class AuthScheme(StrEnum):
 
 class AuthConfig(BaseModel):
     """Authentication configuration for HTTP requests."""
+
     scheme: AuthScheme = AuthScheme.BEARER
     token: str | None = None
     api_key_header: str = "X-API-Key"
@@ -73,6 +75,7 @@ class AuthConfig(BaseModel):
 
 class RetryConfig(BaseModel):
     """Retry configuration with exponential backoff."""
+
     max_retries: int = Field(default=3, ge=0)
     base_delay: float = Field(default=1.0, gt=0)
     max_delay: float = Field(default=30.0, gt=0)
@@ -82,6 +85,7 @@ class RetryConfig(BaseModel):
 
 class HTTPAdapterConfig(BaseModel):
     """Full configuration for HTTPAPIAdapter."""
+
     base_url: str
     endpoint: str = "/"
     method: str = "POST"
@@ -158,18 +162,20 @@ class HTTPAPIAdapter(AgentAdapter):
                 )
 
                 # Record attempt as a tool call step
-                transcript.add_step(TranscriptStep(
-                    step_type=StepType.TOOL_CALL,
-                    tool_call=ToolCall(
-                        tool_name="http_request",
-                        arguments={
-                            "method": self.config.method,
-                            "url": f"{self.config.base_url}{self.config.endpoint}",
-                            "attempt": attempt + 1,
-                        },
-                        result={"status_code": response.status_code},
-                    ),
-                ))
+                transcript.add_step(
+                    TranscriptStep(
+                        step_type=StepType.TOOL_CALL,
+                        tool_call=ToolCall(
+                            tool_name="http_request",
+                            arguments={
+                                "method": self.config.method,
+                                "url": f"{self.config.base_url}{self.config.endpoint}",
+                                "attempt": attempt + 1,
+                            },
+                            result={"status_code": response.status_code},
+                        ),
+                    )
+                )
 
                 if response.status_code in retry_cfg.retry_on_status_codes:
                     last_error = httpx.HTTPStatusError(
@@ -179,7 +185,7 @@ class HTTPAPIAdapter(AgentAdapter):
                     )
                     if attempt < retry_cfg.max_retries:
                         delay = min(
-                            retry_cfg.base_delay * (retry_cfg.backoff_factor ** attempt),
+                            retry_cfg.base_delay * (retry_cfg.backoff_factor**attempt),
                             retry_cfg.max_delay,
                         )
                         await asyncio.sleep(delay)
@@ -191,23 +197,30 @@ class HTTPAPIAdapter(AgentAdapter):
 
             except httpx.HTTPStatusError:
                 raise
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
-                    httpx.PoolTimeout, httpx.ConnectTimeout) as exc:
+            except httpx.TransportError as exc:
                 last_error = exc
-                transcript.add_step(TranscriptStep(
-                    step_type=StepType.ERROR,
-                    error=f"HTTP request attempt {attempt + 1} failed: {exc}",
-                ))
+                transcript.add_step(
+                    TranscriptStep(
+                        step_type=StepType.ERROR,
+                        error=f"HTTP request attempt {attempt + 1} failed: {exc}",
+                    )
+                )
                 if attempt < retry_cfg.max_retries:
                     delay = min(
-                        retry_cfg.base_delay * (retry_cfg.backoff_factor ** attempt),
+                        retry_cfg.base_delay * (retry_cfg.backoff_factor**attempt),
                         retry_cfg.max_delay,
                     )
                     await asyncio.sleep(delay)
                     continue
-                raise
+                raise InfraError(
+                    f"HTTP request failed after {attempt + 1} attempt(s): {exc}"
+                ) from exc
 
-        raise last_error or RuntimeError("All retry attempts exhausted")
+        if last_error is not None:
+            if isinstance(last_error, httpx.TransportError):
+                raise InfraError(f"HTTP request failed: {last_error}") from last_error
+            raise last_error
+        raise RuntimeError("All retry attempts exhausted")
 
     async def run(self, task: Task) -> Transcript:
         """Invoke the HTTP agent and return a transcript."""
@@ -218,10 +231,12 @@ class HTTPAPIAdapter(AgentAdapter):
             result = self.parse_response_body(raw_response)
 
             transcript.final_output = result
-            transcript.add_step(TranscriptStep(
-                step_type=StepType.AGENT_OUTPUT,
-                content=result,
-            ))
+            transcript.add_step(
+                TranscriptStep(
+                    step_type=StepType.AGENT_OUTPUT,
+                    content=result,
+                )
+            )
         except Exception as exc:
             self.record_error(transcript, exc)
             raise
