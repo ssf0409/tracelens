@@ -147,46 +147,58 @@ class TestCompositeGraderPolicy:
         assert outcome.passed is False
 
     @pytest.mark.asyncio
-    async def test_warn_failure_doesnt_fail_overall(
+    async def test_warn_failure_doesnt_fail_overall_with_gate(
         self, sample_task, sample_transcript
     ) -> None:
-        """Warn grader failure doesn't fail overall (by default)."""
+        """Warn grader failure doesn't fail overall when GATE passes."""
         composite = CompositeGrader(
             grader_id="composite",
             graders=[
+                (SimpleScoreGrader(
+                    "gate",
+                    score=1.0,
+                    passed=True,
+                    config=GraderConfig(policy=EvalPolicy.GATE),
+                ), 0.4),
                 (SimpleScoreGrader(
                     "latency",
                     score=0.3,
                     passed=False,
                     config=GraderConfig(policy=EvalPolicy.WARN),
-                ), 0.5),
+                ), 0.3),
                 (SimpleScoreGrader(
                     "quality",
                     score=0.9,
                     passed=True,
                     config=GraderConfig(policy=EvalPolicy.TRACK),
-                ), 0.5),
+                ), 0.3),
             ],
         )
 
         outcome = await composite.grade(sample_transcript, sample_task)
-        # Warn failures don't block by default
+        # Warn failures don't block when GATE passes
         assert outcome.passed is True
 
     @pytest.mark.asyncio
-    async def test_track_failure_doesnt_fail_overall(
+    async def test_track_failure_doesnt_fail_overall_with_gate(
         self, sample_task, sample_transcript
     ) -> None:
-        """Track grader failure never fails overall."""
+        """Track grader failure never fails overall when GATE passes."""
         composite = CompositeGrader(
             grader_id="composite",
             graders=[
+                (SimpleScoreGrader(
+                    "gate",
+                    score=1.0,
+                    passed=True,
+                    config=GraderConfig(policy=EvalPolicy.GATE),
+                ), 0.5),
                 (SimpleScoreGrader(
                     "clarity",
                     score=0.2,
                     passed=False,
                     config=GraderConfig(policy=EvalPolicy.TRACK),
-                ), 1.0),
+                ), 0.5),
             ],
         )
 
