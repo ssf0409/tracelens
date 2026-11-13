@@ -83,9 +83,7 @@ class CIQualityGrader(CodeGrader):
         actual = transcript.final_output.get("answer")
         return {"correct": 1.0 if actual == expected else 0.0}
 
-    def determine_pass(
-        self, metrics: dict[str, float], task: Task
-    ) -> tuple[bool, float]:
+    def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
         return metrics["correct"] == 1.0, metrics["correct"]
 ```
 
@@ -534,10 +532,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - run: uv python install 3.12
-      - run: uv sync
+      - run: uv sync --frozen
 
       - name: Run evaluation and keep trials
         run: |

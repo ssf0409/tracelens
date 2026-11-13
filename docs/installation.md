@@ -50,8 +50,7 @@ git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
 
 # Install with development tools
-uv venv
-uv pip install -e ".[dev,http,llm]"
+uv sync --extra dev --extra http
 ```
 
 See [Contributor Testing](contributor-testing.md) for the local verification
@@ -84,12 +83,12 @@ jobs:
   eval:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - name: Set up Python
         run: uv python install 3.12
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
       - name: Run evaluation
         run: |
           uv run tracelens run \

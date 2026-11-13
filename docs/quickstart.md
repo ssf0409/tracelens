@@ -19,7 +19,7 @@ uv pip install tracelens
 # Or for development
 git clone https://github.com/ssf0409/tracelens.git
 cd tracelens
-uv pip install -e ".[dev]"
+uv sync --extra dev --extra http
 ```
 
 ## 2. Define Tasks
@@ -63,6 +63,7 @@ An agent is any async function that takes input and returns output:
 ```python
 from typing import Any
 
+
 async def math_agent(input_data: dict[str, Any]) -> dict[str, Any]:
     a = input_data["a"]
     b = input_data["b"]
@@ -97,9 +98,7 @@ class MathGrader(CodeGrader):
     def __init__(self) -> None:
         super().__init__(grader_id="math")
 
-    def compute_metrics(
-        self, transcript: Transcript, task: Task
-    ) -> dict[str, float]:
+    def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
         expected = task.metadata["expected"]
         actual = transcript.final_output.get("answer")
         if actual is None:
@@ -109,9 +108,7 @@ class MathGrader(CodeGrader):
             "error": abs(actual - expected),
         }
 
-    def determine_pass(
-        self, metrics: dict[str, float], task: Task
-    ) -> tuple[bool, float]:
+    def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
         return metrics["correct"] == 1.0, metrics["correct"]
 ```
 

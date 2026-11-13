@@ -16,7 +16,7 @@ the ladder as the blast radius grows.
 | Environment | Use When | Required Commands |
 |-------------|----------|-------------------|
 | Editable dev checkout | Changing source, tests, or docs locally. | `uv sync --extra dev --extra http` |
-| Local verification gate | Before every PR. | `uv lock --check`, `uv run --frozen --extra dev pytest -q`, `uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous`, `uv run --frozen --extra dev mypy src/tracelens/` |
+| Local verification gate | Before every PR. | `make verify` (or: `uv lock --check`, `uv run --frozen --extra dev ruff check src/ tests/ examples/ scripts/ benchmarks/high-stakes-autonomous`, `uv run --frozen --extra dev mypy src/tracelens/`, `uv run --frozen --extra dev pytest -q --cov=tracelens --cov-report=term-missing --cov-fail-under=90`) |
 | Built artifact smoke | Changing packaging, CLI, public imports, README, or release metadata. | Build wheel/sdist, install the wheel into a clean venv, run import and CLI smoke tests. |
 | Downstream integration smoke | Changing public APIs, dependency metadata, adapters, baselines, or statistics. | Install the built wheel into a small downstream fixture or real downstream project and run its TraceLens-facing tests. |
 | PyPI release | Maintainer-only final publish path. | Push `vX.Y.Z`; GitHub Actions publishes with PyPI trusted publishing. |
@@ -43,10 +43,16 @@ The core test suite must not require live LLM credentials.
 Run this before opening or updating a PR:
 
 ```bash
+make verify
+```
+
+Or run the individual gate checks:
+
+```bash
 uv lock --check
-uv run --frozen --extra dev pytest -q
-uv run --frozen --extra dev ruff check src/ tests/ examples/ benchmarks/high-stakes-autonomous
+uv run --frozen --extra dev ruff check src/ tests/ examples/ scripts/ benchmarks/high-stakes-autonomous
 uv run --frozen --extra dev mypy src/tracelens/
+uv run --frozen --extra dev pytest -q --cov=tracelens --cov-report=term-missing --cov-fail-under=90
 ```
 
 If your change touches examples, run the changed examples directly. At minimum:
@@ -148,6 +154,21 @@ trusted publishing configuration, or package metadata that cannot be validated
 with a local wheel. For normal source, docs, examples, and API changes, the
 built artifact smoke is faster and closer to what maintainers need before
 tagging a release.
+
+## Docker Environment
+
+The repository includes a `Dockerfile` and `docker-compose.yml` for running the
+test suite and verification tools inside an isolated container:
+
+```bash
+docker compose run --rm test
+docker compose run --rm test-coverage
+docker compose run --rm type-check
+docker compose run --rm lint
+```
+
+Docker files are strictly developer tools and are excluded from the published
+source distribution (`sdist`).
 
 ## Contributor Boundaries
 

@@ -25,9 +25,7 @@ What alternatives did you consider and why did you reject them?
 
 ## Verification
 
-- [ ] `pytest -q` passes locally
-- [ ] `ruff check src/ tests/` passes
-- [ ] `mypy src/tracelens/` passes (strict)
+- [ ] `make verify` passes locally (`uv lock --check`, ruff check across all paths, strict mypy, pytest with 90% coverage floor)
 - [ ] New / changed code is covered by tests
 - [ ] `CHANGELOG.md`: entry under `[Unreleased]` for every user-visible change (never inside a released section; none needed for internal changes)
 - [ ] If touching `DecisionSpec`, baseline, or regression logic: backwards-compat note in that entry
