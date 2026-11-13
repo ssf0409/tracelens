@@ -25,8 +25,8 @@ from tracelens import estimate_metric
 scores = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]  # 8/10 = 0.80
 est = estimate_metric(scores, confidence=0.95, seed=0)
 
-print(est)                       # MetricEstimate(0.8000 [0.5000, 1.0000], n=10)
-print(est.mean, est.ci_width)    # 0.8 0.5
+print(est)  # MetricEstimate(0.8000 [0.5000, 1.0000], n=10)
+print(est.mean, est.ci_width)  # 0.8 0.5
 ```
 
 A 95% CI of `[0.50, 1.00]` on a pass rate of `0.80` is the honest message here: **with only 10 trials, "0.80" could plausibly be anything from a coin flip to perfect.** That width is your signal to run more trials.
@@ -61,17 +61,17 @@ point, lo, hi = bootstrap_ci(scores, statistic="mean", seed=0)
 ```python
 from tracelens import compare_metrics
 
-baseline = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]   # v1: 0.80
-current  = [1, 1, 1, 1, 1, 1, 0, 1, 1, 1]   # v2: 0.90
+baseline = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]  # v1: 0.80
+current = [1, 1, 1, 1, 1, 1, 0, 1, 1, 1]  # v2: 0.90
 
 result = compare_metrics(baseline, current, compute_p_value=True, seed=0)
 
-print(result.delta)            # 0.1    (current - baseline)
-print(result.relative_delta)   # 0.125  (delta / |baseline mean|)
+print(result.delta)  # 0.1    (current - baseline)
+print(result.relative_delta)  # 0.125  (delta / |baseline mean|)
 print(result.ci_lower, result.ci_upper)  # -0.2 0.4  (CI of the difference)
-print(result.is_significant)   # False  — CI of the difference includes 0
-print(result.cohens_d)         # 0.268  — small effect
-print(result.p_value)          # 1.0    — not significant
+print(result.is_significant)  # False  — CI of the difference includes 0
+print(result.cohens_d)  # 0.268  — small effect
+print(result.p_value)  # 1.0    — not significant
 ```
 
 Full signature:
@@ -175,13 +175,12 @@ This is the path `compare_metrics(..., compute_p_value=True)` runs internally (u
 
 ## 5. How many samples?
 
-Every tool above gets sharper with more data. The lever is `num_runs` (and the number of tasks):
+Every tool above gets sharper with more data, but the sampling unit determines which lever matters:
 
-- **More `num_runs` per task tightens every CI.** The `[0.50, 1.00]` interval from 10 trials shrinks fast as you add runs — and a tighter difference CI is what flips a real improvement from "not significant" to "significant."
-- **Rule of thumb from [Accuracy Best Practices](accuracy.md): if a CI width exceeds `0.1`, you need more runs or more tasks.** That doc has a full sample-size table.
-- **The pass@k / pass^k estimators need enough trials per task.** `pass_at_k_estimator(results_per_task, k)` and `pass_to_k_estimator(results_per_task, k)` only compute on tasks that have at least `k` samples; tasks with too few are skipped (`pass^k`) or fall back to an empirical rate (`pass@k`). With `k=5` and only 3 runs per task, you're not measuring what you think you are.
-
-A practical loop: run, call `estimate_metric`, check `ci_width`; if it's above `0.1`, raise `num_runs` and rerun. Once the CIs are tight, `compare_metrics` between versions becomes trustworthy.
+- **The task is the sampling unit for suite-level comparisons.** Increasing `num_runs` per task reduces per-task measurement variance, but suite-level comparison uncertainty (`compare_runs` / `tracelens compare`) shrinks primarily by adding more **tasks** to the evaluation suite.
+- **Rule of thumb from [Accuracy Best Practices](accuracy.md): if a suite-level CI width exceeds `0.1`, add more tasks.** More runs per task help non-deterministic tasks stabilize their mean, but cannot substitute for task diversity.
+- **The pass@k / pass^k estimators need at least `k` gradable trials per task.** `pass_at_k` and `pass_to_k` require at least `k` trials on a task to be eligible. Tasks with fewer than `k` trials are marked ineligible; they are omitted from the suite estimator with eligible/total counts reported, never using a placeholder empirical rate.
+- **For comparing versions on the same eval suite, use paired comparisons.** For two runs of the same evaluation tasks, use `compare_runs` (`tracelens compare`), which pairs task-level performance. `compare_metrics` treats trials as independent unpaired samples and should only be used when samples are genuinely independent draws (such as latency samples or unrelated cohorts).
 
 ---
 
