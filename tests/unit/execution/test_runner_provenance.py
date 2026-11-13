@@ -36,17 +36,21 @@ class _Pass(CodeGrader):
 
 
 def _suite() -> EvalSet:
-    return EvalSet(name="suite", tasks=[
-        Task(task_id="a", name="a", input_data={"x": 1}),
-        Task(task_id="b", name="b", input_data={"x": 2}),
-    ])
+    return EvalSet(
+        name="suite",
+        tasks=[
+            Task(task_id="a", name="a", input_data={"x": 1}),
+            Task(task_id="b", name="b", input_data={"x": 2}),
+        ],
+    )
 
 
 def test_run_records_provenance_and_checkpoint_identity_agrees(tmp_path: Path) -> None:
     checkpoint = tmp_path / "cp.json"
     spec = DecisionSpec(model=ModelConfig(provider="p", model_id="m"))
     runner = EvaluationRunner(
-        _Echo(), [_Pass()],
+        _Echo(),
+        [_Pass()],
         RunnerConfig(num_runs=2, checkpoint_path=str(checkpoint)),
         decision_spec=spec,
     )
@@ -58,9 +62,7 @@ def test_run_records_provenance_and_checkpoint_identity_agrees(tmp_path: Path) -
     assert prov.started_at == batch.started_at and prov.completed_at == batch.completed_at
     assert prov.measurement.eval_set_name == "suite"
     assert prov.measurement.eval_set_hash == eval_set_hash(_suite())
-    assert prov.measurement.task_hashes == {
-        t.task_id: task_content_hash(t) for t in _suite().tasks
-    }
+    assert prov.measurement.task_hashes == {t.task_id: task_content_hash(t) for t in _suite().tasks}
     assert [g.name for g in prov.measurement.graders] == ["always"]
     assert prov.measurement.runner.num_runs == 2
     assert prov.candidate.adapter.class_path.endswith("_Echo")
@@ -73,6 +75,7 @@ def test_run_records_provenance_and_checkpoint_identity_agrees(tmp_path: Path) -
         "adapter": prov.candidate.adapter.class_path,
         "graders": [g.class_path for g in prov.measurement.graders],
         "decision_spec_fingerprint": spec.fingerprint,
+        "num_runs": 2,
     }
 
 
