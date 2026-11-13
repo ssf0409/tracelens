@@ -180,9 +180,7 @@ class TestEvaluateGate:
         baseline.decision_spec = DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048))
         manager.set_baseline(baseline)
         current = DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512))
-        gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True, True], spec=current)), manager
-        )
+        gate = evaluate_gate(_batch(*_runs("t1", [True, True, True], spec=current)), manager)
         task = gate.tasks[0]
         assert task.infra_config_mismatch
         assert task.infra_config_diff["memory_hard_limit_mb"] == (2048, 512)
@@ -214,7 +212,11 @@ class TestGateResultModel:
         baseline.decision_spec = DecisionSpec(infra=InfraConfig(cpu_hard_limit=2.0))
         manager.set_baseline(baseline)
         batch = _batch(
-            *_runs("t1", [False, False, False], spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0))),
+            *_runs(
+                "t1",
+                [False, False, False],
+                spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0)),
+            ),
             *_runs("t2", [True, True]),
             *_runs("t3", [True]),
         )
@@ -240,8 +242,12 @@ class TestHelpers:
         assert [r["pass_rate"] for r in results] == [1.0, 0.0]  # pass, timeout-as-failure
 
     def test_spec_from_trials_prefers_latest_and_reports_mix(self):
-        old = _trial("t", True, run_index=0, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)))
-        new = _trial("t", True, run_index=1, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512)))
+        old = _trial(
+            "t", True, run_index=0, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048))
+        )
+        new = _trial(
+            "t", True, run_index=1, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512))
+        )
         spec, warning = spec_from_trials([old, new])
         assert spec is not None and spec.infra is not None
         assert spec.infra.memory_hard_limit_mb == 512
@@ -253,10 +259,23 @@ class TestHelpers:
 
 def test_gate_without_task_argument_uses_all_tasks(tmp_path):
     gate = evaluate_gate(
-        _batch(*_runs("t1", [True])), _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
+        _batch(*_runs("t1", [True, True, True])), _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
     )
     assert gate.status in (GateStatus.PASSED, GateStatus.BLOCKED)
     assert pytest.approx(gate.noise_band) == 0.03
+
+
+class TestSampleWarnings:
+    def test_warns_at_n_1_and_n_2_for_threshold(self, tmp_path):
+        manager = _manager(tmp_path, {"t1": {"pass_rate": 1.0}})
+        gate_n1 = evaluate_gate(_batch(*_runs("t1", [True])), manager)
+        assert any("sample size (n=1) is too small" in w for w in gate_n1.warnings)
+
+        gate_n2 = evaluate_gate(_batch(*_runs("t1", [True, True])), manager)
+        assert any("sample size (n=2) is too small" in w for w in gate_n2.warnings)
+
+        gate_n3 = evaluate_gate(_batch(*_runs("t1", [True, True, True])), manager)
+        assert not any("is too small to reliably detect drops" in w for w in gate_n3.warnings)
 
 
 class TestTaskContentIdentity:
@@ -300,15 +319,12 @@ class TestTaskContentIdentity:
             "(aaaaaaaaaaaa -> bbbbbbbbbbbb); re-store the baseline for this task"
         )
         assert gate.skipped_task_content_changed == 1 and gate.checked == 0
-        assert (
-            "1 task(s) whose content changed since their baseline was stored: t1"
-            in gate.reasons
-        )
+        assert "1 task(s) whose content changed since their baseline was stored: t1" in gate.reasons
         assert "1 skipped (task content changed)" in gate.summary_line()
 
     def test_matching_content_is_compared_normally(self, tmp_path):
         gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True])),
+            _batch(*_runs("t1", [True, True, True])),
             self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
             task_hashes={"t1": "a" * 64},
         )
@@ -316,7 +332,7 @@ class TestTaskContentIdentity:
 
     def test_unhashed_baseline_is_compared_with_a_warning(self, tmp_path):
         gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True])),
+            _batch(*_runs("t1", [True, True, True])),
             _manager(tmp_path, {"t1": {"pass_rate": 1.0}}),
             task_hashes={"t1": "a" * 64},
         )
@@ -328,7 +344,7 @@ class TestTaskContentIdentity:
 
     def test_without_current_hashes_nothing_changes(self, tmp_path):
         gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True])),
+            _batch(*_runs("t1", [True, True, True])),
             self._manager_with_hashes(tmp_path, {"t1": "a" * 64}),
         )
         assert gate.status is GateStatus.PASSED and gate.warnings == []

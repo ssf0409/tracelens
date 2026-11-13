@@ -483,10 +483,10 @@ def _trials_needed(
 class RegressionSeverity(str, Enum):
     """Severity levels for regressions."""
 
-    NONE = "none"           # No regression
-    MINOR = "minor"         # < 5% decline
-    MODERATE = "moderate"   # 5-15% decline (default blocking threshold)
-    SEVERE = "severe"       # > 15% decline
+    NONE = "none"  # No regression
+    MINOR = "minor"  # < 5% decline
+    MODERATE = "moderate"  # 5-15% decline (default blocking threshold)
+    SEVERE = "severe"  # > 15% decline
 
 
 # The severity ladder, least to most severe; blocking compares positions.

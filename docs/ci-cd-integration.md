@@ -83,9 +83,7 @@ class CIQualityGrader(CodeGrader):
         actual = transcript.final_output.get("answer")
         return {"correct": 1.0 if actual == expected else 0.0}
 
-    def determine_pass(
-        self, metrics: dict[str, float], task: Task
-    ) -> tuple[bool, float]:
+    def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
         return metrics["correct"] == 1.0, metrics["correct"]
 ```
 
@@ -438,6 +436,11 @@ baseline = TaskBaseline(
         required_confidence=0.95,
     ),
 )
+# std represents the observed sample standard deviation across trials and
+# decides statistical significance in regression testing. For single-trial
+# runs (n=1), no dispersion exists: store without std (std=0.0) so the gate
+# evaluates delta thresholds and reports insufficient_data rather than a
+# fabricated p-value.
 baseline.add_metric(
     metric_name="pass_rate",
     value=0.92,

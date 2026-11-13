@@ -8,6 +8,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scaffold gate defaults and single-trial dispersion.** `tracelens init` no
+  longer stores an invented `std=0.05` for one-trial baselines in `eval/README.md`
+  (step 4.1), and `tracelens.yaml` now documents single-trial detection limits
+  with guidance to raise `num_runs` when evaluating non-deterministic agents or
+  LLM graders. The scaffolded `.github/workflows/eval.yml` workflow triggers on
+  push to `main` as well as pull requests, and supports projects without
+  `uv.lock` via `pyproject.toml`. (#118)
+
 ### Changed
 
 - **Mean score reports the trials it leaves out.**

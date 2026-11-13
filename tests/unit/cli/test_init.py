@@ -26,7 +26,7 @@ def enable_gate_block(config_text: str) -> str:
     for i in range(start + 1, len(lines)):
         if not lines[i].startswith("  #   "):
             break
-        lines[i] = "    " + lines[i][len("  #   "):]
+        lines[i] = "    " + lines[i][len("  #   ") :]
     return "".join(lines)
 
 
@@ -39,6 +39,7 @@ class TestWorkflowTemplate:
     def test_is_valid_yaml_with_expected_shape(self):
         data = yaml.safe_load(render_workflow("tracelens==1.2.3"))
         triggers = _triggers(data)
+        assert triggers["push"] == {"branches": ["main"]}
         assert triggers["pull_request"] == {"branches": ["main"]}
         assert "paths" not in triggers["pull_request"]
         assert "workflow_dispatch" in triggers
@@ -50,6 +51,7 @@ class TestWorkflowTemplate:
     def test_install_step_is_reproducible_and_pins_tracelens(self):
         text = render_workflow("tracelens==1.2.3")
         assert "uv sync --frozen" in text
+        assert "uv sync" in text
         assert "uv venv --python 3.12" in text
         assert 'uv pip install "tracelens==1.2.3"' in text
         assert 'python -c "import tracelens"' in text  # only when missing
@@ -142,7 +144,10 @@ class TestReadmeTemplate:
         assert "tracelens inspect eval/results/trials.json --failures" in text
         assert "from tracelens import BaselineManager, TaskBaseline" in text
         assert "uncomment the `baseline:` block" in text
-        assert "--baseline-check --baselines-file eval/baselines.json --fail-on-regression moderate" in text
+        assert (
+            "--baseline-check --baselines-file eval/baselines.json --fail-on-regression moderate"
+            in text
+        )
         assert "Prove that it blocks" in text
         assert "0 = gate passed, 1 = blocked, 2 = misconfigured or unevaluable" in text
 
