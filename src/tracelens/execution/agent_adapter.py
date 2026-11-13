@@ -10,7 +10,7 @@ from typing import Any
 
 from tracelens.core._time import utc_now
 from tracelens.core.task import Task
-from tracelens.core.transcript import StepType, Transcript, TranscriptStep
+from tracelens.core.transcript import StepType, ToolCall, Transcript, TranscriptStep
 
 
 class AgentAdapter(ABC):
@@ -65,12 +65,57 @@ class AgentAdapter(ABC):
         ))
         transcript.completed_at = utc_now()
 
+    def record_llm_call(
+        self,
+        transcript: Transcript,
+        *,
+        model: str | None = None,
+        content: Any = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+    ) -> TranscriptStep:
+        """Helper to record an LLM call with token counts."""
+        step = TranscriptStep(
+            step_type=StepType.LLM_CALL,
+            model=model,
+            content=content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+        transcript.add_step(step)
+        return step
+
+    def record_tool_call(
+        self,
+        transcript: Transcript,
+        tool_name: str,
+        arguments: dict[str, Any],
+        result: Any | None = None,
+        error: str | None = None,
+        duration_ms: float | None = None,
+    ) -> TranscriptStep:
+        """Helper to record a tool call."""
+        tool_call = ToolCall(
+            tool_name=tool_name,
+            arguments=arguments,
+            result=result,
+            error=error,
+            duration_ms=duration_ms,
+        )
+        step = TranscriptStep(
+            step_type=StepType.TOOL_CALL,
+            tool_call=tool_call,
+        )
+        transcript.add_step(step)
+        return step
+
 
 class SimpleAdapter(AgentAdapter):
     """Wraps any async callable as an AgentAdapter.
 
     Useful for testing and simple single-shot agents that take
-    input_data and return a result.
+    input_data and return a result. Optionally accepts a usage extractor
+    returning (tokens_in, tokens_out).
 
     Example:
         async def my_fn(input_data: dict) -> dict:
@@ -79,8 +124,14 @@ class SimpleAdapter(AgentAdapter):
         adapter = SimpleAdapter(my_fn)
     """
 
-    def __init__(self, fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> None:
+    def __init__(
+        self,
+        fn: Callable[[dict[str, Any]], Awaitable[Any]],
+        *,
+        usage_fn: Callable[[Any], tuple[int, int]] | None = None,
+    ) -> None:
         self._fn = fn
+        self._usage_fn = usage_fn
 
     async def run(self, task: Task) -> Transcript:
         """Invoke the wrapped function and build a transcript."""
@@ -88,9 +139,17 @@ class SimpleAdapter(AgentAdapter):
         try:
             result = await self._fn(task.input_data)
             transcript.final_output = result
+            tokens_in, tokens_out = (None, None)
+            if self._usage_fn is not None:
+                try:
+                    tokens_in, tokens_out = self._usage_fn(result)
+                except Exception:
+                    pass
             transcript.add_step(TranscriptStep(
                 step_type=StepType.AGENT_OUTPUT,
                 content=result,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
             ))
         except Exception as exc:
             self.record_error(transcript, exc)
