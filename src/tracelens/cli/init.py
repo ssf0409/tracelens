@@ -93,6 +93,22 @@ class StarterGrader(CodeGrader):
     ) -> tuple[bool, float]:
         score = metrics["exact_match"]
         return score == 1.0, score
+
+    def explain(
+        self,
+        metrics: dict[str, float],
+        transcript: Transcript,
+        task: Task,
+    ) -> str | None:
+        if metrics.get("exact_match") == 1.0:
+            return None
+        expected = str(task.metadata.get("expected_answer", "")).strip()
+        actual = (
+            str(transcript.final_output.get("answer", "")).strip()
+            if isinstance(transcript.final_output, dict)
+            else str(transcript.final_output).strip()
+        )
+        return f"expected {expected!r}, got {actual!r}"
 '''
 
 
@@ -349,9 +365,7 @@ def render_readme(requirement: str | None = None) -> str:
 
 def render_workflow(requirement: str | None = None) -> str:
     """The generated ``.github/workflows/eval.yml`` for the given requirement."""
-    return WORKFLOW_TEMPLATE.replace(
-        "__REQUIREMENT__", requirement or tracelens_requirement()
-    )
+    return WORKFLOW_TEMPLATE.replace("__REQUIREMENT__", requirement or tracelens_requirement())
 
 
 def add_init_parser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]

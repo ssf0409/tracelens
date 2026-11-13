@@ -30,6 +30,7 @@ from tracelens.metrics.budgets import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def task() -> Task:
     return Task(
@@ -63,8 +64,8 @@ def _make_transcript(
 # LatencyGrader
 # ---------------------------------------------------------------------------
 
-class TestLatencyGrader:
 
+class TestLatencyGrader:
     def test_default_policy_is_warn(self) -> None:
         grader = LatencyGrader("latency", max_ms=1000.0)
         assert grader.policy == EvalPolicy.WARN
@@ -106,6 +107,10 @@ class TestLatencyGrader:
         assert passed is False
         assert score == 0.0
 
+        explanation = grader.explain(metrics, transcript, task)
+        assert explanation is not None
+        assert "exceeds max budget 1000.0ms" in explanation
+
     def test_exact_budget_passes(self, task: Task) -> None:
         grader = LatencyGrader("latency", max_ms=1000.0)
         transcript = _make_transcript(duration_ms=1000.0)
@@ -137,8 +142,8 @@ class TestLatencyGrader:
 # TokenBudgetGrader
 # ---------------------------------------------------------------------------
 
-class TestTokenBudgetGrader:
 
+class TestTokenBudgetGrader:
     def test_default_policy_is_warn(self) -> None:
         grader = TokenBudgetGrader("tokens", max_tokens=1000)
         assert grader.policy == EvalPolicy.WARN
@@ -189,6 +194,10 @@ class TestTokenBudgetGrader:
         assert passed is False
         assert score == 0.0
 
+        explanation = grader.explain(metrics, transcript, task)
+        assert explanation is not None
+        assert "total tokens 700 exceeds max budget 500" in explanation
+
     def test_zero_tokens_passes(self, task: Task) -> None:
         grader = TokenBudgetGrader("tokens", max_tokens=1000)
         transcript = _make_transcript()
@@ -216,8 +225,8 @@ class TestTokenBudgetGrader:
 # ToolCallGrader
 # ---------------------------------------------------------------------------
 
-class TestToolCallGrader:
 
+class TestToolCallGrader:
     def test_default_policy_is_gate(self) -> None:
         grader = ToolCallGrader("tools", required_tools=["search"])
         assert grader.policy == EvalPolicy.GATE
@@ -265,6 +274,7 @@ class TestToolCallGrader:
 
         passed, _ = grader.determine_pass(metrics, task)
         assert passed is False
+        assert grader.explain(metrics, transcript, task) == "unauthorized tool calls: ['delete']"
 
     def test_forbidden_tools_enforced(self, task: Task) -> None:
         grader = ToolCallGrader("tools", forbidden_tools=["delete", "drop"])
@@ -279,6 +289,7 @@ class TestToolCallGrader:
 
         passed, _ = grader.determine_pass(metrics, task)
         assert passed is False
+        assert grader.explain(metrics, transcript, task) == "forbidden tool calls: ['delete']"
 
     def test_all_constraints_satisfied(self, task: Task) -> None:
         grader = ToolCallGrader(
@@ -330,8 +341,8 @@ class TestToolCallGrader:
 # TraceConsistencyGrader
 # ---------------------------------------------------------------------------
 
-class TestTraceConsistencyGrader:
 
+class TestTraceConsistencyGrader:
     def test_default_policy_is_warn(self) -> None:
         grader = TraceConsistencyGrader("consistency")
         assert grader.policy == EvalPolicy.WARN
@@ -398,6 +409,9 @@ class TestTraceConsistencyGrader:
 
         passed, _ = grader.determine_pass(metrics, task)
         assert passed is False
+        assert (
+            grader.explain(metrics, transcript, task) == "phantom tool calls: ['unexpected_tool']"
+        )
 
     def test_unused_tool_results_counted(self, task: Task) -> None:
         """Tool calls with results but no subsequent AGENT_OUTPUT step."""

@@ -47,17 +47,23 @@ class TestEventChainAllFound:
     async def test_all_events_found_strict(self, task: Task):
         config = EventChainConfig(
             expected_events=[
-                EventExpectation(event_id="search", match_type=EventMatchType.TOOL_NAME, tool_name="search"),
-                EventExpectation(event_id="analyze", match_type=EventMatchType.TOOL_NAME, tool_name="analyze"),
+                EventExpectation(
+                    event_id="search", match_type=EventMatchType.TOOL_NAME, tool_name="search"
+                ),
+                EventExpectation(
+                    event_id="analyze", match_type=EventMatchType.TOOL_NAME, tool_name="analyze"
+                ),
             ],
             ordering=OrderingMode.STRICT,
         )
         verifier = EventChainVerifier("ev1", config)
 
-        transcript = _make_transcript([
-            _tool_step("search"),
-            _tool_step("analyze"),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("search"),
+                _tool_step("analyze"),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True
@@ -68,18 +74,24 @@ class TestEventChainAllFound:
     async def test_all_events_found_unordered(self, task: Task):
         config = EventChainConfig(
             expected_events=[
-                EventExpectation(event_id="search", match_type=EventMatchType.TOOL_NAME, tool_name="search"),
-                EventExpectation(event_id="analyze", match_type=EventMatchType.TOOL_NAME, tool_name="analyze"),
+                EventExpectation(
+                    event_id="search", match_type=EventMatchType.TOOL_NAME, tool_name="search"
+                ),
+                EventExpectation(
+                    event_id="analyze", match_type=EventMatchType.TOOL_NAME, tool_name="analyze"
+                ),
             ],
             ordering=OrderingMode.UNORDERED,
         )
         verifier = EventChainVerifier("ev1", config)
 
         # Reversed order — should still pass with UNORDERED
-        transcript = _make_transcript([
-            _tool_step("analyze"),
-            _tool_step("search"),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("analyze"),
+                _tool_step("search"),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True
@@ -92,8 +104,12 @@ class TestEventChainMissing:
     async def test_missing_event_require_all(self, task: Task):
         config = EventChainConfig(
             expected_events=[
-                EventExpectation(event_id="search", match_type=EventMatchType.TOOL_NAME, tool_name="search"),
-                EventExpectation(event_id="analyze", match_type=EventMatchType.TOOL_NAME, tool_name="analyze"),
+                EventExpectation(
+                    event_id="search", match_type=EventMatchType.TOOL_NAME, tool_name="search"
+                ),
+                EventExpectation(
+                    event_id="analyze", match_type=EventMatchType.TOOL_NAME, tool_name="analyze"
+                ),
             ],
             ordering=OrderingMode.UNORDERED,
             require_all=True,
@@ -106,6 +122,7 @@ class TestEventChainMissing:
         assert outcome.passed is False
         assert outcome.metrics["events_found"] == 1.0
         assert outcome.metrics["events_missing"] == 1.0
+        assert outcome.feedback == "missing events: ['analyze']"
 
     async def test_partial_scoring(self, task: Task):
         """With require_all=False, partial matches produce proportional scores."""
@@ -134,40 +151,58 @@ class TestEventChainOrdering:
     async def test_strict_wrong_order(self, task: Task):
         config = EventChainConfig(
             expected_events=[
-                EventExpectation(event_id="first", match_type=EventMatchType.TOOL_NAME, tool_name="first"),
-                EventExpectation(event_id="second", match_type=EventMatchType.TOOL_NAME, tool_name="second"),
+                EventExpectation(
+                    event_id="first", match_type=EventMatchType.TOOL_NAME, tool_name="first"
+                ),
+                EventExpectation(
+                    event_id="second", match_type=EventMatchType.TOOL_NAME, tool_name="second"
+                ),
             ],
             ordering=OrderingMode.STRICT,
         )
         verifier = EventChainVerifier("ev1", config)
 
-        transcript = _make_transcript([
-            _tool_step("second"),
-            _tool_step("first"),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("second"),
+                _tool_step("first"),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is False
         # Score penalty: ratio (1.0) × 0.5 for ordering violation
         assert outcome.score == pytest.approx(0.5)
+        assert outcome.feedback == "ordering violation in mode strict"
 
     async def test_partial_ordering_with_after(self, task: Task):
         config = EventChainConfig(
             expected_events=[
-                EventExpectation(event_id="fetch", match_type=EventMatchType.TOOL_NAME, tool_name="fetch"),
-                EventExpectation(event_id="parse", match_type=EventMatchType.TOOL_NAME, tool_name="parse", after=["fetch"]),
-                EventExpectation(event_id="log", match_type=EventMatchType.TOOL_NAME, tool_name="log"),
+                EventExpectation(
+                    event_id="fetch", match_type=EventMatchType.TOOL_NAME, tool_name="fetch"
+                ),
+                EventExpectation(
+                    event_id="parse",
+                    match_type=EventMatchType.TOOL_NAME,
+                    tool_name="parse",
+                    after=["fetch"],
+                ),
+                EventExpectation(
+                    event_id="log", match_type=EventMatchType.TOOL_NAME, tool_name="log"
+                ),
             ],
             ordering=OrderingMode.PARTIAL,
         )
         verifier = EventChainVerifier("ev1", config)
 
         # log before fetch is fine (no constraint), parse after fetch is required
-        transcript = _make_transcript([
-            _tool_step("log"),
-            _tool_step("fetch"),
-            _tool_step("parse"),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("log"),
+                _tool_step("fetch"),
+                _tool_step("parse"),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True
@@ -175,18 +210,27 @@ class TestEventChainOrdering:
     async def test_partial_ordering_violated(self, task: Task):
         config = EventChainConfig(
             expected_events=[
-                EventExpectation(event_id="fetch", match_type=EventMatchType.TOOL_NAME, tool_name="fetch"),
-                EventExpectation(event_id="parse", match_type=EventMatchType.TOOL_NAME, tool_name="parse", after=["fetch"]),
+                EventExpectation(
+                    event_id="fetch", match_type=EventMatchType.TOOL_NAME, tool_name="fetch"
+                ),
+                EventExpectation(
+                    event_id="parse",
+                    match_type=EventMatchType.TOOL_NAME,
+                    tool_name="parse",
+                    after=["fetch"],
+                ),
             ],
             ordering=OrderingMode.PARTIAL,
         )
         verifier = EventChainVerifier("ev1", config)
 
         # parse before fetch violates the `after` constraint
-        transcript = _make_transcript([
-            _tool_step("parse"),
-            _tool_step("fetch"),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("parse"),
+                _tool_step("fetch"),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is False
@@ -209,9 +253,11 @@ class TestEventChainMatchTypes:
         )
         verifier = EventChainVerifier("ev1", config)
 
-        transcript = _make_transcript([
-            _tool_step("search", args={"query": "python", "limit": "10"}),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("search", args={"query": "python", "limit": "10"}),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True
@@ -230,9 +276,11 @@ class TestEventChainMatchTypes:
         )
         verifier = EventChainVerifier("ev1", config)
 
-        transcript = _make_transcript([
-            _tool_step("search", args={"query": "javascript"}),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("search", args={"query": "javascript"}),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is False
@@ -251,9 +299,11 @@ class TestEventChainMatchTypes:
         )
         verifier = EventChainVerifier("ev1", config)
 
-        transcript = _make_transcript([
-            _tool_step("search", args={"query": "javascript tutorials"}),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("search", args={"query": "javascript tutorials"}),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True
@@ -307,9 +357,11 @@ class TestEventChainMatchTypes:
         )
         verifier = EventChainVerifier("ev1", config)
 
-        transcript = _make_transcript([
-            _tool_step("fetch", result="status: success"),
-        ])
+        transcript = _make_transcript(
+            [
+                _tool_step("fetch", result="status: success"),
+            ]
+        )
 
         outcome = await verifier.grade(transcript, task)
         assert outcome.passed is True

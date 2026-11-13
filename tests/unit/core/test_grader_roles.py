@@ -100,9 +100,7 @@ class TestCompositeGraderRoles:
         assert outcome.score == pytest.approx(0.85, rel=0.01)
 
     @pytest.mark.asyncio
-    async def test_must_pass_failure_causes_overall_failure(
-        self, sample_task, sample_transcript
-    ):
+    async def test_must_pass_failure_causes_overall_failure(self, sample_task, sample_transcript):
         """Test that must-pass failure causes overall failure."""
         must_pass_config = GraderConfig(role=GraderRole.MUST_PASS)
         score_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)
@@ -111,13 +109,12 @@ class TestCompositeGraderRoles:
             grader_id="composite",
             graders=[
                 # Must-pass grader fails
-                (SimpleScoreGrader(
-                    "safety", score=0.3, passed=False, config=must_pass_config
-                ), 0.2),
+                (
+                    SimpleScoreGrader("safety", score=0.3, passed=False, config=must_pass_config),
+                    0.2,
+                ),
                 # Score contributor passes with high score
-                (SimpleScoreGrader(
-                    "quality", score=0.95, passed=True, config=score_config
-                ), 0.8),
+                (SimpleScoreGrader("quality", score=0.95, passed=True, config=score_config), 0.8),
             ],
         )
 
@@ -129,9 +126,7 @@ class TestCompositeGraderRoles:
         assert outcome.score > 0.5  # Weighted average
 
     @pytest.mark.asyncio
-    async def test_must_pass_success_allows_overall_pass(
-        self, sample_task, sample_transcript
-    ):
+    async def test_must_pass_success_allows_overall_pass(self, sample_task, sample_transcript):
         """Test that must-pass success allows overall pass."""
         must_pass_config = GraderConfig(role=GraderRole.MUST_PASS)
         score_config = GraderConfig(role=GraderRole.SCORE_CONTRIBUTOR)
@@ -140,13 +135,9 @@ class TestCompositeGraderRoles:
             grader_id="composite",
             graders=[
                 # Must-pass grader passes
-                (SimpleScoreGrader(
-                    "safety", score=1.0, passed=True, config=must_pass_config
-                ), 0.3),
+                (SimpleScoreGrader("safety", score=1.0, passed=True, config=must_pass_config), 0.3),
                 # Score contributor also passes
-                (SimpleScoreGrader(
-                    "quality", score=0.8, passed=True, config=score_config
-                ), 0.7),
+                (SimpleScoreGrader("quality", score=0.8, passed=True, config=score_config), 0.7),
             ],
         )
 
@@ -157,22 +148,22 @@ class TestCompositeGraderRoles:
         assert outcome.score == pytest.approx(0.86, rel=0.01)
 
     @pytest.mark.asyncio
-    async def test_multiple_must_pass_all_must_pass(
-        self, sample_task, sample_transcript
-    ):
+    async def test_multiple_must_pass_all_must_pass(self, sample_task, sample_transcript):
         """Test that ALL must-pass graders must pass."""
         must_pass_config = GraderConfig(role=GraderRole.MUST_PASS)
 
         composite = CompositeGrader(
             grader_id="composite",
             graders=[
-                (SimpleScoreGrader(
-                    "safety1", score=1.0, passed=True, config=must_pass_config
-                ), 0.5),
+                (
+                    SimpleScoreGrader("safety1", score=1.0, passed=True, config=must_pass_config),
+                    0.5,
+                ),
                 # Second must-pass fails
-                (SimpleScoreGrader(
-                    "safety2", score=0.2, passed=False, config=must_pass_config
-                ), 0.5),
+                (
+                    SimpleScoreGrader("safety2", score=0.2, passed=False, config=must_pass_config),
+                    0.5,
+                ),
             ],
         )
 
@@ -182,18 +173,17 @@ class TestCompositeGraderRoles:
         assert outcome.passed is False
 
     @pytest.mark.asyncio
-    async def test_failed_must_pass_tracked_in_metrics(
-        self, sample_task, sample_transcript
-    ):
+    async def test_failed_must_pass_tracked_in_metrics(self, sample_task, sample_transcript):
         """Test that failed must-pass graders are tracked."""
         must_pass_config = GraderConfig(role=GraderRole.MUST_PASS)
 
         composite = CompositeGrader(
             grader_id="composite",
             graders=[
-                (SimpleScoreGrader(
-                    "safety", score=0.0, passed=False, config=must_pass_config
-                ), 1.0),
+                (
+                    SimpleScoreGrader("safety", score=0.0, passed=False, config=must_pass_config),
+                    1.0,
+                ),
             ],
         )
 
@@ -215,13 +205,9 @@ class TestCompositeGraderRoles:
             grader_id="composite",
             graders=[
                 # Must-pass passes
-                (SimpleScoreGrader(
-                    "safety", score=1.0, passed=True, config=must_pass_config
-                ), 0.3),
+                (SimpleScoreGrader("safety", score=1.0, passed=True, config=must_pass_config), 0.3),
                 # Score contributor fails (low score)
-                (SimpleScoreGrader(
-                    "quality", score=0.3, passed=False, config=score_config
-                ), 0.7),
+                (SimpleScoreGrader("quality", score=0.3, passed=False, config=score_config), 0.7),
             ],
         )
 
@@ -241,12 +227,8 @@ class TestCompositeGraderRoles:
         composite = CompositeGrader(
             grader_id="composite",
             graders=[
-                (SimpleScoreGrader(
-                    "safety", score=1.0, passed=True, config=must_pass_config
-                ), 0.3),
-                (SimpleScoreGrader(
-                    "quality", score=0.8, passed=True, config=score_config
-                ), 0.7),
+                (SimpleScoreGrader("safety", score=1.0, passed=True, config=must_pass_config), 0.3),
+                (SimpleScoreGrader("quality", score=0.8, passed=True, config=score_config), 0.7),
             ],
         )
 
@@ -261,12 +243,8 @@ class TestCompositeGraderRoles:
         composite = CompositeGrader(
             grader_id="composite",
             graders=[
-                (SimpleScoreGrader(
-                    "safety", score=1.0, passed=True, config=must_pass_config
-                ), 0.3),
-                (SimpleScoreGrader(
-                    "quality", score=0.8, passed=True, config=score_config
-                ), 0.7),
+                (SimpleScoreGrader("safety", score=1.0, passed=True, config=must_pass_config), 0.3),
+                (SimpleScoreGrader("quality", score=0.8, passed=True, config=score_config), 0.7),
             ],
         )
 
@@ -286,3 +264,36 @@ class TestGraderConfigRole:
         """Test explicit role setting."""
         config = GraderConfig(role=GraderRole.MUST_PASS)
         assert config.role == GraderRole.MUST_PASS
+
+
+class CustomExplainGrader(CodeGrader):
+    """Test grader with explain hook overridden."""
+
+    def compute_metrics(self, transcript, task):
+        return {"accuracy": 0.0}
+
+    def determine_pass(self, metrics, task):
+        return False, 0.0
+
+    def explain(self, metrics, transcript, task):
+        return "failed accuracy threshold"
+
+
+class TestCodeGraderExplain:
+    """Tests for CodeGrader explain() hook."""
+
+    @pytest.mark.asyncio
+    async def test_default_explain_returns_none(self):
+        grader = SimpleScoreGrader("test", score=0.5, passed=False)
+        task = Task(name="t", input_data={})
+        transcript = Transcript(task_id="t")
+        outcome = await grader.grade(transcript, task)
+        assert outcome.feedback is None
+
+    @pytest.mark.asyncio
+    async def test_custom_explain_populates_feedback(self):
+        grader = CustomExplainGrader("custom")
+        task = Task(name="t", input_data={})
+        transcript = Transcript(task_id="t")
+        outcome = await grader.grade(transcript, task)
+        assert outcome.feedback == "failed accuracy threshold"
