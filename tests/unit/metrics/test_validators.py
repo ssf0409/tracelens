@@ -25,6 +25,7 @@ from tracelens.metrics.validators import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_transcript(final_output: object) -> Transcript:
     """Create a minimal transcript with the given final_output."""
     return Transcript(task_id="task-1", final_output=final_output)
@@ -49,6 +50,7 @@ def _run(coro):  # noqa: ANN001, ANN202
 # JsonSchemaGrader
 # ===========================================================================
 
+
 class TestJsonSchemaGrader:
     """Tests for JsonSchemaGrader."""
 
@@ -68,7 +70,9 @@ class TestJsonSchemaGrader:
     def test_custom_policy_override(self) -> None:
         config = GraderConfig(policy=EvalPolicy.WARN)
         grader = JsonSchemaGrader(
-            "json-schema", schema=self.SIMPLE_SCHEMA, config=config,
+            "json-schema",
+            schema=self.SIMPLE_SCHEMA,
+            config=config,
         )
         assert grader.policy == EvalPolicy.WARN
 
@@ -100,6 +104,8 @@ class TestJsonSchemaGrader:
 
         assert outcome.passed is False
         assert outcome.metrics["schema_valid"] == 0.0
+        assert outcome.feedback is not None
+        assert "'thirty' is not of type 'integer'" in outcome.feedback
 
     def test_none_output_fails(self) -> None:
         grader = JsonSchemaGrader("json-schema", schema=self.SIMPLE_SCHEMA)
@@ -108,6 +114,8 @@ class TestJsonSchemaGrader:
 
         assert outcome.passed is False
         assert outcome.metrics["schema_valid"] == 0.0
+        assert outcome.feedback is not None
+        assert "None is not of type 'object'" in outcome.feedback
 
     def test_array_schema(self) -> None:
         schema = {"type": "array", "items": {"type": "integer"}}
@@ -130,6 +138,7 @@ class TestJsonSchemaGrader:
 # ===========================================================================
 # StructuredOutputGrader
 # ===========================================================================
+
 
 class TestStructuredOutputGrader:
     """Tests for StructuredOutputGrader."""
@@ -161,6 +170,8 @@ class TestStructuredOutputGrader:
         assert outcome.passed is False
         assert outcome.metrics["parse_valid"] == 0.0
         assert outcome.metrics["validation_errors"] >= 1.0
+        assert outcome.feedback is not None
+        assert "expected_metrics" in outcome.feedback
 
     def test_non_dict_output_fails(self) -> None:
         grader = StructuredOutputGrader("structured", model_path=self.MODEL_PATH)
@@ -169,10 +180,12 @@ class TestStructuredOutputGrader:
 
         assert outcome.passed is False
         assert outcome.metrics["parse_valid"] == 0.0
+        assert outcome.feedback == "output is not a dict (got str)"
 
     def test_bad_model_path_raises_runtime_error(self) -> None:
         grader = StructuredOutputGrader(
-            "structured", model_path="nonexistent.module.Model",
+            "structured",
+            model_path="nonexistent.module.Model",
         )
         transcript = _make_transcript({"foo": "bar"})
         with pytest.raises(RuntimeError, match="cannot load model"):
@@ -182,6 +195,7 @@ class TestStructuredOutputGrader:
 # ===========================================================================
 # ContainsGrader
 # ===========================================================================
+
 
 class TestContainsGrader:
     """Tests for ContainsGrader."""
@@ -207,6 +221,7 @@ class TestContainsGrader:
 
         assert outcome.passed is False
         assert outcome.metrics["required_found"] == pytest.approx(2.0 / 3.0)
+        assert outcome.feedback == "missing required: ['foo']"
 
     def test_no_required_empty_list(self) -> None:
         grader = ContainsGrader("contains", required=[])
@@ -218,17 +233,22 @@ class TestContainsGrader:
 
     def test_forbidden_found_fails(self) -> None:
         grader = ContainsGrader(
-            "contains", required=["hello"], forbidden=["secret"],
+            "contains",
+            required=["hello"],
+            forbidden=["secret"],
         )
         transcript = _make_transcript("hello this is secret data")
         outcome = _run(grader.grade(transcript, _make_task()))
 
         assert outcome.passed is False
         assert outcome.metrics["forbidden_found"] == 1.0
+        assert outcome.feedback == "found forbidden: ['secret']"
 
     def test_forbidden_absent_passes(self) -> None:
         grader = ContainsGrader(
-            "contains", required=["hello"], forbidden=["secret"],
+            "contains",
+            required=["hello"],
+            forbidden=["secret"],
         )
         transcript = _make_transcript("hello world")
         outcome = _run(grader.grade(transcript, _make_task()))
@@ -245,7 +265,9 @@ class TestContainsGrader:
 
     def test_multiple_forbidden(self) -> None:
         grader = ContainsGrader(
-            "contains", required=[], forbidden=["password", "token"],
+            "contains",
+            required=[],
+            forbidden=["password", "token"],
         )
         transcript = _make_transcript("your password and token are here")
         outcome = _run(grader.grade(transcript, _make_task()))
@@ -257,6 +279,7 @@ class TestContainsGrader:
 # ===========================================================================
 # RegexMatchGrader
 # ===========================================================================
+
 
 class TestRegexMatchGrader:
     """Tests for RegexMatchGrader."""
@@ -281,6 +304,7 @@ class TestRegexMatchGrader:
 
         assert outcome.passed is False
         assert outcome.metrics["patterns_matched"] == pytest.approx(2.0 / 3.0)
+        assert outcome.feedback == "patterns failed to match: ['@']"
 
     def test_no_patterns_match(self) -> None:
         grader = RegexMatchGrader("regex", patterns=[r"\d+"])
@@ -289,6 +313,7 @@ class TestRegexMatchGrader:
 
         assert outcome.passed is False
         assert outcome.metrics["patterns_matched"] == 0.0
+        assert outcome.feedback == "patterns failed to match: ['\\\\d+']"
 
     def test_empty_patterns_passes(self) -> None:
         grader = RegexMatchGrader("regex", patterns=[])
@@ -314,12 +339,14 @@ class TestRegexMatchGrader:
 # ConstraintGrader
 # ===========================================================================
 
+
 class TestConstraintGrader:
     """Tests for ConstraintGrader."""
 
     def test_default_policy_is_gate(self) -> None:
         grader = ConstraintGrader(
-            "constraint", constraints=[{"type": "must_include", "value": "ok"}],
+            "constraint",
+            constraints=[{"type": "must_include", "value": "ok"}],
         )
         assert grader.policy == EvalPolicy.GATE
 
@@ -496,6 +523,7 @@ class TestConstraintGrader:
         assert outcome.passed is False
         assert outcome.metrics["constraints_met"] == pytest.approx(0.5)
         assert outcome.metrics["violations"] == 1.0
+        assert outcome.feedback == "constraint[1] (must_include 'missing_term') violated"
 
     def test_empty_constraints_passes(self) -> None:
         grader = ConstraintGrader("constraint", constraints=[])
