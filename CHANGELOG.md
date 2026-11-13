@@ -10,6 +10,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Changed
 
+- **Starter failures explain expected versus actual output.** The `tracelens
+  init` scaffold now shows why a starter trial failed: the starter grader
+  attaches `feedback: expected '...', got '...'` to failing trials,
+  `tracelens inspect` prints the task's `input:`, `expected:` and `actual:`
+  values alongside the failure, and `failures.html` carries the same
+  explanation. Starter tasks declare their expected answer under
+  `expectation.expected_output`, and the scaffolded adapter answers the two
+  canned starter questions instead of echoing the task input.
+
 - **Mean score reports the trials it leaves out.**
   - Task summaries and the results JSON gain `scored_trials`, per task and
     overall.

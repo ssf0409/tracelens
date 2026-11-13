@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tracelens.cli.config import load_run_config
@@ -10,12 +11,15 @@ from tracelens.cli.init import (
     ADAPTER_TEMPLATE,
     CONFIG_TEMPLATE,
     GRADER_TEMPLATE,
+    STARTER_TASKS,
     add_init_parser,
     cmd_init,
     render_readme,
     render_workflow,
     tracelens_requirement,
 )
+from tracelens.core.task import Task
+from tracelens.core.transcript import Transcript
 
 
 def enable_gate_block(config_text: str) -> str:
@@ -256,3 +260,164 @@ class TestInitOverwriteProtection:
         # Untouched files do not have backups
         assert not (tmp_path / "eval/grader.py.bak").exists()
         assert not (tmp_path / "eval/tasks.json.bak").exists()
+
+
+class TestStarterTasks:
+    """Issue #102: starter tasks canonical representation and no answer leakage."""
+
+    def test_tasks_do_not_leak_answers_in_input_data(self):
+        tasks = STARTER_TASKS["tasks"]
+        assert len(tasks) >= 2
+        for task in tasks:
+            assert "answer" not in task["input_data"]
+            assert "question" in task["input_data"]
+
+    def test_canonical_expected_output_in_expectation(self):
+        tasks = STARTER_TASKS["tasks"]
+        for task in tasks:
+            assert "metadata" not in task or "expected_answer" not in task.get("metadata", {})
+            assert "expectation" in task
+            expectation = task["expectation"]
+            assert "expected_output" in expectation
+            assert "answer" in expectation["expected_output"]
+
+        # Validate with Task schema
+        from tracelens.core.task import Task
+        validated = [Task.model_validate(t) for t in tasks]
+        assert validated[0].expectation.expected_output == {"answer": "Paris"}
+        assert validated[1].expectation.expected_output == {"answer": "4"}
+
+
+class TestStarterAdapterTemplate:
+    """Issue #102: starter adapter provides deterministic canned answers."""
+
+    def test_starter_agent_returns_canned_answers(self):
+        import asyncio
+
+        namespace: dict = {}
+        exec(compile(ADAPTER_TEMPLATE, "<string>", "exec"), namespace)
+        starter_agent = namespace["starter_agent"]
+
+        capital_res = asyncio.run(starter_agent({"question": "What is the capital of France?"}))
+        assert capital_res == {"answer": "Paris"}
+
+        math_res = asyncio.run(starter_agent({"question": "What is 2 + 2?"}))
+        assert math_res == {"answer": "4"}
+
+        unknown_res = asyncio.run(starter_agent({"question": "Who was the 16th US President?"}))
+        assert unknown_res == {"answer": "unknown"}
+
+
+class TestStarterGraderTemplate:
+    """Issue #102: starter grader emits bounded, explanatory feedback across failure modes."""
+
+    @pytest.fixture
+    def grader_class(self):
+        namespace: dict = {}
+        exec(compile(GRADER_TEMPLATE, "<string>", "exec"), namespace)
+        return namespace["StarterGrader"]
+
+    def _make_task(self, expected_answer: str | None = "Paris") -> Task:
+        from tracelens.core.task import Task, TaskExpectation
+
+        expectation = (
+            TaskExpectation(expected_output={"answer": expected_answer})
+            if expected_answer is not None
+            else None
+        )
+        return Task(
+            task_id="starter-capital",
+            name="Answer a simple geography question",
+            input_data={"question": "What is the capital of France?"},
+            expectation=expectation,
+        )
+
+    def _make_transcript(self, final_output: object) -> Transcript:
+        from tracelens.core.transcript import Transcript
+
+        return Transcript(task_id="starter-capital", final_output=final_output)
+
+    def test_correct_answer_passes_without_failure_feedback(self, grader_class):
+        import asyncio
+
+        grader = grader_class()
+        task = self._make_task("Paris")
+        transcript = self._make_transcript({"answer": "Paris"})
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is True
+        assert outcome.score == 1.0
+        assert outcome.metrics == {"exact_match": 1.0}
+        assert outcome.feedback is None
+
+        # Verify compute_metrics & determine_pass directly
+        metrics = grader.compute_metrics(transcript, task)
+        assert metrics == {"exact_match": 1.0}
+        passed, score = grader.determine_pass(metrics, task)
+        assert passed is True and score == 1.0
+
+    def test_wrong_answer_explains_expected_and_actual(self, grader_class):
+        import asyncio
+
+        grader = grader_class()
+        task = self._make_task("Paris")
+        transcript = self._make_transcript({"answer": "wrong"})
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics == {"exact_match": 0.0}
+        assert outcome.feedback == "expected 'Paris', got 'wrong'"
+
+    def test_missing_answer_key_explains_missing_key(self, grader_class):
+        import asyncio
+
+        grader = grader_class()
+        task = self._make_task("Paris")
+        transcript = self._make_transcript({"result": "Paris"})
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics == {"exact_match": 0.0}
+        assert outcome.feedback == "expected key 'answer' in output, got keys ['result']"
+
+    def test_null_output_explains_null_output(self, grader_class):
+        import asyncio
+
+        grader = grader_class()
+        task = self._make_task("Paris")
+        transcript = self._make_transcript(None)
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics == {"exact_match": 0.0}
+        assert outcome.feedback == "expected 'Paris', got null output"
+
+    def test_wrong_output_type_explains_type(self, grader_class):
+        import asyncio
+
+        grader = grader_class()
+        task = self._make_task("Paris")
+        transcript = self._make_transcript("Paris")
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics == {"exact_match": 0.0}
+        assert outcome.feedback == "expected dict output, got str"
+
+    def test_task_with_no_expectation_declares_missing(self, grader_class):
+        import asyncio
+
+        grader = grader_class()
+        task = self._make_task(expected_answer=None)
+        transcript = self._make_transcript({"answer": "Paris"})
+
+        outcome = asyncio.run(grader.grade(transcript, task))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics == {"exact_match": 0.0}
+        assert outcome.feedback == "task declares no expected answer"
+

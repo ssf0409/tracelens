@@ -76,7 +76,7 @@ def readme_snippet(readme: Path) -> str:
     return textwrap.dedent(text.split("python - <<'EOF'\n", 1)[1].split("\n   EOF", 1)[0])
 
 
-TRUSTED = 'return {"answer": input_data["answer"]}'
+TRUSTED = 'return {"answer": CANNED_ANSWERS.get(question, input_data.get("answer", "unknown"))}'
 
 
 def test_documented_user_journey(tmp_path: Path) -> None:
@@ -169,10 +169,14 @@ def test_documented_user_journey(tmp_path: Path) -> None:
     )
     assert "passed 0, agent failure 10, infra error 0, grader error 0, not run 0" in inspect.stdout
     assert "starter-capital run 0  agent failure  status=completed" in inspect.stdout
+    assert 'input:    {"question": "What is the capital of France?"}' in inspect.stdout
+    assert 'expected: {"answer": "Paris"}' in inspect.stdout
     assert 'actual:   {"answer": "wrong"}' in inspect.stdout
     assert "task:     Answer a simple geography question" in inspect.stdout
     assert "starter FAIL score=0.00" in inspect.stdout
+    assert "feedback: expected 'Paris', got 'wrong'" in inspect.stdout
     assert (project / "eval/results/failures.html").read_text().count("agent failure") >= 2
+    assert "expected &#x27;Paris&#x27;, got &#x27;wrong&#x27;" in (project / "eval/results/failures.html").read_text()
 
     # 7. compare pairs the broken run with the trusted one but gives no verdict
     # on the scaffold's two tasks: however decisive the data, the exact
