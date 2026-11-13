@@ -167,6 +167,9 @@ class EvaluationRunner:
             decision_spec=self.decision_spec,
             run_id=batch.batch_id,
             started_at=batch.started_at,
+            is_subset=eval_set.is_subset,
+            selected_task_ids=eval_set.selected_task_ids,
+            total_eval_set_tasks=eval_set.total_eval_set_tasks,
         )
         batch.provenance = provenance
         self._checkpoint_identity = {
