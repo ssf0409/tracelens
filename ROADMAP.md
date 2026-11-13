@@ -68,27 +68,32 @@ TraceLens should not become:
 
 When a request could be solved by either a core feature or a recipe, prefer the
 recipe until at least two downstream projects need the same abstraction.
+Core abstractions and analysis primitives remain disciplined by real downstream
+evidence (tracked in issue #33), rather than expanding ahead of proven need.
 
-## The Gap Today
+## The Gap Today & Shipped Foundations
 
-An honest inventory (as of the 0.4 series), so the phases below have context:
+The initial 0.4 series identified key architectural gaps; 0.5.0 closed several
+foundational seams (shipped in 0.5.0: YAML run configuration, provenance tracking,
+paired run comparison via `tracelens compare`, inspect/offline HTML reporting, and
+persisted gate reporting across formats via issues #28, #44-#47):
 
-- **Results cannot be sliced.** Task tags, categories, and difficulty are
-  captured but only used to filter before a run; nothing joins them back to
-  outcomes.
-- **Failures have no taxonomy.** Statuses, error messages, and grader feedback
-  are recorded but only aggregated into scalar rates.
-- **Trace behavior is never associated with outcomes.** Transcripts carry
-  steps, tool errors, tokens, and latency, but nothing relates those features
-  to pass/fail.
-- **Evidence is thin at the source.** Adapters assemble transcripts by hand
-  with two helpers; token and duration fields are silently zero when left
-  unfilled, and externally produced traces have no import path.
-- **Runs are single-shot.** Each run writes standalone files; there is no
-  first-class way to compare two runs or accumulate history.
-- **The regression path is not wired through reporting.** Report building
-  accepts a baseline manager it never uses, and report JSON drops regression
-  data on re-render.
+- **Results slicing (open):** Task tags, categories, and difficulty are
+  captured and filterable before a run, but descriptive slicing joining them back
+  to outcomes and exploratory slice comparisons (issue #90, #108) remain open.
+- **Failures taxonomy (open):** Statuses, error messages, and grader feedback
+  are recorded, but formal grouping across error signatures remains in progress.
+- **Trace behavior & outcomes association (open):** Transcripts carry
+  steps, tool errors, tokens, and latency, but associating features with pass/fail
+  remains to be built.
+- **Evidence at the source (open):** Externally produced traces require an import
+  contract (issue #104), and adapter step recording helpers remain open (#131).
+- **Runs comparison (shipped in 0.5.0):** `tracelens compare` provides paired
+  task-level comparisons between saved runs (issue #28).
+- **Regression reporting (shipped in 0.5.0):** Report generation threads gate results
+  cleanly across JSON, Markdown, and HTML without dropping regression data on
+  re-render (issue #47). Report building still accepts an unused baseline manager parameter
+  for historical compatibility.
 
 ## Executable Roadmap
 
@@ -99,41 +104,37 @@ sampling-unit, and trial-validity definitions every statistic follows live in
 leverage; each names its definition of done. CLI commands that do not exist
 yet are marked *(proposed)*.
 
-### Phase 0 — Make the existing numbers trustworthy
+### Phase 0 — Make the existing numbers trustworthy (Shipped in 0.5.0)
 
 Repair the seams so the current decision output is correct and flows end to
 end.
 
-- Land the statistical correctness fixes against the statistical contract:
+- Landed statistical correctness fixes against the statistical contract:
   bootstrap multiplicity (issue #44), order-independent pass^k (issue #45),
   and explicit metric availability instead of zeros (issue #46).
-- Thread regression results through report building so markdown, HTML, JSON,
+- Threaded regression results through report building so markdown, HTML, JSON,
   and CI renderings include them without CLI-side assembly, and stop dropping
   them when re-rendering saved results (issue #47).
-- Render the harness-health signals that are already computed: grader error
+- Rendered harness-health signals that are already computed: grader error
   rate and token totals alongside infra error rate.
 
-Done when a run with `--baseline-check` produces reports whose regression
-section survives save and re-render, and harness-health metrics appear in
-every output format.
+**Status:** Completed and shipped in TraceLens 0.5.0.
 
 ### Phase 1 — See the variables
 
 Build the analysis foundation: one flat, joinable view of trials.
 
 - Transcript capture helpers and an import path for externally recorded
-  transcripts with offline grading, so behavior variables are actually
-  populated and traces can enter without TraceLens driving the agent.
+  transcripts with offline grading (issues #104, #131), so behavior variables
+  are actually populated and traces can enter without TraceLens driving the agent.
 - A trial-analysis table joining trials with task dimensions (category, tags,
   difficulty, metadata), decision-spec fields, extracted behavior features,
-  and outcomes. This is the substrate for everything below.
-- Slice analysis: pass rate and score by any task dimension, with bootstrap
-  confidence intervals and minimum-sample guards, flagging slices that fall
-  significantly below the suite.
-- Failure grouping: cluster failed trials by status and normalized error
+  and outcomes. This is the substrate for descriptive slicing.
+- Descriptive slice analysis (issue #90): pass rate and score by any task dimension,
+  with sample counts and availability guards.
+- Failure grouping: group failed trials by status and normalized error
   signature, with counts and representative trial IDs.
-- Surface both in reports (a failure-analysis section) and in
-  `tracelens analyze` *(proposed)*.
+- Surface both in reports (a failure-analysis section) and inspection tools.
 
 Done when, from a saved trials file and its eval set, one command answers:
 which task slices fail most, with what failure modes, and which transcripts
@@ -141,39 +142,34 @@ to read first.
 
 ### Phase 2 — Explain the variance
 
-Turn comparison and diagnosis into decision output.
+Turn comparison and exploratory slice diagnosis into decision output.
 
-- `tracelens compare` *(issue #28; shipped as a paired task bootstrap,
-  slice-level regressions still to come)*: A/B two saved runs
-  with bootstrap significance, noise-band awareness, and slice-level
-  regressions, printing the decision-spec diff — "here is what changed" —
+- `tracelens compare` *(issue #28; shipped in 0.5.0 as a paired task bootstrap)*:
+  A/B two saved runs with bootstrap significance, noise-band awareness,
+  printing the decision-spec diff — "here is what changed" —
   next to "here is what moved". When the diff shows exactly one changed
   factor, say so: the outcome change is attributable to that factor, which
   is evidence, not causal proof.
-- Driver association: relate behavior features (tool error rate, retries,
-  token usage, duration, ...) to pass/fail with effect sizes and permutation
-  tests; rank suspects with explicit correlation-not-causation labeling.
-- A diagnosis view combining failure clusters, ranked drivers, and
-  read-these-first transcripts.
+- Exploratory slice comparisons *(proposed follow-up in issue #108)*: contract-backed
+  paired task comparisons on defined subsets with multiplicity correction and
+  sample-size guards (explicitly non-causal).
+- A diagnosis view combining failure clusters and read-these-first transcripts.
 
 Done when a user deciding whether to ship runs one comparison and gets a
-verdict with evidence, and a user debugging a regression gets a ranked list
-of suspects plus specific transcripts to read.
+verdict with evidence, and a user debugging a regression gets a clear list
+of moving tasks plus specific transcripts to read.
 
 ### Phase 3 — Decide from the corpus
 
-Scale from single runs to accumulated history.
+Scale from single runs to accumulated history (exploratory, non-committed ambition).
 
-- A file-based run store (directory convention plus index; no server) with
-  listing and cross-run trend views, including drift over time.
-- Prioritization: for each failure cluster or slice, the expected pass-rate
-  gain from fixing it, with confidence intervals, as a ranked table.
+- File-based run storage conventions and cross-run trends over time.
 - Production traces as input: an OpenTelemetry ingestion recipe (issue #7) so
   real traffic can feed the same analysis, starting as an example.
 - Optional LLM-assisted failure labeling as an extra, never a core
   dependency.
 
-Done when "what should we fix first" is answerable from accumulated runs, and
+Done when trends over time are inspectable from accumulated runs, and
 downstream projects can feed non-eval traces through the same analysis.
 
 ### Supporting tracks
@@ -213,10 +209,11 @@ The analysis layer is only worth building if it stays honest:
 
 ## Contributor On-Ramp
 
-New contributors should start with scoped issues that have clear acceptance
-criteria and a small review surface. Use the GitHub `good first issue` label for
-the current queue; keep priority labels, milestones, and project-board fields in
-GitHub rather than baking them into this file.
+Contributors should start with scoped issues that have clear acceptance
+criteria and a small review surface. The [open issues list](https://github.com/ssf0409/tracelens/issues?q=is%3Aissue%20is%3Aopen)
+and delivery tracker (issue #55) track active work and delivery status; the GitHub `good first issue`
+label serves as an optional discovery aid. Priority labels, milestones, and project status live
+in GitHub rather than baking them into this file.
 
 Before opening a PR, read [CONTRIBUTING.md](CONTRIBUTING.md), comment on the
 issue with your intended approach, and run `make verify`.
