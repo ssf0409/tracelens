@@ -8,6 +8,15 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ## [Unreleased]
 
+### Added
+
+- **`--fail-on-infra-errors` flag and `run.max_infra_error_rate` config option.**
+  Ungated runs and CI smoke workflows can now fail non-zero (exit 1) when
+  infrastructure failures prevent evaluation (e.g. 100% infra error rate, or
+  exceeding `max_infra_error_rate`). The scaffolded `tracelens.yaml` enables
+  failure on 100% infra errors by default (`fail_on_infra_errors: true`).
+  The ungated exit-0 contract remains intact when the flag is not set. (#121)
+
 ### Changed
 
 - **Mean score reports the trials it leaves out.**
