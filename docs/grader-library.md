@@ -40,13 +40,22 @@ grader = ContainsGrader(
 )
 ```
 
+!!! note "Using built-in graders from the CLI"
+    When running via `tracelens run --graders myproject.eval.CustomGrader`, the CLI
+    instantiates graders using a zero-argument constructor `cls()`. Built-in graders
+    that require configuration (such as `schema`, `required`, or `constraints`) should
+    be subclassed with the desired defaults or wrapped in a zero-argument factory class
+    before passing their dotted path to `--graders`.
+
 ---
 
 ## Output-shape & content graders
 
 These deterministic graders validate the structure and content of
 `transcript.final_output`. All of their value arguments are **keyword-only**
-(after the positional `grader_id`).
+(after the positional `grader_id`). Dict and list outputs are serialized to JSON
+with sorted keys rather than using Python repr, and `None` outputs fail gracefully
+with `output_present=0.0`.
 
 ### JsonSchemaGrader
 
@@ -88,10 +97,10 @@ grader = StructuredOutputGrader(
 
 ### ContainsGrader
 
-Checks that `str(transcript.final_output)` contains every required substring and
-none of the forbidden ones.
+Checks that `transcript.final_output` contains every required substring and
+none of the forbidden ones. An optional `field` extracts a specific key from dict outputs.
 
-- Signature: `ContainsGrader(grader_id, *, required, forbidden=None, config=None)`
+- Signature: `ContainsGrader(grader_id, *, required, forbidden=None, field=None, config=None)`
 - Default policy: **TRACK**
 
 ```python
@@ -106,10 +115,11 @@ grader = ContainsGrader(
 
 ### RegexMatchGrader
 
-Checks that `str(transcript.final_output)` matches every regex pattern via
-`re.search`. An invalid pattern raises `ValueError` at construction.
+Checks that `transcript.final_output` matches every regex pattern via
+`re.search`. An optional `field` extracts a specific key from dict outputs.
+An invalid pattern raises `ValueError` at construction.
 
-- Signature: `RegexMatchGrader(grader_id, *, patterns, config=None)`
+- Signature: `RegexMatchGrader(grader_id, *, patterns, field=None, config=None)`
 - Default policy: **TRACK**
 
 ```python
@@ -123,11 +133,11 @@ grader = RegexMatchGrader(
 
 ### ConstraintGrader
 
-Evaluates a list of heterogeneous constraints. Supported `type` values:
-`must_include`, `must_not_include` (substring checks on `str(output)`),
+Evaluates a list of heterogeneous constraints against the agent output. Supported `type` values:
+`must_include`, `must_not_include` (substring checks on stringified output),
 `numeric_range` (`output[field]` within `[min, max]`), and `enum`
-(`output[field]` in `values`). An unknown `type` raises `ValueError` at
-construction.
+(`output[field]` in `values`). Constraint schemas and types are validated at construction,
+raising `ValueError` if malformed or unknown.
 
 - Signature: `ConstraintGrader(grader_id, *, constraints, config=None)`
 - Default policy: **GATE**

@@ -38,6 +38,34 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **Built-in grader correctness pass.** Resolves several edge cases and correctness
+  issues across the built-in grader suite:
+  - `JsonSchemaGrader` now selects the validator class via `validator_for(schema, default=Draft7Validator)`,
+    preventing `SchemaError` crashes on valid Draft 7 schemas (e.g. tuple-form `items`),
+    and validates schemas once at construction time.
+  - `ConstraintGrader` strictly validates constraint definitions at construction time
+    (`must_include`/`must_not_include` require string values; `numeric_range` requires
+    numeric `min`/`max` where `min <= max`; `enum` requires a list of allowed values).
+  - Output string matching in `ContainsGrader`, `RegexMatchGrader`, and `ConstraintGrader`
+    safely handles `None` outputs (`output_present=0.0`) and serializes dict/list outputs
+    to deterministic JSON rather than Python `str()` repr. `ContainsGrader` and
+    `RegexMatchGrader` also support an optional `field` selector for dict outputs.
+  - Tool call graders (`ToolCallGrader`, `TraceConsistencyGrader`) read
+    `transcript.all_tool_calls` so tool calls recorded in either `tool_calls` or `steps`
+    are evaluated consistently.
+  - `EventChainVerifier` validates regex patterns and DAG `after` references at construction,
+    supports an optional `step_type` filter on `CONTENT_REGEX`, and respects `score_per_event`.
+  - `LatencyAnalyzer` sorts token events chronologically and handles explicit zero token counts.
+  - `LLMGrader` safely coerces non-string provider responses before parsing.
+  (#126)
+- **Markdown reports render hostile table cells safely.** Task ids or gate
+  values containing `|`, line breaks, or HTML metacharacters (`&`, `<`, `>`)
+  no longer break the per-task and baseline-gate tables piped into
+  `$GITHUB_STEP_SUMMARY`: every Markdown table cell escapes its pipes and
+  newlines and then runs through `html.escape`, so the table keeps its
+  column structure and a cell cannot open a raw HTML element.
+  (#134)
+
 - **`mean_score` means the same thing in the report, the baseline gate and
   `compare`.** The trials at issue are gradable but have no score: a
   timeout, or an agent failure before any grader ran.
@@ -57,6 +85,22 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
     beside it.
 
   (#114)
+
+### Added
+
+- **Releases happen on merge.** The "Release on merge" workflow
+  (`.github/workflows/release-auto.yml`) runs after CI passes on a push to
+  `main`: when `CHANGELOG.md` has entries under `[Unreleased]`, it picks the
+  next version (`scripts/next_version.py`: `[release: X.Y.Z]`,
+  `[release: major|minor|patch]`, or `[release: skip]` in the commit title;
+  otherwise a minor bump for Added, Changed, Removed, or Deprecated entries
+  and a patch bump for fixes), moves the entries into a dated section,
+  commits `release: vX.Y.Z`, tags it, and runs the release workflow with
+  `publish=true`. A release commit, a red CI run, an empty `[Unreleased]`
+  section, or a pre-release as the latest tag never release; when `main`
+  rejects the push, the workflow opens the release pull request through
+  "Release prepare" instead. "Release prepare" stays for pre-releases and
+  named versions.
 
 ## [0.7.0] - 2026-10-14
 
