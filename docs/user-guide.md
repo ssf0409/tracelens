@@ -32,15 +32,18 @@ and filters read (TraceLens itself doesn't interpret them).
 ```python
 from tracelens import Task, EvalSet
 
-eval_set = EvalSet(name="support-suite", tasks=[
-    Task(
-        name="refund within policy",
-        input_data={"ticket": "I want a refund for order #5512"},
-        metadata={"expected_action": "refund"},   # your grader reads this
-        category="task",
-        tags=["billing", "refund"],
-    ),
-])
+eval_set = EvalSet(
+    name="support-suite",
+    tasks=[
+        Task(
+            name="refund within policy",
+            input_data={"ticket": "I want a refund for order #5512"},
+            metadata={"expected_action": "refund"},  # your grader reads this
+            category="task",
+            tags=["billing", "refund"],
+        ),
+    ],
+)
 ```
 
 **Inline vs. from JSON.** Small suites can be inline; real suites live in a
@@ -82,8 +85,10 @@ by how your agent is exposed:
 ```python
 from tracelens import SimpleAdapter
 
+
 async def my_agent(input_data: dict) -> dict:
     return {"action": decide(input_data["ticket"])}
+
 
 adapter = SimpleAdapter(my_agent)
 ```
@@ -97,6 +102,7 @@ downstream is identical regardless of which adapter you pick.
 from datetime import UTC, datetime
 
 from tracelens import AgentAdapter, Task, Transcript
+
 
 class MyAdapter(AgentAdapter):
     provenance_version = "agent-2.3.0"  # bump when the agent code or prompt under test changes
@@ -138,6 +144,7 @@ pass/score:
 
 ```python
 from tracelens import CodeGrader
+
 
 class ActionGrader(CodeGrader):
     provenance_version = "rubric-v1"  # bump when the rubric changes
@@ -196,9 +203,11 @@ batch = await EvaluationRunner(adapter, [composite], config).run(eval_set)
 
 `run` is async — call it from `asyncio.run(...)`. For long suites, `RunnerConfig`
 also takes a progress callback and a `checkpoint_path` so a rerun resumes
-(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials but
-re-runs infra-errored ones, and refuses (with `CheckpointError`) a checkpoint
-written by a different eval set, adapter, graders, or `DecisionSpec` —
+(`--progress` / `--checkpoint` on the CLI). Resume skips completed trials,
+re-grades trials that suffered grader crashes using their preserved transcripts
+without re-invoking the agent, re-runs infra-errored trials, and refuses (with
+`CheckpointError`) a checkpoint written by a different eval set, adapter,
+graders, `DecisionSpec`, or `num_runs` —
 identity is class-path based, so pass a `DecisionSpec` to distinguish two
 configs of the same adapter class, and use stable explicit `task_id`s
 (auto-generated ids change every run and can never resume). On flaky
@@ -244,7 +253,7 @@ from tracelens import ReportGenerator
 
 gen = ReportGenerator(k_values=[1, 3, 5], consistency_k_values=[2, 3, 5])
 report = gen.build_report(batch)
-print(gen.render_ci_summary(report))   # also render_markdown / render_html
+print(gen.render_ci_summary(report))  # also render_markdown / render_html
 ```
 
 **Gating CI on regressions** — once a run looks good, freeze it as a baseline and
