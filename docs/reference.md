@@ -39,6 +39,7 @@ corresponding package extra.
 
 ::: tracelens.AgentAdapter
 ::: tracelens.SimpleAdapter
+::: tracelens.SyncAdapter
 ::: tracelens.HTTPAPIAdapter
 ::: tracelens.HTTPAdapterConfig
 ::: tracelens.AuthConfig

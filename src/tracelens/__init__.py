@@ -90,7 +90,11 @@ from tracelens.core.transcript import (
     TranscriptStep,
 )
 from tracelens.core.trial import InfraError, Trial, TrialBatch, TrialStatus
-from tracelens.execution.agent_adapter import AgentAdapter, SimpleAdapter
+from tracelens.execution.agent_adapter import (
+    AgentAdapter,
+    SimpleAdapter,
+    SyncAdapter,
+)
 from tracelens.execution.http_adapter import (
     AuthConfig,
     AuthScheme,
@@ -218,6 +222,7 @@ __all__ = [
     # --- Execution ---
     "AgentAdapter",
     "SimpleAdapter",
+    "SyncAdapter",
     "HTTPAPIAdapter",
     "HTTPAdapterConfig",
     "AuthConfig",
