@@ -6,6 +6,7 @@ import pytest
 from scipy import stats
 
 from tracelens.baselines.comparison import (
+    SEVERITY_ORDER,
     MetricRegression,
     RegressionDetector,
     RegressionReport,
@@ -30,9 +31,16 @@ class TestRegressionSeverity:
             RegressionSeverity.SEVERE,
         ]
 
-        # Verify they can be compared in order
+        assert levels == SEVERITY_ORDER
+
+        # String enum alphabetical ordering would put "none" > "moderate" > "minor"
+        # Verify that SEVERITY_ORDER.index correctly reflects severity priority
         for i in range(len(levels) - 1):
-            assert levels[i] != levels[i + 1]
+            assert SEVERITY_ORDER.index(levels[i]) < SEVERITY_ORDER.index(levels[i + 1])
+
+        # Verify max() with key=SEVERITY_ORDER.index handles mixture correctly
+        mixed = [RegressionSeverity.MINOR, RegressionSeverity.NONE, RegressionSeverity.MODERATE]
+        assert max(mixed, key=SEVERITY_ORDER.index) is RegressionSeverity.MODERATE
 
     def test_severity_at_least_and_relative_change(self):
         assert severity_at_least(RegressionSeverity.SEVERE, RegressionSeverity.MODERATE)
@@ -393,10 +401,13 @@ class TestNoiseAwareRegression:
         assert report.should_block_ci(threshold=RegressionSeverity.MINOR) is False
         # Strict path at the same threshold: the regression still counts
         # as MINOR and the check blocks.
-        assert report.should_block_ci(
-            threshold=RegressionSeverity.MINOR,
-            ignore_noise_band=False,
-        ) is True
+        assert (
+            report.should_block_ci(
+                threshold=RegressionSeverity.MINOR,
+                ignore_noise_band=False,
+            )
+            is True
+        )
 
     def test_noise_band_aware_false_disables_flagging(self):
         """Setting noise_band_aware=False on the detector disables the
@@ -1070,9 +1081,7 @@ class TestNoiseAwareSeverityConsistency:
 
     def test_noise_only_report_downgrades_overall_severity(self) -> None:
         baseline = TaskBaseline(task_id="t1")
-        baseline.add_metric(
-            metric_name="pass_rate", value=0.10, std=0.001, sample_size=20
-        )
+        baseline.add_metric(metric_name="pass_rate", value=0.10, std=0.001, sample_size=20)
         baseline_spec, current_spec = self._specs()
         detector = RegressionDetector()
 

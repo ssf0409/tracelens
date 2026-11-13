@@ -483,10 +483,10 @@ def _trials_needed(
 class RegressionSeverity(str, Enum):
     """Severity levels for regressions."""
 
-    NONE = "none"           # No regression
-    MINOR = "minor"         # < 5% decline
-    MODERATE = "moderate"   # 5-15% decline (default blocking threshold)
-    SEVERE = "severe"       # > 15% decline
+    NONE = "none"  # No regression
+    MINOR = "minor"  # < 5% decline
+    MODERATE = "moderate"  # 5-15% decline (default blocking threshold)
+    SEVERE = "severe"  # > 15% decline
 
 
 # The severity ladder, least to most severe; blocking compares positions.
@@ -568,6 +568,11 @@ class MetricRegression(BaseModel):
     # Deltas flagged this way are surfaced but do NOT block CI by default
     # (see RegressionReport.blocking_regressions).
     within_noise_band: bool = False
+
+    # Set when regression detection applied a custom MetricBaseline
+    # threshold (e.g. "relative=0.1" or "absolute=-0.2"); surfaced in the CI
+    # notes so an exempted or breached custom rule is visible.
+    custom_threshold: str | None = None
 
     # How the evidence was produced: the test (``boschloo_exact``,
     # ``welch_t``, ``exact_permutation``, ``prediction_t``, or ``None``;
@@ -734,6 +739,7 @@ class RegressionReport(BaseModel):
             )
             effective_severity = max(
                 (r.severity for r in considered),
+                key=SEVERITY_ORDER.index,
                 default=RegressionSeverity.NONE,
             )
         else:
@@ -759,6 +765,8 @@ class RegressionReport(BaseModel):
                 notes = f" [{reg.evidence_text()}]"
                 if reg.within_noise_band:
                     notes += " [within infra-noise band; not blocking]"
+                if reg.custom_threshold:
+                    notes += f" [custom threshold: {reg.custom_threshold}]"
                 lines.append(
                     f"  {reg.metric_name}: {reg.baseline_mean:.4f} -> "
                     f"{reg.current_mean:.4f} ({format_delta_percent(reg.delta_percent)}){notes}"
@@ -909,13 +917,66 @@ class RegressionDetector:
         delta = sides.mean_c - sides.mean_b
         delta_percent = relative_change(delta, sides.mean_b)
 
-        # Skip if change is too small. A change from a zero mean has no
-        # percentage to hold against the floor, so any nonzero one is reported.
-        if delta_percent is None:
-            if delta == 0:
+        # Custom per-metric thresholds configured on the baseline override
+        # the min-delta floor: a decline within them is not a regression at
+        # all, and a breach is annotated on the finding.
+        custom_threshold_desc: str | None = None
+        has_custom_threshold = (
+            metric_baseline.regression_threshold_relative is not None
+            or metric_baseline.regression_threshold_absolute is not None
+        )
+        if has_custom_threshold:
+            descs = []
+            if metric_baseline.regression_threshold_relative is not None:
+                descs.append(f"relative={metric_baseline.regression_threshold_relative}")
+            if metric_baseline.regression_threshold_absolute is not None:
+                descs.append(f"absolute={metric_baseline.regression_threshold_absolute}")
+            custom_threshold_desc = ", ".join(descs)
+
+            rel_change = (
+                delta / abs(sides.mean_b)
+                if sides.mean_b != 0
+                else (float("inf") if delta != 0 else 0.0)
+            )
+            breached = False
+            if metric_baseline.higher_is_better:
+                if (
+                    metric_baseline.regression_threshold_relative is not None
+                    and rel_change < -metric_baseline.regression_threshold_relative
+                ):
+                    breached = True
+                if (
+                    metric_baseline.regression_threshold_absolute is not None
+                    and delta < metric_baseline.regression_threshold_absolute
+                ):
+                    breached = True
+            else:
+                if (
+                    metric_baseline.regression_threshold_relative is not None
+                    and rel_change > metric_baseline.regression_threshold_relative
+                ):
+                    breached = True
+                if (
+                    metric_baseline.regression_threshold_absolute is not None
+                    and delta > -metric_baseline.regression_threshold_absolute
+                ):
+                    breached = True
+
+            # A decline that does not breach the custom threshold is not
+            # flagged as a regression.
+            is_decline = (delta < 0) if metric_baseline.higher_is_better else (delta > 0)
+            if is_decline and not breached:
                 return None
-        elif abs(delta_percent) < self.min_delta_percent:
-            return None
+
+        # Skip if change is too small (unless a custom threshold overrode the
+        # floor). A change from a zero mean has no percentage to hold against
+        # the floor, so any nonzero one is reported.
+        if not has_custom_threshold:
+            if delta_percent is None:
+                if delta == 0:
+                    return None
+            elif abs(delta_percent) < self.min_delta_percent:
+                return None
 
         test, p_value = _p_value(sides, _alternative(sides))
         finding = MetricRegression(
@@ -928,6 +989,7 @@ class RegressionDetector:
             is_significant=p_value is not None and p_value <= self.significance_level,
             insufficient_data=p_value is None,
             severity=severity_for(delta_percent),
+            custom_threshold=custom_threshold_desc,
             test=test,
             baseline_n=sides.n_b,
             current_n=sides.n_c,

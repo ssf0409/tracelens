@@ -44,11 +44,13 @@ text in your baselines.
 ```python
 from tracelens import DecisionSpec, ModelConfig, PromptSpec
 
+
 def spec_for(version: str, prompt_text: str) -> DecisionSpec:
     return DecisionSpec(
         model=ModelConfig(provider="openai", model_id="gpt-4o-mini", temperature=0.7),
         prompts=PromptSpec.from_prompts(system_prompt=prompt_text, prompt_version=version),
     )
+
 
 v1_spec = spec_for("v1", "Reply to the support ticket.")
 v2_spec = spec_for(
@@ -61,8 +63,8 @@ That difference is what makes a result *attributable*: a transcript stamped with
 `v2_spec.fingerprint` provably came from the v2 prompt and not from v1.
 
 ```python
-print(v1_spec.fingerprint_short)            # 20a1b674339b
-print(v2_spec.fingerprint_short)            # cc545403c02b
+print(v1_spec.fingerprint_short)  # 20a1b674339b
+print(v2_spec.fingerprint_short)  # cc545403c02b
 print(v1_spec.fingerprint != v2_spec.fingerprint)  # True
 ```
 
@@ -80,16 +82,18 @@ single run per task tells you nothing about a non-deterministic agent's variance
 ```python
 from tracelens import EvaluationRunner, RunnerConfig, SimpleAdapter
 
+
 async def run_version(make_adapter, spec: DecisionSpec):
     runner = EvaluationRunner(
         make_adapter(),
-        [ReplyQualityGrader("reply_quality")],   # SAME grader for both versions
+        [ReplyQualityGrader("reply_quality")],  # SAME grader for both versions
         RunnerConfig(num_runs=10, max_concurrency=1),
         decision_spec=spec,
     )
-    batch = await runner.run(TASKS)              # SAME eval set for both versions
+    batch = await runner.run(TASKS)  # SAME eval set for both versions
     scores = [o.score for trial in batch.trials for o in trial.outcomes]
     return batch, scores
+
 
 b1, s1 = await run_version(lambda: SimpleAdapter(make_agent(0.66)), v1_spec)
 b2, s2 = await run_version(lambda: SimpleAdapter(make_agent(0.82)), v2_spec)
