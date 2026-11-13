@@ -1687,3 +1687,59 @@ def test_a_significant_rise_from_a_zero_baseline_blocks_in_a_real_process(
         report = _tracelens("report", "--results", str(out), "--format", fmt, cwd=root)
         assert report.returncode == 0, report.stdout + report.stderr
         assert "N/A relative to 0" in report.stdout and "+100.0%" not in report.stdout
+def test_eval_set_misspelled_task_key_fails_fast_with_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #129: misspelled task keys fail before any agent call with exit 2."""
+    bad_tasks = tmp_path / "bad_tasks.json"
+    bad_tasks.write_text(json.dumps({
+        "tasks": [
+            {
+                "task_id": "t1",
+                "name": "bad task",
+                "input_data": {"val": 1},
+                "expectd_output": "misspelled",
+            }
+        ]
+    }))
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(bad_tasks),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+    )
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "expectd_output" in err
+    assert EchoAdapter.run_count == 0
+
+
+def test_eval_set_misspelled_expectation_key_fails_fast_with_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #129: misspelled expectation keys fail before any agent call with exit 2."""
+    bad_tasks = tmp_path / "bad_tasks_expectation.json"
+    bad_tasks.write_text(json.dumps({
+        "tasks": [
+            {
+                "task_id": "t1",
+                "name": "bad task",
+                "input_data": {"val": 1},
+                "expectation": {
+                    "expectd_output": "typo",
+                },
+            }
+        ]
+    }))
+
+    exit_code = _run_cli(
+        "run",
+        "--eval-set", str(bad_tasks),
+        "--adapter", ADAPTER,
+        "--graders", GRADER,
+    )
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "expectd_output" in err
+    assert EchoAdapter.run_count == 0
