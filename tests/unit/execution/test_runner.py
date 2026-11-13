@@ -132,6 +132,29 @@ class TestEvaluationRunner:
         assert trial.error_message is not None
         assert len(trial.outcomes) == 0  # No grading on timeout
 
+    async def test_task_timeout_honoured_when_smaller_than_runner_budget(self):
+        """Issue #136: task.timeout_seconds is honoured when smaller than runner budget."""
+        async def hanging_fn(input_data: dict) -> dict:
+            await asyncio.sleep(10)
+            return {}
+
+        adapter = SimpleAdapter(hanging_fn)
+        # Runner budget is large (300s), task timeout is small (0.05s)
+        config = RunnerConfig(timeout_seconds=300.0)
+        runner = EvaluationRunner(adapter, [_PassGrader()], config)
+        task = Task(
+            task_id="fast-timeout-task",
+            name="Hanging task with tight timeout",
+            input_data={},
+            timeout_seconds=0.05,
+        )
+        batch = await runner.run(EvalSet(name="test-eval-set", tasks=[task]))
+
+        trial = batch.trials[0]
+        assert trial.status == TrialStatus.TIMEOUT
+        assert "0.05s" in (trial.error_message or "")
+        assert len(trial.outcomes) == 0
+
     async def test_adapter_error_handling(self):
         """Adapter exceptions result in FAILED status with no grading."""
         async def broken_fn(input_data: dict) -> dict:

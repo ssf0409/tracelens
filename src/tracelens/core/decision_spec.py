@@ -19,7 +19,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, TypeAdapter, computed_field, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -458,6 +458,29 @@ class DecisionSpec(BaseModel):
         description="Any additional parameters that affect agent behavior",
     )
 
+    _stored_fingerprint: str | None = None
+
+    @property
+    def stored_fingerprint(self) -> str | None:
+        """Fingerprint stored when loaded from serialized state."""
+        return self._stored_fingerprint
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _validate_and_check_fingerprint(cls, data: Any, handler: Any) -> Any:
+        expected_fp = None
+        if isinstance(data, dict) and "fingerprint" in data:
+            expected_fp = data.get("fingerprint")
+        instance = handler(data)
+        if expected_fp is not None:
+            instance._stored_fingerprint = expected_fp
+            if instance._stored_fingerprint != instance.fingerprint:
+                raise ValueError(
+                    f"Stored fingerprint {instance._stored_fingerprint!r} does not match "
+                    f"computed fingerprint {instance.fingerprint!r}"
+                )
+        return instance
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def fingerprint(self) -> str:
@@ -468,8 +491,10 @@ class DecisionSpec(BaseModel):
         not capture.
         """
         hash_data = self._to_hash_dict()
-        # Serialize deterministically (sorted keys)
-        serialized = json.dumps(hash_data, sort_keys=True, default=str)
+        # Serialize deterministically in JSON mode so datetimes, enums, and other
+        # structured types in extra round-trip to the exact same JSON representation.
+        json_compatible = TypeAdapter(dict[str, Any]).dump_python(hash_data, mode="json")
+        serialized = json.dumps(json_compatible, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode()).hexdigest()
 
     @computed_field  # type: ignore[prop-decorator]
@@ -580,3 +605,8 @@ class DecisionSpec(BaseModel):
                 summary["infra"] = infra_summary
 
         return summary
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DecisionSpec):
+            return NotImplemented
+        return self.__dict__ == other.__dict__
