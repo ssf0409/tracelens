@@ -88,6 +88,7 @@ class TaskGateOutcome(StrEnum):
     NO_GRADABLE_TRIALS = "no_gradable_trials"
     NO_COMPARABLE_METRICS = "no_comparable_metrics"
     TASK_CONTENT_CHANGED = "task_content_changed"
+    CANARY_FINGERPRINT_MISMATCH = "canary_fingerprint_mismatch"
 
 
 EXIT_CODES: dict[GateStatus, int] = {
@@ -198,6 +199,7 @@ class TaskGateResult:
     overall_severity: RegressionSeverity = RegressionSeverity.NONE
     infra_config_mismatch: bool = False
     infra_config_diff: dict[str, tuple[Any, Any]] = field(default_factory=dict)
+    canary_fingerprint_mismatch: bool = False
     regressions: list[MetricRegression] = field(default_factory=list)
     improvements: list[MetricRegression] = field(default_factory=list)
     # Whether a total failure of this task could have blocked at these
@@ -243,6 +245,7 @@ class TaskGateResult:
             "overall_severity": self.overall_severity.value,
             "infra_config_mismatch": self.infra_config_mismatch,
             "infra_config_diff": _diff_to_json(self.infra_config_diff),
+            "canary_fingerprint_mismatch": self.canary_fingerprint_mismatch,
             "regressions": [r.model_dump(mode="json") for r in self.regressions],
             "improvements": [r.model_dump(mode="json") for r in self.improvements],
             "detectable": self.detectable,
@@ -418,6 +421,7 @@ class GateResult:
     skipped_no_gradable: int = 0
     skipped_no_comparable_metrics: int = 0
     skipped_task_content_changed: int = 0
+    skipped_canary_fingerprint_mismatch: int = 0
     blocking_regressions: int = 0
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -486,12 +490,12 @@ class GateResult:
         if self.skipped_no_gradable:
             parts.append(f"{self.skipped_no_gradable} skipped (no gradable trials)")
         if self.skipped_no_comparable_metrics:
-            parts.append(
-                f"{self.skipped_no_comparable_metrics} skipped (no comparable metrics)"
-            )
+            parts.append(f"{self.skipped_no_comparable_metrics} skipped (no comparable metrics)")
         if self.skipped_task_content_changed:
+            parts.append(f"{self.skipped_task_content_changed} skipped (task content changed)")
+        if self.skipped_canary_fingerprint_mismatch:
             parts.append(
-                f"{self.skipped_task_content_changed} skipped (task content changed)"
+                f"{self.skipped_canary_fingerprint_mismatch} skipped (canary fingerprint mismatch)"
             )
         parts.append(f"{self.blocking_regressions} blocking regression(s)")
         underpowered = sum(len(t.underpowered_regressions) for t in self.underpowered_tasks)
@@ -517,6 +521,7 @@ class GateResult:
             "skipped_no_gradable": self.skipped_no_gradable,
             "skipped_no_comparable_metrics": self.skipped_no_comparable_metrics,
             "skipped_task_content_changed": self.skipped_task_content_changed,
+            "skipped_canary_fingerprint_mismatch": self.skipped_canary_fingerprint_mismatch,
             "blocking_regressions": self.blocking_regressions,
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
@@ -549,6 +554,9 @@ class GateResult:
             skipped_no_gradable=int(data.get("skipped_no_gradable", 0)),
             skipped_no_comparable_metrics=int(data.get("skipped_no_comparable_metrics", 0)),
             skipped_task_content_changed=int(data.get("skipped_task_content_changed", 0)),
+            skipped_canary_fingerprint_mismatch=int(
+                data.get("skipped_canary_fingerprint_mismatch", 0)
+            ),
             blocking_regressions=int(data.get("blocking_regressions", 0)),
             reasons=list(data.get("reasons", [])),
             warnings=list(data.get("warnings", [])),
@@ -777,8 +785,14 @@ def evaluate_gate(
     # actually live (below). ``_apply_multiplicity`` re-annotates every
     # finding at the level the run settles on, so the detector's own level
     # only governs the first pass.
+    # A MINOR gate threshold asks for every minor drop to be detectable, so
+    # the detector's reporting floor comes down to zero; without this the
+    # default 5% floor filters out the very drops MINOR exists to block.
     detector = RegressionDetector(
-        significance_level=alpha, noise_band_absolute=noise_band, power_notes=False
+        significance_level=alpha,
+        min_delta_percent=0.0 if threshold is RegressionSeverity.MINOR else 5.0,
+        noise_band_absolute=noise_band,
+        power_notes=False,
     )
     trials_by_task: dict[str, list[Trial]] = {}
     for trial in batch.trials:
@@ -800,26 +814,30 @@ def evaluate_gate(
         current_results = per_trial_results(task_trials)
         excluded = len(task_trials) - len(current_results)
         if baseline is None:
-            tasks.append(TaskGateResult(
-                task_id=task_id,
-                outcome=TaskGateOutcome.NO_BASELINE,
-                reason="no baseline stored for this task",
-                compared_trials=0,
-                excluded_trials=excluded,
-            ))
+            tasks.append(
+                TaskGateResult(
+                    task_id=task_id,
+                    outcome=TaskGateOutcome.NO_BASELINE,
+                    reason="no baseline stored for this task",
+                    compared_trials=0,
+                    excluded_trials=excluded,
+                )
+            )
             continue
         current_hash = task_hashes.get(task_id)
         if baseline.task_hash and current_hash and baseline.task_hash != current_hash:
-            tasks.append(TaskGateResult(
-                task_id=task_id,
-                outcome=TaskGateOutcome.TASK_CONTENT_CHANGED,
-                reason=(
-                    "task content changed since the baseline was stored "
-                    f"({short_hash(baseline.task_hash)} -> {short_hash(current_hash)}); "
-                    "re-store the baseline for this task"
-                ),
-                excluded_trials=excluded,
-            ))
+            tasks.append(
+                TaskGateResult(
+                    task_id=task_id,
+                    outcome=TaskGateOutcome.TASK_CONTENT_CHANGED,
+                    reason=(
+                        "task content changed since the baseline was stored "
+                        f"({short_hash(baseline.task_hash)} -> {short_hash(current_hash)}); "
+                        "re-store the baseline for this task"
+                    ),
+                    excluded_trials=excluded,
+                )
+            )
             continue
         if current_hash and not baseline.task_hash:
             unhashed_baselines.append(task_id)
@@ -864,6 +882,57 @@ def evaluate_gate(
             current_spec, warning = spec_from_trials(task_trials)
             if warning and warning not in warnings:
                 warnings.append(warning)
+
+        # Enforce canary fingerprint contract: canary baselines (BaselineType.CANARY / is_canary)
+        # require a DecisionSpec with a matching fingerprint. Missing or mismatched
+        # DecisionSpec identity evidence makes the gate unevaluable.
+        if baseline.is_canary:
+            cur_fp = current_spec.fingerprint if current_spec else None
+            base_fp = baseline.fingerprint
+            if cur_fp is None or base_fp != cur_fp:
+                expected_str = short_hash(base_fp) if base_fp else "none"
+                got_str = short_hash(cur_fp) if cur_fp else "none"
+                tasks.append(
+                    TaskGateResult(
+                        task_id=task_id,
+                        outcome=TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH,
+                        reason=(
+                            f"canary baseline fingerprint mismatch ({expected_str} -> {got_str}); "
+                            "pass matching --decision-spec or re-store canary baseline"
+                        ),
+                        compared_trials=len(current_results),
+                        excluded_trials=excluded,
+                        canary_fingerprint_mismatch=True,
+                    )
+                )
+                continue
+
+        if not current_results:
+            tasks.append(
+                TaskGateResult(
+                    task_id=task_id,
+                    outcome=TaskGateOutcome.NO_GRADABLE_TRIALS,
+                    reason="no gradable trials (all infra/grader failures)",
+                    excluded_trials=excluded,
+                )
+            )
+            continue
+        current_metrics = sorted({name for result in current_results for name in result})
+        if not baseline.metrics.keys() & set(current_metrics):
+            tasks.append(
+                TaskGateResult(
+                    task_id=task_id,
+                    outcome=TaskGateOutcome.NO_COMPARABLE_METRICS,
+                    reason=(
+                        "baseline shares no metric with the CLI metrics "
+                        f"({', '.join(current_metrics)})"
+                    ),
+                    compared_trials=len(current_results),
+                    excluded_trials=excluded,
+                    available_metrics=current_metrics,
+                )
+            )
+            continue
         report = detector.compare_with_specs(
             baseline,
             current_results,
@@ -956,9 +1025,8 @@ def evaluate_gate(
     no_baseline = [t for t in tasks if t.outcome is TaskGateOutcome.NO_BASELINE]
     no_gradable = [t for t in tasks if t.outcome is TaskGateOutcome.NO_GRADABLE_TRIALS]
     no_comparable = [t for t in tasks if t.outcome is TaskGateOutcome.NO_COMPARABLE_METRICS]
-    content_changed = [
-        t for t in tasks if t.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED
-    ]
+    content_changed = [t for t in tasks if t.outcome is TaskGateOutcome.TASK_CONTENT_CHANGED]
+    canary_mismatch = [t for t in tasks if t.outcome is TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH]
     blocking = [t for t in checked if t.blocking]
     blocking_suite = [s for s in suite if s.blocking]
     undetectable = [t for t in checked if not t.detectable]
@@ -980,7 +1048,8 @@ def evaluate_gate(
     if unhashed_baselines:
         warnings.append(
             f"{len(unhashed_baselines)} baseline(s) carry no task_hash, so a change to "
-            "their task content cannot be detected: " + ", ".join(unhashed_baselines)
+            "their task content cannot be detected: "
+            + ", ".join(unhashed_baselines)
             + "; re-store them from a results file that records provenance"
         )
     if undetectable and len(undetectable) < len(checked):
@@ -1016,6 +1085,11 @@ def evaluate_gate(
             reasons.append(
                 f"{len(content_changed)} task(s) whose content changed since their "
                 "baseline was stored: " + ", ".join(t.task_id for t in content_changed)
+            )
+        if canary_mismatch:
+            reasons.append(
+                f"{len(canary_mismatch)} canary task(s) with fingerprint mismatch: "
+                + ", ".join(t.task_id for t in canary_mismatch)
             )
         if no_gradable:
             reasons.append(
@@ -1059,9 +1133,7 @@ def evaluate_gate(
             reasons.append(
                 f"{len(blocking)} blocking regression(s) at threshold "
                 f"'{threshold.value}': "
-                + ", ".join(
-                    f"{t.task_id} ({t.overall_severity.value})" for t in blocking
-                )
+                + ", ".join(f"{t.task_id} ({t.overall_severity.value})" for t in blocking)
             )
         if blocking_suite:
             status = GateStatus.BLOCKED
@@ -1093,6 +1165,7 @@ def evaluate_gate(
         skipped_no_gradable=len(no_gradable),
         skipped_no_comparable_metrics=len(no_comparable),
         skipped_task_content_changed=len(content_changed),
+        skipped_canary_fingerprint_mismatch=len(canary_mismatch),
         blocking_regressions=len(blocking) + len(blocking_suite),
         reasons=reasons,
         warnings=warnings,

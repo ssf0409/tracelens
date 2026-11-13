@@ -72,6 +72,7 @@ from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.core.task import Task
 from tracelens.core.transcript import Transcript
 
+
 class GoalParserAdapter(AgentAdapter):
     """Calls one parser component directly."""
 
@@ -92,15 +93,14 @@ class GoalParserAdapter(AgentAdapter):
 ```python
 from tracelens.core.grader import CodeGrader
 
+
 class GoalParserGrader(CodeGrader):
     def compute_metrics(self, transcript: Transcript, task: Task) -> dict[str, float]:
         expected = task.expectation.expected_output["goals"]
         actual = transcript.final_output.get("goals", [])
         return {
             "goal_count_match": float(len(actual) == len(expected)),
-            "types_match": float(
-                {g["type"] for g in actual} == {g["type"] for g in expected}
-            ),
+            "types_match": float({g["type"] for g in actual} == {g["type"] for g in expected}),
         }
 
     def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
@@ -162,10 +162,13 @@ Use the full agent adapter — `SimpleAdapter` for simple callables, or a custom
 ```python
 from tracelens.execution.agent_adapter import SimpleAdapter
 
+
 async def invoke_planning_agent(input_data: dict) -> dict:
     from myproject.agent import PlanningAgent
+
     agent = PlanningAgent()
     return await agent.decompose(input_data["goal"], input_data["user_context"])
+
 
 adapter = SimpleAdapter(invoke_planning_agent)
 ```
@@ -183,7 +186,9 @@ format_grader = FormatValidationGrader("format", config=GraderConfig(policy=Eval
 
 # Quality + personalization — contribute to the weighted score
 quality_grader = DecompositionQualityGrader("quality", config=GraderConfig(policy=EvalPolicy.TRACK))
-personalization_grader = PersonalizationGrader("personalization", config=GraderConfig(policy=EvalPolicy.TRACK))
+personalization_grader = PersonalizationGrader(
+    "personalization", config=GraderConfig(policy=EvalPolicy.TRACK)
+)
 
 composite = CompositeGrader(
     grader_id="task_composite",
@@ -209,7 +214,7 @@ back-compat, but `EvalPolicy` is the current API.)
 from tracelens.execution.runner import RunnerConfig
 
 config = RunnerConfig(
-    num_runs=5,          # 5 runs per task for pass@k and pass^k
+    num_runs=5,  # 5 runs per task for pass@k and pass^k
     max_concurrency=10,
     timeout_seconds=120.0,
 )
@@ -265,6 +270,7 @@ Write a custom `AgentAdapter` that orchestrates the full pipeline and records in
 from tracelens.execution.agent_adapter import AgentAdapter
 from tracelens.core.transcript import Transcript, TranscriptStep, StepType
 
+
 class RequestPipelineAdapter(AgentAdapter):
     """Runs the full parse → policy → execute → confirm pipeline."""
 
@@ -274,21 +280,27 @@ class RequestPipelineAdapter(AgentAdapter):
         try:
             # Stage 1: Request parsing
             parsed = await self.request_parser.parse(task.input_data["request"])
-            transcript.intermediate_outputs.append({
-                "stage": "request_parser",
-                "output": parsed,
-            })
-            transcript.add_step(TranscriptStep(
-                step_type=StepType.INTERNAL,
-                content={"stage": "request_parser", "result": parsed},
-            ))
+            transcript.intermediate_outputs.append(
+                {
+                    "stage": "request_parser",
+                    "output": parsed,
+                }
+            )
+            transcript.add_step(
+                TranscriptStep(
+                    step_type=StepType.INTERNAL,
+                    content={"stage": "request_parser", "result": parsed},
+                )
+            )
 
             # Stage 2: Policy check
             policy_result = await self.policy_checker.evaluate(parsed, task.input_data["account"])
-            transcript.intermediate_outputs.append({
-                "stage": "policy_checker",
-                "output": policy_result,
-            })
+            transcript.intermediate_outputs.append(
+                {
+                    "stage": "policy_checker",
+                    "output": policy_result,
+                }
+            )
 
             if not policy_result["approved"]:
                 transcript.final_output = {"status": "rejected", "reason": policy_result["reason"]}
@@ -296,17 +308,21 @@ class RequestPipelineAdapter(AgentAdapter):
 
             # Stage 3: Action execution
             action = await self.action_executor.execute(parsed, policy_result)
-            transcript.intermediate_outputs.append({
-                "stage": "action_executor",
-                "output": action,
-            })
+            transcript.intermediate_outputs.append(
+                {
+                    "stage": "action_executor",
+                    "output": action,
+                }
+            )
 
             # Stage 4: Confirmation
             confirmation = await self.confirmer.verify(action)
-            transcript.intermediate_outputs.append({
-                "stage": "confirmation",
-                "output": confirmation,
-            })
+            transcript.intermediate_outputs.append(
+                {
+                    "stage": "confirmation",
+                    "output": confirmation,
+                }
+            )
 
             transcript.final_output = {
                 "status": "completed",
@@ -515,8 +531,8 @@ from tracelens.execution.runner import EvaluationRunner, RunnerConfig
 # Different configs per level
 level_configs = {
     "function": RunnerConfig(num_runs=1, max_concurrency=20, timeout_seconds=30),
-    "task":     RunnerConfig(num_runs=5, max_concurrency=10, timeout_seconds=120),
-    "system":   RunnerConfig(num_runs=10, max_concurrency=3, timeout_seconds=600),
+    "task": RunnerConfig(num_runs=5, max_concurrency=10, timeout_seconds=120),
+    "system": RunnerConfig(num_runs=10, max_concurrency=3, timeout_seconds=600),
 }
 
 for level, config in level_configs.items():
@@ -592,7 +608,7 @@ manager.create_capability_baseline(
     task_id="decompose_fitness_goal",
     metrics={"quality_score": 0.78, "personalization_score": 0.72},
     promotion_policy=PromotionPolicy(
-        min_improvement_relative=0.05,   # 5% — standard
+        min_improvement_relative=0.05,  # 5% — standard
         min_samples=10,
         required_confidence=0.95,
     ),
@@ -623,7 +639,7 @@ manager.create_capability_baseline(
     task_id="request_pipeline_performance",
     metrics={"pipeline_completion_rate": 0.85, "avg_latency_ms": 4500},
     promotion_policy=PromotionPolicy(
-        min_improvement_relative=0.10,   # 10% — wide
+        min_improvement_relative=0.10,  # 10% — wide
         min_samples=20,
         required_confidence=0.95,
     ),

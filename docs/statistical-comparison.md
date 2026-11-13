@@ -25,8 +25,8 @@ from tracelens import estimate_metric
 scores = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]  # 8/10 = 0.80
 est = estimate_metric(scores, confidence=0.95, seed=0)
 
-print(est)                       # MetricEstimate(0.8000 [0.5000, 1.0000], n=10)
-print(est.mean, est.ci_width)    # 0.8 0.5
+print(est)  # MetricEstimate(0.8000 [0.5000, 1.0000], n=10)
+print(est.mean, est.ci_width)  # 0.8 0.5
 ```
 
 A 95% CI of `[0.50, 1.00]` on a pass rate of `0.80` is the honest message here: **with only 10 trials, "0.80" could plausibly be anything from a coin flip to perfect.** That width is your signal to run more trials.
@@ -61,17 +61,17 @@ point, lo, hi = bootstrap_ci(scores, statistic="mean", seed=0)
 ```python
 from tracelens import compare_metrics
 
-baseline = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]   # v1: 0.80
-current  = [1, 1, 1, 1, 1, 1, 0, 1, 1, 1]   # v2: 0.90
+baseline = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]  # v1: 0.80
+current = [1, 1, 1, 1, 1, 1, 0, 1, 1, 1]  # v2: 0.90
 
 result = compare_metrics(baseline, current, compute_p_value=True, seed=0)
 
-print(result.delta)            # 0.1    (current - baseline)
-print(result.relative_delta)   # 0.125  (delta / |baseline mean|)
+print(result.delta)  # 0.1    (current - baseline)
+print(result.relative_delta)  # 0.125  (delta / |baseline mean|)
 print(result.ci_lower, result.ci_upper)  # -0.2 0.4  (CI of the difference)
-print(result.is_significant)   # False  — CI of the difference includes 0
-print(result.cohens_d)         # 0.268  — small effect
-print(result.p_value)          # 1.0    — not significant
+print(result.is_significant)  # False  — CI of the difference includes 0
+print(result.cohens_d)  # 0.268  — small effect
+print(result.p_value)  # 1.0    — not significant
 ```
 
 Full signature:

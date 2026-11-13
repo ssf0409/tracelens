@@ -76,10 +76,13 @@ is what the HTTP example does:
 ```python
 from tracelens import Task
 
-eval_set = EvalSet(name="http-echo", tasks=[
-    Task(name="add small", input_data={"a": 2, "b": 3}),
-    Task(name="add large", input_data={"a": 1000, "b": 1234}),
-])
+eval_set = EvalSet(
+    name="http-echo",
+    tasks=[
+        Task(name="add small", input_data={"a": 2, "b": 3}),
+        Task(name="add large", input_data={"a": 1000, "b": 1234}),
+    ],
+)
 ```
 
 ---
@@ -169,6 +172,7 @@ shows OpenAI and Anthropic providers and an `instruction_following` grader:
 import json
 from tracelens import LLMGrader, Task, Transcript
 
+
 class InstructionFollowingGrader(LLMGrader):
     def build_grading_prompt(self, transcript: Transcript, task: Task) -> str:
         return f"Score instruction_following 1-10 for: {transcript.final_output}"
@@ -253,7 +257,7 @@ from tracelens import ReportGenerator
 
 gen = ReportGenerator(k_values=[1, 3, 5], consistency_k_values=[2, 3, 5])
 report = gen.build_report(batch)
-print(gen.render_ci_summary(report))   # also: render_markdown, render_html
+print(gen.render_ci_summary(report))  # also: render_markdown, render_html
 ```
 
 ---
@@ -299,7 +303,7 @@ results_by_task = batch.get_pass_results_by_task()  # {task_id: [True, False, ..
 
 for task_id, results in results_by_task.items():
     n, c = len(results), sum(results)
-    capability = pass_at_k(n=n, c=c, k=3)         # >=1 of 3 attempts passes
+    capability = pass_at_k(n=n, c=c, k=3)  # >=1 of 3 attempts passes
     reliability = pass_to_k(results=results, k=3)  # all 3 in a window pass
     print(f"{task_id}: pass@3={capability:.2f}  pass^3={reliability:.2f}")
 ```

@@ -18,8 +18,8 @@ All loaders implement the same [`TaskLoader`][tracelens.core.task.TaskLoader] AB
 their `load()` and `save()` result contracts remain consistent:
 
 ```python
-loader = CSVTaskLoader(input_field="prompt")   # or any other loader
-tasks  = loader.load("eval_data.csv")
+loader = CSVTaskLoader(input_field="prompt")  # or any other loader
+tasks = loader.load("eval_data.csv")
 eval_set = EvalSet(name="My Suite", tasks=tasks)
 ```
 

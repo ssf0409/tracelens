@@ -7,7 +7,7 @@ import pytest
 
 from tracelens.baselines.comparison import RegressionSeverity
 from tracelens.baselines.manager import BaselineManager, TaskBaseline
-from tracelens.core.decision_spec import DecisionSpec, InfraConfig
+from tracelens.core.decision_spec import DecisionSpec, InfraConfig, ModelConfig
 from tracelens.core.outcome import Outcome
 from tracelens.core.provenance import (
     CandidateSpec,
@@ -180,9 +180,7 @@ class TestEvaluateGate:
         baseline.decision_spec = DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048))
         manager.set_baseline(baseline)
         current = DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512))
-        gate = evaluate_gate(
-            _batch(*_runs("t1", [True, True, True], spec=current)), manager
-        )
+        gate = evaluate_gate(_batch(*_runs("t1", [True, True, True], spec=current)), manager)
         task = gate.tasks[0]
         assert task.infra_config_mismatch
         assert task.infra_config_diff["memory_hard_limit_mb"] == (2048, 512)
@@ -214,7 +212,11 @@ class TestGateResultModel:
         baseline.decision_spec = DecisionSpec(infra=InfraConfig(cpu_hard_limit=2.0))
         manager.set_baseline(baseline)
         batch = _batch(
-            *_runs("t1", [False, False, False], spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0))),
+            *_runs(
+                "t1",
+                [False, False, False],
+                spec=DecisionSpec(infra=InfraConfig(cpu_hard_limit=1.0)),
+            ),
             *_runs("t2", [True, True]),
             *_runs("t3", [True]),
         )
@@ -240,8 +242,12 @@ class TestHelpers:
         assert [r["pass_rate"] for r in results] == [1.0, 0.0]  # pass, timeout-as-failure
 
     def test_spec_from_trials_prefers_latest_and_reports_mix(self):
-        old = _trial("t", True, run_index=0, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048)))
-        new = _trial("t", True, run_index=1, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512)))
+        old = _trial(
+            "t", True, run_index=0, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048))
+        )
+        new = _trial(
+            "t", True, run_index=1, spec=DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512))
+        )
         spec, warning = spec_from_trials([old, new])
         assert spec is not None and spec.infra is not None
         assert spec.infra.memory_hard_limit_mb == 512
@@ -300,10 +306,7 @@ class TestTaskContentIdentity:
             "(aaaaaaaaaaaa -> bbbbbbbbbbbb); re-store the baseline for this task"
         )
         assert gate.skipped_task_content_changed == 1 and gate.checked == 0
-        assert (
-            "1 task(s) whose content changed since their baseline was stored: t1"
-            in gate.reasons
-        )
+        assert "1 task(s) whose content changed since their baseline was stored: t1" in gate.reasons
         assert "1 skipped (task content changed)" in gate.summary_line()
 
     def test_matching_content_is_compared_normally(self, tmp_path):
@@ -859,3 +862,112 @@ class TestTheSuiteCriterionCannotRescueWhatItCannotReject:
         assert len(result.suite) == 2  # pass_rate and mean_score
         assert all(2.0 ** -s.tasks <= 0.025 for s in result.suite)
         assert all(len(result.suite) * 2.0 ** -s.tasks > 0.025 for s in result.suite)
+    def test_fail_on_regression_minor_blocks_on_small_drop(self, tmp_path):
+        # 3% drop: 1.0 -> 0.97 (pass_rate: 300 trials, 291 pass, 9 fail -> p < 0.05)
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id="t1")
+        baseline.add_metric("pass_rate", 1.0, std=0.01, sample_size=300)
+        manager.set_baseline(baseline)
+        manager.save()
+
+        # 291 passes, 9 failures -> pass_rate = 0.97 (3% drop)
+        batch = _batch(*_runs("t1", [True] * 291 + [False] * 9))
+
+        # Under default MODERATE: should NOT block because drop is < 5%
+        gate_moderate = evaluate_gate(batch, manager, threshold=RegressionSeverity.MODERATE)
+        assert gate_moderate.status is GateStatus.PASSED
+        assert gate_moderate.blocking_regressions == 0
+
+        # Under MINOR: min_delta is lowered to 0.0, so 3% drop is detected as MINOR and blocks
+        gate_minor = evaluate_gate(batch, manager, threshold=RegressionSeverity.MINOR)
+        assert gate_minor.status is GateStatus.BLOCKED
+        assert gate_minor.exit_code == 1
+        assert gate_minor.blocking_regressions == 1
+        assert gate_minor.tasks[0].blocking is True
+        assert gate_minor.tasks[0].overall_severity is RegressionSeverity.MINOR
+
+    def test_per_metric_threshold_relative_honored(self, tmp_path):
+        manager = BaselineManager(tmp_path / "baselines.json")
+        baseline = TaskBaseline(task_id="t1")
+        # Relative threshold 0.15 (15% drop allowed before regression)
+        baseline.add_metric(
+            "pass_rate",
+            1.0,
+            std=0.01,
+            sample_size=100,
+            relative_threshold=0.15,
+        )
+        manager.set_baseline(baseline)
+        manager.save()
+
+        # 90 passes, 10 failures -> pass_rate = 0.90 (10% drop, which is < 15%)
+        batch = _batch(*_runs("t1", [True] * 90 + [False] * 10))
+
+        # 10% drop would normally be MODERATE regression and block under MODERATE.
+        # But because custom relative threshold is 15%, it is not flagged as a regression.
+        gate = evaluate_gate(batch, manager, threshold=RegressionSeverity.MODERATE)
+        assert gate.status is GateStatus.PASSED
+        assert gate.blocking_regressions == 0
+        assert gate.tasks[0].has_regression is False
+
+        # If drop is 20% (80 passes, 20 failures), it exceeds 15% and must block
+        batch_fail = _batch(*_runs("t1", [True] * 80 + [False] * 20))
+        gate_fail = evaluate_gate(batch_fail, manager, threshold=RegressionSeverity.MODERATE)
+        assert gate_fail.status is GateStatus.BLOCKED
+        assert gate_fail.blocking_regressions == 1
+        assert gate_fail.tasks[0].has_regression is True
+        assert gate_fail.tasks[0].regressions[0].custom_threshold == "relative=0.15"
+
+    def test_canary_baseline_fingerprint_enforced(self, tmp_path):
+        spec_baseline = DecisionSpec(
+            model=ModelConfig(provider="openai", model_id="gpt-4o", seed=1)
+        )
+        manager = BaselineManager(tmp_path / "baselines.json")
+        manager.create_canary_baseline(
+            task_id="t-canary",
+            metrics={"pass_rate": 1.0},
+            sample_size=5,
+            decision_spec=spec_baseline,
+        )
+        manager.save()
+
+        # 1. Matching spec: gate passes (five trials a side give the check
+        # enough power to be evaluable at all)
+        matching_batch = _batch(*_runs("t-canary", [True] * 5))
+        gate_match = evaluate_gate(
+            matching_batch,
+            manager,
+            decision_spec=spec_baseline,
+        )
+        assert gate_match.status is GateStatus.PASSED
+        assert gate_match.tasks[0].outcome is TaskGateOutcome.CHECKED
+
+        # 2. Missing spec: gate UNEVALUABLE (exit 2) with canary_fingerprint_mismatch
+        no_spec_batch = _batch(*_runs("t-canary", [True, True]))
+        gate_no_spec = evaluate_gate(
+            no_spec_batch,
+            manager,
+            decision_spec=None,
+        )
+        assert gate_no_spec.status is GateStatus.UNEVALUABLE
+        assert gate_no_spec.exit_code == 2
+        assert gate_no_spec.skipped_canary_fingerprint_mismatch == 1
+        task_res = gate_no_spec.tasks[0]
+        assert task_res.outcome is TaskGateOutcome.CANARY_FINGERPRINT_MISMATCH
+        assert task_res.canary_fingerprint_mismatch is True
+        assert "canary baseline fingerprint mismatch" in task_res.reason
+        assert "pass matching --decision-spec or re-store canary baseline" in task_res.reason
+        assert "1 canary task(s) with fingerprint mismatch: t-canary" in gate_no_spec.reasons
+
+        # 3. Mismatched spec: gate UNEVALUABLE (exit 2)
+        diff_spec = DecisionSpec(model=ModelConfig(provider="openai", model_id="gpt-4o", seed=2))
+        diff_spec_batch = _batch(*_runs("t-canary", [True, True]))
+        gate_diff_spec = evaluate_gate(
+            diff_spec_batch,
+            manager,
+            decision_spec=diff_spec,
+        )
+        assert gate_diff_spec.status is GateStatus.UNEVALUABLE
+        assert gate_diff_spec.exit_code == 2
+        assert gate_diff_spec.skipped_canary_fingerprint_mismatch == 1
+        assert gate_diff_spec.tasks[0].canary_fingerprint_mismatch is True

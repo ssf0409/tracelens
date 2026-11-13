@@ -94,22 +94,33 @@ Four pieces — Task, Adapter, Grader, Runner — and a report:
 ```python
 import asyncio
 from tracelens import (
-    Task, EvalSet, SimpleAdapter, CodeGrader,
-    EvaluationRunner, RunnerConfig, Transcript,
+    Task,
+    EvalSet,
+    SimpleAdapter,
+    CodeGrader,
+    EvaluationRunner,
+    RunnerConfig,
+    Transcript,
 )
 from tracelens.reporting.generator import ReportGenerator
 
 # 1. Define tasks
-eval_set = EvalSet(name="Math Suite", tasks=[
-    Task(name="Add 2+3", input_data={"a": 2, "b": 3}, metadata={"expected": 5}),
-    Task(name="Add 10+20", input_data={"a": 10, "b": 20}, metadata={"expected": 30}),
-])
+eval_set = EvalSet(
+    name="Math Suite",
+    tasks=[
+        Task(name="Add 2+3", input_data={"a": 2, "b": 3}, metadata={"expected": 5}),
+        Task(name="Add 10+20", input_data={"a": 10, "b": 20}, metadata={"expected": 30}),
+    ],
+)
+
 
 # 2. Wrap your agent
 async def math_agent(input_data: dict) -> dict:
     return {"answer": input_data["a"] + input_data["b"]}
 
+
 adapter = SimpleAdapter(math_agent)
+
 
 # 3. Write a grader
 class MathGrader(CodeGrader):
@@ -119,8 +130,11 @@ class MathGrader(CodeGrader):
     def determine_pass(self, metrics: dict[str, float], task: Task) -> tuple[bool, float]:
         return metrics["correct"] == 1.0, metrics["correct"]
 
+
 # 4. Run and report
-batch = asyncio.run(EvaluationRunner(adapter, [MathGrader("math")], RunnerConfig(num_runs=3)).run(eval_set))
+batch = asyncio.run(
+    EvaluationRunner(adapter, [MathGrader("math")], RunnerConfig(num_runs=3)).run(eval_set)
+)
 print(ReportGenerator().render_markdown(ReportGenerator().build_report(batch)))
 ```
 

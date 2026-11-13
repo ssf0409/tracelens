@@ -28,7 +28,7 @@ spec = DecisionSpec(
     tools=[ToolSpec(name="search", version="1.0")],
     agent=AgentSpec(agent_name="goal_decomposition", agent_version="1.0.0"),
 )
-print(spec.fingerprint)        # full SHA-256 hex digest
+print(spec.fingerprint)  # full SHA-256 hex digest
 print(spec.fingerprint_short)  # first 12 chars, e.g. "a1b2c3d4e5f6"
 ```
 
@@ -183,17 +183,18 @@ plus `EnvironmentSpec.git_branch` and `python_version`, are excluded.
 ```python
 a = DecisionSpec(prompts=PromptSpec.from_prompts(system_prompt="Be terse."))
 b = DecisionSpec(prompts=PromptSpec.from_prompts(system_prompt="Be verbose."))
-assert a.fingerprint != b.fingerprint   # the prompt changed
+assert a.fingerprint != b.fingerprint  # the prompt changed
 ```
 
 **Same config, different host → same fingerprint:**
 
 ```python
 from tracelens import InfraConfig
+
 cfg = dict(memory_hard_limit_mb=2048, runtime_platform="kubernetes")
 run_a = DecisionSpec(infra=InfraConfig(**cfg, hostname="node-7"))
 run_b = DecisionSpec(infra=InfraConfig(**cfg, hostname="node-12"))
-assert run_a.fingerprint == run_b.fingerprint   # only the hostname differs
+assert run_a.fingerprint == run_b.fingerprint  # only the hostname differs
 ```
 
 One compatibility detail: `infra` is only mixed into the hash when it is explicitly
@@ -290,7 +291,7 @@ or grader class may define:
 
 ```python
 class MyGrader(CodeGrader):
-    provenance_version = "rubric-v4"   # bump when the rubric changes
+    provenance_version = "rubric-v4"  # bump when the rubric changes
 ```
 
 The content half is `source_hash`: the SHA-256 of the file that defines the
@@ -387,14 +388,14 @@ delta that is plausibly just infra noise:
 report = RegressionDetector(min_delta_percent=1.0).compare_with_specs(
     baseline,
     current_results=[{"pass_rate": current_rate}] * 6,
-    baseline_spec=baseline_spec,   # DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048, ...))
-    current_spec=current_spec,     # DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512,  ...))
+    baseline_spec=baseline_spec,  # DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=2048, ...))
+    current_spec=current_spec,  # DecisionSpec(infra=InfraConfig(memory_hard_limit_mb=512,  ...))
 )
 
-print(report.infra_config_mismatch)            # True — memory budget changed
+print(report.infra_config_mismatch)  # True — memory budget changed
 for key, (was, now) in report.infra_config_diff.items():
-    print(f"  {key}: {was!r} -> {now!r}")       # memory_hard_limit_mb: 2048 -> 512
-print(len(report.blocking_regressions))        # excludes within_noise_band ones
+    print(f"  {key}: {was!r} -> {now!r}")  # memory_hard_limit_mb: 2048 -> 512
+print(len(report.blocking_regressions))  # excludes within_noise_band ones
 print(report.should_block_ci())
 ```
 
