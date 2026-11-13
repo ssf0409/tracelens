@@ -48,6 +48,8 @@ run:
     noise_band: 0.05
     multiplicity: none
     suite_blocking: true
+  fail_on_infra_errors: true
+  max_infra_error_rate: 0.2
 """
 
 MINIMAL = "run:\n  eval_set: t.json\n  adapter: a.A\n  graders: [g.G]\n"
@@ -99,6 +101,8 @@ class TestLoadRunConfig:
             "fail_on_regression": "severe",
             "require_baselines": True,
             "noise_band": 0.05,
+            "fail_on_infra_errors": True,
+            "max_infra_error_rate": 0.2,
             "multiplicity": "none",
             "suite_blocking": True,
         }

@@ -65,6 +65,8 @@ RUN_DEFAULTS: dict[str, Any] = {
     "infra_exceptions": None,
     "decision_spec": None,
     "noise_band": None,
+    "fail_on_infra_errors": False,
+    "max_infra_error_rate": None,
 }
 
 _EVAL_SET_FORMATS = ("json", "jsonl", "csv")
@@ -109,6 +111,8 @@ _FIELDS: tuple[_Field, ...] = (
     _Field(("run", "baseline", "multiplicity"), "multiplicity", "str", choices=_MULTIPLICITY),
     _Field(("run", "baseline", "suite_blocking"), "suite_blocking", "bool"),
     _Field(("run", "baseline", "noise_band"), "noise_band", "number"),
+    _Field(("run", "fail_on_infra_errors"), "fail_on_infra_errors", "bool"),
+    _Field(("run", "max_infra_error_rate"), "max_infra_error_rate", "number"),
 )
 
 # Sections (mapping-valued keys) and the leaf keys allowed under each.
