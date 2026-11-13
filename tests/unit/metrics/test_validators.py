@@ -25,6 +25,7 @@ from tracelens.metrics.validators import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_transcript(final_output: object) -> Transcript:
     """Create a minimal transcript with the given final_output."""
     return Transcript(task_id="task-1", final_output=final_output)
@@ -49,6 +50,7 @@ def _run(coro):  # noqa: ANN001, ANN202
 # JsonSchemaGrader
 # ===========================================================================
 
+
 class TestJsonSchemaGrader:
     """Tests for JsonSchemaGrader."""
 
@@ -68,7 +70,9 @@ class TestJsonSchemaGrader:
     def test_custom_policy_override(self) -> None:
         config = GraderConfig(policy=EvalPolicy.WARN)
         grader = JsonSchemaGrader(
-            "json-schema", schema=self.SIMPLE_SCHEMA, config=config,
+            "json-schema",
+            schema=self.SIMPLE_SCHEMA,
+            config=config,
         )
         assert grader.policy == EvalPolicy.WARN
 
@@ -131,6 +135,7 @@ class TestJsonSchemaGrader:
 # StructuredOutputGrader
 # ===========================================================================
 
+
 class TestStructuredOutputGrader:
     """Tests for StructuredOutputGrader."""
 
@@ -172,7 +177,8 @@ class TestStructuredOutputGrader:
 
     def test_bad_model_path_raises_runtime_error(self) -> None:
         grader = StructuredOutputGrader(
-            "structured", model_path="nonexistent.module.Model",
+            "structured",
+            model_path="nonexistent.module.Model",
         )
         transcript = _make_transcript({"foo": "bar"})
         with pytest.raises(RuntimeError, match="cannot load model"):
@@ -182,6 +188,7 @@ class TestStructuredOutputGrader:
 # ===========================================================================
 # ContainsGrader
 # ===========================================================================
+
 
 class TestContainsGrader:
     """Tests for ContainsGrader."""
@@ -218,7 +225,9 @@ class TestContainsGrader:
 
     def test_forbidden_found_fails(self) -> None:
         grader = ContainsGrader(
-            "contains", required=["hello"], forbidden=["secret"],
+            "contains",
+            required=["hello"],
+            forbidden=["secret"],
         )
         transcript = _make_transcript("hello this is secret data")
         outcome = _run(grader.grade(transcript, _make_task()))
@@ -228,7 +237,9 @@ class TestContainsGrader:
 
     def test_forbidden_absent_passes(self) -> None:
         grader = ContainsGrader(
-            "contains", required=["hello"], forbidden=["secret"],
+            "contains",
+            required=["hello"],
+            forbidden=["secret"],
         )
         transcript = _make_transcript("hello world")
         outcome = _run(grader.grade(transcript, _make_task()))
@@ -245,7 +256,9 @@ class TestContainsGrader:
 
     def test_multiple_forbidden(self) -> None:
         grader = ContainsGrader(
-            "contains", required=[], forbidden=["password", "token"],
+            "contains",
+            required=[],
+            forbidden=["password", "token"],
         )
         transcript = _make_transcript("your password and token are here")
         outcome = _run(grader.grade(transcript, _make_task()))
@@ -257,6 +270,7 @@ class TestContainsGrader:
 # ===========================================================================
 # RegexMatchGrader
 # ===========================================================================
+
 
 class TestRegexMatchGrader:
     """Tests for RegexMatchGrader."""
@@ -314,12 +328,14 @@ class TestRegexMatchGrader:
 # ConstraintGrader
 # ===========================================================================
 
+
 class TestConstraintGrader:
     """Tests for ConstraintGrader."""
 
     def test_default_policy_is_gate(self) -> None:
         grader = ConstraintGrader(
-            "constraint", constraints=[{"type": "must_include", "value": "ok"}],
+            "constraint",
+            constraints=[{"type": "must_include", "value": "ok"}],
         )
         assert grader.policy == EvalPolicy.GATE
 
@@ -511,3 +527,104 @@ class TestConstraintGrader:
                 "constraint",
                 constraints=[{"type": "unknown_type", "value": "x"}],
             )
+
+    def test_constraint_validation_rules(self) -> None:
+        # must_include requires str value
+        with pytest.raises(ValueError, match="requires 'value' of type str"):
+            ConstraintGrader("c1", constraints=[{"type": "must_include"}])
+        with pytest.raises(ValueError, match="requires 'value' of type str"):
+            ConstraintGrader("c1", constraints=[{"type": "must_include", "value": 123}])
+
+        # must_not_include requires str value
+        with pytest.raises(ValueError, match="requires 'value' of type str"):
+            ConstraintGrader("c2", constraints=[{"type": "must_not_include"}])
+
+        # numeric_range requires field and valid numbers
+        with pytest.raises(ValueError, match="requires 'field' of type str"):
+            ConstraintGrader("c3", constraints=[{"type": "numeric_range"}])
+        with pytest.raises(ValueError, match="'min' must be numeric"):
+            ConstraintGrader(
+                "c3", constraints=[{"type": "numeric_range", "field": "f", "min": True}]
+            )
+        with pytest.raises(ValueError, match="'max' must be numeric"):
+            ConstraintGrader(
+                "c3", constraints=[{"type": "numeric_range", "field": "f", "max": "high"}]
+            )
+        with pytest.raises(ValueError, match="'min' \\(10\\) > 'max' \\(5\\)"):
+            ConstraintGrader(
+                "c3", constraints=[{"type": "numeric_range", "field": "f", "min": 10, "max": 5}]
+            )
+
+        # enum requires field and list values
+        with pytest.raises(ValueError, match="requires 'field' of type str"):
+            ConstraintGrader("c4", constraints=[{"type": "enum"}])
+        with pytest.raises(ValueError, match="requires 'values' of type list"):
+            ConstraintGrader(
+                "c4", constraints=[{"type": "enum", "field": "f", "values": "not-a-list"}]
+            )
+
+    def test_none_output_handling(self) -> None:
+        grader = ConstraintGrader(
+            "c_none",
+            constraints=[{"type": "must_include", "value": "hello"}],
+        )
+        outcome = _run(grader.grade(_make_transcript(None), _make_task()))
+        assert outcome.passed is False
+        assert outcome.metrics["constraints_met"] == 0.0
+        assert outcome.metrics["violations"] == 1.0
+
+
+class TestGraderFieldAndSerialization:
+    """Tests for field extraction, json serialization, and None handling in Contains/Regex."""
+
+    def test_json_schema_draft7_tuple_items(self) -> None:
+        # In Draft 7, items can be a list of schemas (tuple validation).
+        # In Draft 2020-12, items must be a schema (object/bool) and prefixItems is used instead.
+        schema = {
+            "type": "array",
+            "items": [{"type": "string"}, {"type": "number"}],
+        }
+        grader = JsonSchemaGrader("tuple-schema", schema=schema)
+        valid = _make_transcript(["hello", 42])
+        outcome = _run(grader.grade(valid, _make_task()))
+        assert outcome.passed is True
+
+    def test_contains_grader_none_output(self) -> None:
+        grader = ContainsGrader("contains_none", required=["hello"])
+        outcome = _run(grader.grade(_make_transcript(None), _make_task()))
+        assert outcome.passed is False
+        assert outcome.score == 0.0
+        assert outcome.metrics["output_present"] == 0.0
+        assert outcome.metrics["required_found"] == 0.0
+
+    def test_contains_grader_field_extraction(self) -> None:
+        grader = ContainsGrader("contains_field", required=["needle"], field="summary")
+        transcript = _make_transcript({"summary": "here is the needle", "other": "irrelevant"})
+        outcome = _run(grader.grade(transcript, _make_task()))
+        assert outcome.passed is True
+        assert outcome.metrics["output_present"] == 1.0
+
+        # Missing field fails
+        transcript_missing = _make_transcript({"other": "irrelevant"})
+        outcome_missing = _run(grader.grade(transcript_missing, _make_task()))
+        assert outcome_missing.passed is False
+        assert outcome_missing.metrics["output_present"] == 0.0
+
+    def test_contains_grader_dict_json_serialization(self) -> None:
+        grader = ContainsGrader("contains_json", required=['"a": 1', '"b": 2'])
+        transcript = _make_transcript({"b": 2, "a": 1})
+        outcome = _run(grader.grade(transcript, _make_task()))
+        assert outcome.passed is True
+
+    def test_regex_grader_none_output(self) -> None:
+        grader = RegexMatchGrader("regex_none", patterns=[r"\d+"])
+        outcome = _run(grader.grade(_make_transcript(None), _make_task()))
+        assert outcome.passed is False
+        assert outcome.metrics["output_present"] == 0.0
+
+    def test_regex_grader_field_extraction(self) -> None:
+        grader = RegexMatchGrader("regex_field", patterns=[r"^ID-\d+$"], field="id")
+        transcript = _make_transcript({"id": "ID-12345"})
+        outcome = _run(grader.grade(transcript, _make_task()))
+        assert outcome.passed is True
+        assert outcome.metrics["output_present"] == 1.0

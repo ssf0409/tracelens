@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 class GraderType(str, Enum):
     """Types of graders."""
 
-    CODE_BASED = "code_based"      # Deterministic, code logic
-    LLM_BASED = "llm_based"        # LLM-as-judge
-    HUMAN = "human"                # Human evaluation
-    COMPOSITE = "composite"        # Combination of multiple graders
+    CODE_BASED = "code_based"  # Deterministic, code logic
+    LLM_BASED = "llm_based"  # LLM-as-judge
+    HUMAN = "human"  # Human evaluation
+    COMPOSITE = "composite"  # Combination of multiple graders
 
 
 class EvalPolicy(str, Enum):
@@ -342,9 +342,7 @@ class LLMGrader(Grader):
         """
         if self._provider is not None:
             return await self._provider.complete(prompt)
-        raise NotImplementedError(
-            "Pass a provider to __init__ or override _call_llm in a subclass"
-        )
+        raise NotImplementedError("Pass a provider to __init__ or override _call_llm in a subclass")
 
     async def grade(self, transcript: Transcript, task: Task) -> Outcome:
         """Grade by calling LLM and parsing response.
@@ -384,6 +382,9 @@ class LLMGrader(Grader):
             except Exception as exc:
                 last_exc = exc
                 continue
+
+            if not isinstance(response, str):
+                response = str(response)
 
             try:
                 passed, score, metrics, feedback = self.parse_llm_response(response, task)
@@ -539,24 +540,16 @@ class CompositeGrader(Grader):
                 warn_results.append((grader, outcome))
 
         # GATE/MUST_PASS failures block
-        all_blocking_passed = all(
-            outcome.passed for _, outcome in blocking_results
-        )
+        all_blocking_passed = all(outcome.passed for _, outcome in blocking_results)
         failed_blocking = [
-            grader.grader_id
-            for grader, outcome in blocking_results
-            if not outcome.passed
+            grader.grader_id for grader, outcome in blocking_results if not outcome.passed
         ]
         if failed_blocking:
             all_metrics["_failed_must_pass"] = len(failed_blocking)
             feedbacks.insert(0, f"MUST-PASS FAILURE: {', '.join(failed_blocking)}")
 
         # WARN failures recorded but don't block
-        failed_warn = [
-            grader.grader_id
-            for grader, outcome in warn_results
-            if not outcome.passed
-        ]
+        failed_warn = [grader.grader_id for grader, outcome in warn_results if not outcome.passed]
         if failed_warn:
             all_metrics["_failed_warn"] = len(failed_warn)
             feedbacks.insert(

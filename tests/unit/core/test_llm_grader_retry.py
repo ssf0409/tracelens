@@ -95,9 +95,7 @@ def test_retries_transient_call_failures() -> None:
 
 def test_no_retry_when_disabled() -> None:
     provider = _FlakyProvider(failures=1)
-    grader = _JSONGrader(
-        "g", provider=provider, config=_config(retry_on_error=False)
-    )
+    grader = _JSONGrader("g", provider=provider, config=_config(retry_on_error=False))
 
     with pytest.raises(ConnectionError):
         asyncio.run(grader.grade(_transcript(), _task()))
@@ -151,3 +149,18 @@ def test_missing_provider_raises_immediately_without_retry() -> None:
 
     with pytest.raises(NotImplementedError):
         asyncio.run(grader.grade(_transcript(), _task()))
+
+
+def test_non_string_provider_response_coerced() -> None:
+    class _CustomResponse:
+        def __str__(self) -> str:
+            return '{"score": 0.95}'
+
+    class _ObjectProvider:
+        async def complete(self, prompt: str) -> object:
+            return _CustomResponse()
+
+    grader = _JSONGrader("g", provider=_ObjectProvider(), config=_config())
+    outcome = asyncio.run(grader.grade(_transcript(), _task()))
+    assert outcome.passed is True
+    assert outcome.score == 0.95

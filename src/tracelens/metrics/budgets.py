@@ -26,9 +26,7 @@ class LatencyGrader(CodeGrader):
         config: GraderConfig | None = None,
     ) -> None:
         if max_ms <= 0:
-            raise ValueError(
-                f"LatencyGrader '{grader_id}': max_ms must be positive, got {max_ms}"
-            )
+            raise ValueError(f"LatencyGrader '{grader_id}': max_ms must be positive, got {max_ms}")
         if config is None:
             config = GraderConfig(policy=EvalPolicy.WARN)
         super().__init__(grader_id, config)
@@ -132,13 +130,12 @@ class ToolCallGrader(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
-        called_names = {tc.tool_name for tc in transcript.tool_calls}
+        tool_calls = transcript.all_tool_calls
+        called_names = {tc.tool_name for tc in tool_calls}
 
         # Required: fraction of required tools that were actually called
         if self.required_tools:
-            called_required = sum(
-                1 for t in self.required_tools if t in called_names
-            )
+            called_required = sum(1 for t in self.required_tools if t in called_names)
             required_ratio = called_required / len(self.required_tools)
         else:
             required_ratio = 1.0
@@ -146,19 +143,13 @@ class ToolCallGrader(CodeGrader):
         # Unauthorized: tools called that are not in the allowlist
         if self.allowed_tools is not None:
             allowed_set = set(self.allowed_tools)
-            unauthorized = sum(
-                1 for tc in transcript.tool_calls
-                if tc.tool_name not in allowed_set
-            )
+            unauthorized = sum(1 for tc in tool_calls if tc.tool_name not in allowed_set)
         else:
             unauthorized = 0
 
         # Forbidden: tools called that are in the forbidden list
         forbidden_set = set(self.forbidden_tools)
-        forbidden = sum(
-            1 for tc in transcript.tool_calls
-            if tc.tool_name in forbidden_set
-        )
+        forbidden = sum(1 for tc in tool_calls if tc.tool_name in forbidden_set)
 
         return {
             "required_called": required_ratio,
@@ -210,7 +201,7 @@ class TraceConsistencyGrader(CodeGrader):
         transcript: Transcript,
         task: Task,
     ) -> dict[str, float]:
-        tool_calls = transcript.tool_calls
+        tool_calls = transcript.all_tool_calls
 
         # Tool error rate
         if tool_calls:
@@ -229,20 +220,14 @@ class TraceConsistencyGrader(CodeGrader):
             if step.tool_call is None or step.tool_call.result is None:
                 continue
             # Check if any subsequent step is AGENT_OUTPUT
-            has_output_after = any(
-                s.step_type == StepType.AGENT_OUTPUT
-                for s in steps[i + 1:]
-            )
+            has_output_after = any(s.step_type == StepType.AGENT_OUTPUT for s in steps[i + 1 :])
             if not has_output_after:
                 unused += 1
 
         # Phantom calls: tools called that are not in expected_tools
         if self.expected_tools is not None:
             expected_set = set(self.expected_tools)
-            phantom = len({
-                tc.tool_name for tc in tool_calls
-                if tc.tool_name not in expected_set
-            })
+            phantom = len({tc.tool_name for tc in tool_calls if tc.tool_name not in expected_set})
         else:
             phantom = 0
 
