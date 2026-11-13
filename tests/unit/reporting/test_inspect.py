@@ -21,12 +21,14 @@ from tracelens.core.trial import Trial, TrialBatch, TrialStatus
 from tracelens.reporting.inspect import (
     FAILURE_KINDS,
     InspectionReport,
+    SharePolicy,
     TaskContentMismatchError,
     TaskContextError,
     TaskContextStatus,
     TaskDuplicateIdError,
     TrialKind,
     build_inspection,
+    build_share_export,
     classify,
     excerpt,
     render_html,
@@ -50,11 +52,17 @@ def _trial(
     trial = Trial(task_id=task_id, run_index=run_index, status=status, error_message=error_message)
     trial.transcript = transcript
     for grader_id, passed, score in outcomes or []:
-        trial.add_outcome(Outcome(
-            trial_id=trial.trial_id, grader_id=grader_id, passed=passed, score=score,
-            feedback=feedback, grader_error=grader_error,
-            metrics={"exact": 1.0 if passed else 0.0},
-        ))
+        trial.add_outcome(
+            Outcome(
+                trial_id=trial.trial_id,
+                grader_id=grader_id,
+                passed=passed,
+                score=score,
+                feedback=feedback,
+                grader_error=grader_error,
+                metrics={"exact": 1.0 if passed else 0.0},
+            )
+        )
     return trial
 
 
@@ -68,9 +76,14 @@ def _batch(*trials: Trial) -> TrialBatch:
 def _transcript(task_id: str, *, steps: int = 0, final_output: object = None) -> Transcript:
     transcript = Transcript(task_id=task_id, final_output=final_output)
     for i in range(steps):
-        transcript.add_step(TranscriptStep(
-            step_type=StepType.LLM_CALL, content=f"step {i} content", tokens_in=3, tokens_out=2,
-        ))
+        transcript.add_step(
+            TranscriptStep(
+                step_type=StepType.LLM_CALL,
+                content=f"step {i} content",
+                tokens_in=3,
+                tokens_out=2,
+            )
+        )
     return transcript
 
 
@@ -78,7 +91,9 @@ PASSED = _trial("a", outcomes=[("g", True, 1.0)])
 FAILED = _trial("b", outcomes=[("g", False, 0.0)], feedback="answer was wrong")
 TIMEOUT = _trial("c", status=TrialStatus.TIMEOUT)
 INFRA = _trial("d", status=TrialStatus.INFRA_ERROR, error_message="connection refused")
-CRASHED = _trial("e", outcomes=[("g", False, 0.0)], grader_error=True, feedback="Sub-grader 'g' crashed")
+CRASHED = _trial(
+    "e", outcomes=[("g", False, 0.0)], grader_error=True, feedback="Sub-grader 'g' crashed"
+)
 PENDING = _trial("f", status=TrialStatus.PENDING)
 
 
@@ -105,9 +120,16 @@ class TestSelectTrials:
     def test_kinds_task_ids_and_order(self):
         batch = _batch(PENDING, CRASHED, INFRA, TIMEOUT, FAILED, PASSED)
         assert [t.task_id for t in select_trials(batch)] == ["a", "b", "c", "d", "e", "f"]
-        assert [t.task_id for t in select_trials(batch, kinds=FAILURE_KINDS)] == ["b", "c", "d", "e"]
+        assert [t.task_id for t in select_trials(batch, kinds=FAILURE_KINDS)] == [
+            "b",
+            "c",
+            "d",
+            "e",
+        ]
         assert [t.task_id for t in select_trials(batch, kinds=[TrialKind.INFRA_ERROR])] == ["d"]
-        assert [t.task_id for t in select_trials(batch, kinds=FAILURE_KINDS, task_ids=["b", "z"])] == ["b"]
+        assert [
+            t.task_id for t in select_trials(batch, kinds=FAILURE_KINDS, task_ids=["b", "z"])
+        ] == ["b"]
 
     def test_grader_filter_attributes_only_failures_and_crashes(self):
         mixed = Trial(task_id="m", status=TrialStatus.COMPLETED)
@@ -121,8 +143,12 @@ class TestSelectTrials:
 
 class TestTrialView:
     def test_expected_states_are_explicit(self):
-        task = Task(task_id="b", name="named", input_data={"q": "2+2"},
-                    expectation=TaskExpectation(expected_output="4"))
+        task = Task(
+            task_id="b",
+            name="named",
+            input_data={"q": "2+2"},
+            expectation=TaskExpectation(expected_output="4"),
+        )
         bare = Task(task_id="b", name="bare", input_data={})
         assert trial_view(FAILED).expected == "not supplied (pass --eval-set to show it)"
         assert trial_view(FAILED, eval_set_supplied=True).expected == (
@@ -151,26 +177,47 @@ class TestTrialView:
         assert no_feedback.outcomes[0].feedback == "missing"
 
     def test_multi_grader_and_transcript_summary(self):
-        trial = _trial("t", outcomes=[("g1", True, 1.0), ("g2", False, 0.4)],
-                       transcript=_transcript("t", steps=3, final_output={"answer": 3}))
-        trial.transcript.add_step(TranscriptStep(  # type: ignore[union-attr]
-            step_type=StepType.TOOL_CALL, error="boom",
-            tool_call=ToolCall(tool_name="search", arguments={"q": "x"}, result=None, error="boom"),
-        ))
+        trial = _trial(
+            "t",
+            outcomes=[("g1", True, 1.0), ("g2", False, 0.4)],
+            transcript=_transcript("t", steps=3, final_output={"answer": 3}),
+        )
+        trial.transcript.add_step(
+            TranscriptStep(  # type: ignore[union-attr]
+                step_type=StepType.TOOL_CALL,
+                error="boom",
+                tool_call=ToolCall(
+                    tool_name="search", arguments={"q": "x"}, result=None, error="boom"
+                ),
+            )
+        )
         view = trial_view(trial)
         assert [o.grader_id for o in view.outcomes] == ["g1", "g2"]
         assert view.actual == '{"answer": 3}'
         assert view.transcript is not None
-        assert view.transcript.headline().startswith("4 step(s) (4 shown), 15 tokens, 3 llm call(s), 1 tool call(s)")
-        assert view.transcript.steps[3].summary == 'tool search({"q": "x"}) -> missing [tool error: boom]'
+        assert view.transcript.headline().startswith(
+            "4 step(s) (4 shown), 15 tokens, 3 llm call(s), 1 tool call(s)"
+        )
+        assert (
+            view.transcript.steps[3].summary
+            == 'tool search({"q": "x"}) -> missing [tool error: boom]'
+        )
         assert view.transcript.errors == ["boom"]
         assert view.transcript.steps[3].describe().endswith("ERROR: boom")
-        assert trial_view(_trial("e", transcript=_transcript("e"))).transcript.headline().startswith("0 step(s) (0 shown)")  # type: ignore[union-attr]
+        assert (
+            trial_view(_trial("e", transcript=_transcript("e")))
+            .transcript.headline()
+            .startswith("0 step(s) (0 shown)")
+        )  # type: ignore[union-attr]
 
     def test_bounds_count_what_they_omit(self):
         long_output = "x" * 1000
-        trial = _trial("t", outcomes=[("g", False, 0.0)], feedback="f" * 50,
-                       transcript=_transcript("t", steps=30, final_output=long_output))
+        trial = _trial(
+            "t",
+            outcomes=[("g", False, 0.0)],
+            feedback="f" * 50,
+            transcript=_transcript("t", steps=30, final_output=long_output),
+        )
         view = trial_view(trial, max_steps=5, max_chars=100)
         assert view.actual == "x" * 100 + "… (900 more characters)"
         assert view.transcript is not None
@@ -191,8 +238,11 @@ class TestBuildAndRender:
     def test_totals_selection_and_limit(self):
         report = self._report()
         assert report.totals == {
-            TrialKind.PASSED: 1, TrialKind.AGENT_FAILURE: 2, TrialKind.INFRA_ERROR: 1,
-            TrialKind.GRADER_ERROR: 1, TrialKind.NOT_RUN: 1,
+            TrialKind.PASSED: 1,
+            TrialKind.AGENT_FAILURE: 2,
+            TrialKind.INFRA_ERROR: 1,
+            TrialKind.GRADER_ERROR: 1,
+            TrialKind.NOT_RUN: 1,
         }
         assert report.selected == 4 and report.shown == 4
         assert [t.task_id for t in report.trials] == ["b", "c", "d", "e"]
@@ -207,7 +257,10 @@ class TestBuildAndRender:
         text = render_text(self._report(limit=2))
         assert text.startswith("Inspected trials.json: 6 trial(s), run missing, TraceLens ")
         assert "passed 1, agent failure 2, infra error 1, grader error 1, not run 1" in text
-        assert "Selected 4 trial(s) (kinds: agent failure, infra error, grader error); showing the first 2" in text
+        assert (
+            "Selected 4 trial(s) (kinds: agent failure, infra error, grader error); showing the first 2"
+            in text
+        )
         assert "expected outputs: not supplied (pass --eval-set to show them)" in text
         assert "[1] b run 0  agent failure  status=completed  attempts=1" in text
         assert "why:      the agent ran and a grader failed it (a timeout counts)" in text
@@ -219,15 +272,18 @@ class TestBuildAndRender:
     def test_text_with_eval_set_and_kinds(self):
         tasks = [Task(task_id="d", name="infra task", input_data={"n": 1})]
         text = render_text(self._report(kinds=[TrialKind.INFRA_ERROR], tasks=tasks))
-        assert "task:     infra task" in text and "input:    {\"n\": 1}" in text
+        assert "task:     infra task" in text and 'input:    {"n": 1}' in text
         assert "error:    connection refused" in text
         assert "expected: missing (the task declares no expected output)" in text
         assert "why:      infrastructure failed before the agent could be judged" in text
 
     def test_html_is_escaped_offline_and_bounded(self):
-        hostile = _trial("<script>alert(1)</script>", outcomes=[("g", False, 0.0)],
-                         feedback="<b>bold</b>",
-                         transcript=_transcript("h", final_output="SECRET-" + "s" * 600))
+        hostile = _trial(
+            "<script>alert(1)</script>",
+            outcomes=[("g", False, 0.0)],
+            feedback="<b>bold</b>",
+            transcript=_transcript("h", final_output="SECRET-" + "s" * 600),
+        )
         batch = _batch(hostile)
         html = render_html(build_inspection(batch, source="t.json"))
         assert "<script>alert(1)</script>" not in html and "&lt;script&gt;" in html
@@ -235,7 +291,7 @@ class TestBuildAndRender:
         assert "src=" not in html and "href=" not in html  # nothing fetched from anywhere
         assert 'name="viewport"' in html
         assert "SECRET-" + "s" * 600 not in html and "more characters" in html
-        assert "agent failure 1" in html and "<details class=\"trial\" open>" in html
+        assert "agent failure 1" in html and '<details class="trial" open>' in html
         unbounded = render_html(build_inspection(batch, source="t.json", full=True))
         assert "SECRET-" + "s" * 600 in unbounded and "Unbounded output (--full)" in unbounded
         empty = render_html(build_inspection(_batch(PASSED), source="t.json"))
@@ -326,3 +382,115 @@ class TestBuildAndRender:
         html = render_html(legacy_report)
         assert "Expected outputs: unverified" in html
         assert "task b (unverified)" in html
+
+class TestShareExport:
+    def test_default_export_omits_all_sensitive_and_identity_fields(self):
+        secret_sentinels = [
+            "sk-ant-api03-SECRET_KEY_SENTINEL",
+            "ghp_TOKEN_SENTINEL",
+            "user@internal.corp",
+            "/home/user/private/repo/secret.py",
+        ]
+        task = Task(
+            task_id="sensitive-task-id-1234",
+            name="task-with-secret-name",
+            input_data={
+                "secret_email": secret_sentinels[2],
+                "nested": {"key": secret_sentinels[0]},
+            },
+            expectation=TaskExpectation(expected_output=f"secret answer {secret_sentinels[1]}"),
+        )
+        trial = _trial(
+            task.task_id,
+            error_message=f"Traceback error at {secret_sentinels[3]}: failed",
+            outcomes=[("grader-1", False, 0.0)],
+            feedback=f"Feedback leaking {secret_sentinels[0]}",
+            transcript=_transcript(
+                task.task_id, steps=2, final_output={"res": secret_sentinels[1]}
+            ),
+        )
+        batch = _batch(trial)
+        export = build_share_export(batch, source="export.html", tasks=[task])
+
+        # Test serialized outputs
+        json_bytes = export.model_dump_json()
+        html_bytes = render_html(export)
+        text_bytes = render_text(export)
+
+        for sentinel in secret_sentinels:
+            assert sentinel not in json_bytes
+            assert sentinel not in html_bytes
+            assert sentinel not in text_bytes
+
+        # Check raw IDs and names are not leaked
+        assert "sensitive-task-id-1234" not in json_bytes
+        assert "sensitive-task-id-1234" not in html_bytes
+        assert "sensitive-task-id-1234" not in text_bytes
+        assert "task-with-secret-name" not in json_bytes
+        assert "task-with-secret-name" not in html_bytes
+
+        # Check opaque references
+        assert export.trials[0].task_id == "task_1"
+        assert export.trials[0].trial_id == "trial_1"
+        assert export.share_metadata is not None
+        assert export.share_metadata.fields_omitted_count > 0
+        assert "Data Minimization Notice" in html_bytes
+        assert "Data Minimization Notice" in text_bytes or "data_minimization_notice" in json_bytes
+
+    def test_explicit_inclusion_with_configured_redaction(self):
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        other_text = "clean text"
+        task = Task(
+            task_id="t1",
+            name="task 1",
+            input_data={"key": f"input with {secret} and {other_text}"},
+            expectation=TaskExpectation(expected_output=f"expected with {secret}"),
+        )
+        trial = _trial(
+            "t1",
+            error_message=f"error with {secret}",
+            outcomes=[("g", False, 0.0)],
+            feedback=f"feedback with {secret}",
+            transcript=_transcript("t1", steps=1, final_output=f"output with {secret}"),
+        )
+        batch = _batch(trial)
+
+        policy = SharePolicy(
+            include_input=True,
+            include_output=True,
+            include_feedback=True,
+            include_transcript=True,
+            include_errors=True,
+            redact_patterns=[r"AKIA[0-9A-Z]{16}"],
+        )
+        export = build_share_export(batch, source="export", policy=policy, tasks=[task])
+
+        json_dump = export.model_dump_json()
+        html_dump = render_html(export)
+
+        # Secret is completely replaced with [redacted]
+        assert secret not in json_dump
+        assert secret not in html_dump
+        assert "[redacted]" in json_dump
+        assert "[redacted]" in html_dump
+        assert other_text in json_dump
+        assert other_text in html_dump
+        assert export.share_metadata.values_redacted_count >= 5
+
+    def test_invalid_regex_raises_value_error(self):
+        batch = _batch(FAILED)
+        policy = SharePolicy(redact_patterns=["[unclosed"])
+        try:
+            build_share_export(batch, source="export", policy=policy)
+            assert False, "Should have raised ValueError"
+        except ValueError as exc:
+            assert "Invalid redaction regular expression" in str(exc)
+
+    def test_source_batch_unmutated(self):
+        trial = _trial("t1", outcomes=[("g", False, 0.0)], feedback="secret")
+        batch = _batch(trial)
+        orig_feedback = trial.outcomes[0].feedback
+        orig_task_id = trial.task_id
+        _ = build_share_export(batch, source="export")
+        assert trial.outcomes[0].feedback == orig_feedback
+        assert trial.task_id == orig_task_id
