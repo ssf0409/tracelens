@@ -76,10 +76,13 @@ is what the HTTP example does:
 ```python
 from tracelens import Task
 
-eval_set = EvalSet(name="http-echo", tasks=[
-    Task(name="add small", input_data={"a": 2, "b": 3}),
-    Task(name="add large", input_data={"a": 1000, "b": 1234}),
-])
+eval_set = EvalSet(
+    name="http-echo",
+    tasks=[
+        Task(name="add small", input_data={"a": 2, "b": 3}),
+        Task(name="add large", input_data={"a": 1000, "b": 1234}),
+    ],
+)
 ```
 
 ---
@@ -121,11 +124,18 @@ The adapter records each HTTP attempt as a tool-call step on the transcript,
 which you will read in section 6.
 
 > If your agent is *not* an HTTP service, subclass `AgentAdapter` directly and
-> implement `async def run(self, task) -> Transcript`, or wrap a plain async
-> function with `SimpleAdapter(fn)` as
+> implement `async def run(self, task) -> Transcript`, wrap a synchronous
+> callable with `SyncAdapter(fn)`, or wrap an async function with
+> `SimpleAdapter(fn)` as
 > [`examples/run_eval.py`](https://github.com/ssf0409/tracelens/blob/main/examples/run_eval.py)
-> does. The runner only depends on the `AgentAdapter` interface, so everything
-> downstream is identical.
+> does.
+>
+> **Asyncio Contract & Blocking Operations**: Because TraceLens drives trials on
+> an `asyncio` event loop, adapters and hooks (`setup()`, `teardown()`, `run()`)
+> must not block the loop thread with synchronous operations (like `time.sleep()`,
+> synchronous HTTP requests, or CPU-bound work). If an adapter blocks the loop,
+> runner timeouts and cancellation cannot trigger cooperatively. Use `SyncAdapter`
+> or `asyncio.to_thread(...)` to offload blocking execution onto a thread worker.
 
 ---
 
@@ -168,6 +178,7 @@ shows OpenAI and Anthropic providers and an `instruction_following` grader:
 ```python
 import json
 from tracelens import LLMGrader, Task, Transcript
+
 
 class InstructionFollowingGrader(LLMGrader):
     def build_grading_prompt(self, transcript: Transcript, task: Task) -> str:
@@ -253,7 +264,7 @@ from tracelens import ReportGenerator
 
 gen = ReportGenerator(k_values=[1, 3, 5], consistency_k_values=[2, 3, 5])
 report = gen.build_report(batch)
-print(gen.render_ci_summary(report))   # also: render_markdown, render_html
+print(gen.render_ci_summary(report))  # also: render_markdown, render_html
 ```
 
 ---
@@ -299,7 +310,7 @@ results_by_task = batch.get_pass_results_by_task()  # {task_id: [True, False, ..
 
 for task_id, results in results_by_task.items():
     n, c = len(results), sum(results)
-    capability = pass_at_k(n=n, c=c, k=3)         # >=1 of 3 attempts passes
+    capability = pass_at_k(n=n, c=c, k=3)  # >=1 of 3 attempts passes
     reliability = pass_to_k(results=results, k=3)  # all 3 in a window pass
     print(f"{task_id}: pass@3={capability:.2f}  pass^3={reliability:.2f}")
 ```

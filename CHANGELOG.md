@@ -38,6 +38,16 @@ top-level `tracelens.*` imports as the stable surface; submodule paths may move.
 
 ### Fixed
 
+- **Adapter lifecycle timeouts and asyncio contract documentation (#123).**
+  `EvaluationRunner` now bounds adapter `setup()` and `teardown()` using
+  `RunnerConfig.setup_timeout_seconds` and `RunnerConfig.teardown_timeout_seconds`
+  (defaulting to `timeout_seconds`). Setup timeouts mark the trial as `TIMEOUT`
+  and skip `run()`, while teardown timeouts flag `trial.metadata["teardown_failed"] = True`
+  and record a failure without deadlocking the runner. Added `SyncAdapter`
+  (and automatic sync offloading in `SimpleAdapter`) to safely run synchronous
+  blocking agents via worker threads so `asyncio` timeouts trigger reliably,
+  and documented the asyncio non-blocking contract. (#123)
+
 - **`mean_score` means the same thing in the report, the baseline gate and
   `compare`.** The trials at issue are gradable but have no score: a
   timeout, or an agent failure before any grader ran.
