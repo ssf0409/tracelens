@@ -60,6 +60,9 @@ well-chosen sample shows you exactly where the grader and a human disagree.
 
 `--size` is a maximum; if the batch has fewer gradeable trials, you get all of
 them. Trials without a transcript or grader score are skipped automatically.
+Pass `--excerpt-field <field_name>` to restrict `output_excerpt` to only that key
+when final output is a dict, avoiding leaking unreviewed payload fields to reviewers.
+(Explicit export-time redaction policies are tracked in [#106](https://github.com/ssf0409/tracelens/issues/106)).
 
 ### The worksheet
 

@@ -141,3 +141,32 @@ def test_cmd_reconcile_from_self_contained_worksheet(tmp_path: Path) -> None:
 
     # Grader tracks human closely here -> calibrated -> exit 0.
     assert rc == 0
+
+
+def test_cmd_sample_with_excerpt_field(tmp_path: Path) -> None:
+    batch = TrialBatch()
+    trial = Trial(task_id="task-0", status=TrialStatus.COMPLETED)
+    trial.transcript = Transcript(
+        task_id="task-0",
+        final_output={"answer": "42", "raw_prompt": "secret internal instructions"},
+    )
+    trial.add_outcome(
+        Outcome(trial_id=trial.trial_id, grader_id="g", passed=True, score=1.0)
+    )
+    batch.add_trial(trial)
+    trials_path = tmp_path / "trials.json"
+    trials_path.write_text(json.dumps(batch.to_dict()))
+
+    out = tmp_path / "review.json"
+    parser = build_parser()
+    args = parser.parse_args([
+        "sample",
+        "--trials", str(trials_path),
+        "--size", "1",
+        "--excerpt-field", "answer",
+        "--output", str(out),
+    ])
+    rc = cmd_sample(args)
+    assert rc == 0
+    rows = json.loads(out.read_text())
+    assert rows[0]["output_excerpt"] == "42"
